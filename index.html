@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sistema de gestão do evento Opalapa — espaços, expositores e vendas." />
+    <title>Opalapa — Gestão</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎪</text></svg>" />
+  </head>
+  <body>
+    <div id="app-loading" class="app-loading">Carregando…</div>
+
+    <section id="login-screen" class="login-screen hidden" aria-label="Login">
+      <div class="login-card">
+        <div class="login-brand">Opalapa <span>· Gestão</span></div>
+        <h1>Entrar</h1>
+        <p class="login-subtitle">Use seu e-mail ou celular e senha para acessar o sistema.</p>
+        <form id="login-form" class="login-form" autocomplete="on">
+          <div class="field">
+            <label for="login-input">E-mail ou celular</label>
+            <input
+              id="login-input"
+              type="text"
+              name="login"
+              autocomplete="username"
+              placeholder="voce@email.com ou (11) 99999-9999"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="login-password">Senha</label>
+            <input
+              id="login-password"
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              placeholder="Sua senha"
+              required
+            />
+          </div>
+          <p id="login-error" class="login-error" role="alert"></p>
+          <button class="btn primary login-submit" type="submit" id="login-submit">Entrar</button>
+        </form>
+      </div>
+    </section>
+
+    <div id="app-screen" class="hidden">
+    <header class="app-header">
+      <div class="app-header-inner">
+        <div class="brand">Opalapa <span>· Gestão</span></div>
+        <nav class="nav" aria-label="Módulos">
+          <a href="#espacos" class="nav-link active" data-view="espacos" id="nav-espacos" aria-current="page">Espaços</a>
+          <a href="#participantes" class="nav-link" data-view="participantes" id="nav-participantes">Participantes</a>
+          <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao">Arrecadação</a>
+          <div class="nav-dropdown" id="nav-acessos">
+            <button type="button" class="nav-dropdown-toggle" id="nav-acessos-toggle" aria-expanded="false" aria-haspopup="true">
+              Acessos
+              <span class="nav-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="nav-dropdown-menu" role="menu">
+              <a href="#usuarios" class="nav-link" data-view="usuarios" id="nav-usuarios" role="menuitem">Usuários</a>
+            </div>
+          </div>
+        </nav>
+        <div class="user-menu">
+          <span id="user-name" class="user-name"></span>
+          <button class="tbtn" type="button" id="btn-logout">Sair</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="view-espacos" class="page view">
+      <h1>Gestão de Espaços</h1>
+      <p class="subtitle" id="grupo-title">Selecione um agrupamento</p>
+
+      <div class="grupo-tabs" id="grupo-tabs" role="tablist" aria-label="Agrupamentos de espaços"></div>
+
+      <p class="subtitle grupo-hint">
+        Clique nos espaços no mapa para selecionar · use <strong>Continuar</strong> para registrar a venda ·
+        na tabela, clique na linha para editar um espaço
+      </p>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="lbl">Total</div>
+          <div class="val" id="st-total">0</div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Disponível</div>
+          <div class="val" id="st-disp" style="color: #5dcaa5">16</div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Negociação</div>
+          <div class="val" id="st-neg" style="color: #85b7eb">0</div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Reservado</div>
+          <div class="val" id="st-res" style="color: #fac775">0</div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Vendido</div>
+          <div class="val" id="st-vend" style="color: #e24b4a">0</div>
+        </div>
+      </div>
+
+      <div class="status-totals" id="status-totals" aria-label="Totais por status"></div>
+
+      <div class="legend">
+        <div class="leg"><div class="dot" style="background: #5dcaa5"></div>Disponível</div>
+        <div class="leg"><div class="dot" style="background: #85b7eb"></div>Em negociação</div>
+        <div class="leg"><div class="dot" style="background: #fac775"></div>Reservado</div>
+        <div class="leg"><div class="dot" style="background: #e24b4a"></div>Vendido / Fechado</div>
+      </div>
+
+      <div class="map-wrap" id="map-wrap">
+        <img id="map-image" src="/map.png" alt="Mapa de espaços Opalapa" width="1392" height="712" />
+        <svg
+          id="map-svg"
+          viewBox="0 0 1392 712"
+          preserveAspectRatio="none"
+          xmlns="http://www.w3.org/2000/svg"
+        ></svg>
+      </div>
+      <div id="map-empty" class="map-empty hidden"></div>
+
+      <div class="select-bar" id="select-bar">
+        <span>
+          <strong id="sel-count">0</strong> espaço(s) selecionado(s):
+          <span id="sel-nums" class="cell-muted"></span>
+        </span>
+        <button class="tbtn primary" type="button" id="btn-continue" disabled>Continuar</button>
+        <button class="tbtn" type="button" id="btn-clear-selection">Limpar</button>
+      </div>
+
+      <div class="toolbar">
+        <span id="sync-status" class="sync-status ok">Dados salvos no banco de dados</span>
+        <button class="tbtn" type="button" id="btn-print">Imprimir</button>
+        <button class="tbtn" type="button" id="btn-export">Exportar CSV</button>
+      </div>
+
+      <section class="report">
+        <div class="report-head">
+          <h2>Relatório de espaços</h2>
+          <div class="report-filters">
+            <button class="tbtn active" type="button" data-filter="all">Todos</button>
+            <button class="tbtn" type="button" data-filter="active">Ocupados</button>
+            <button class="tbtn" type="button" data-filter="res">Reservados</button>
+            <button class="tbtn" type="button" data-filter="neg">Negociação</button>
+            <button class="tbtn" type="button" data-filter="vend">Vendidos</button>
+          </div>
+        </div>
+        <p class="report-summary" id="report-summary"></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  <input class="chk" type="checkbox" id="chk-all" title="Selecionar todos" />
+                </th>
+                <th>Espaço</th>
+                <th>Status</th>
+                <th>Tipo de comércio</th>
+                <th>Participante</th>
+                <th>Custo</th>
+                <th>Valor negociado</th>
+                <th>Observações</th>
+                <th>Última alteração</th>
+              </tr>
+            </thead>
+            <tbody id="spaces-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <main id="view-participantes" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Participantes do Evento</h1>
+          <p class="subtitle">Cadastre expositores e participantes vinculados aos espaços.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-participante-new">Novo participante</button>
+      </div>
+      <div class="select-bar" id="participantes-select-bar">
+        <span>
+          <strong id="participantes-sel-count">0</strong> participante(s) selecionado(s):
+          <span id="participantes-sel-names" class="cell-muted"></span>
+        </span>
+        <button class="tbtn danger-text" type="button" id="btn-participantes-delete-selected" disabled>
+          Excluir selecionados
+        </button>
+        <button class="tbtn" type="button" id="btn-participantes-clear-selection">Limpar</button>
+      </div>
+      <p class="report-summary" id="participantes-summary"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>
+                <input class="chk" type="checkbox" id="participantes-chk-all" title="Selecionar todos" />
+              </th>
+              <th>Nome</th>
+              <th>Instagram</th>
+              <th>Seguidores</th>
+              <th>Contato</th>
+              <th>Telefone</th>
+              <th>Atualização</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="participantes-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-arrecadacao" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Arrecadação</h1>
+          <p class="subtitle">Acompanhe pagamentos de participantes de espaços e patrocinadores.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-patrocinio-new">Novo patrocinador</button>
+      </div>
+
+      <div class="stats" id="arrecadacao-stats"></div>
+      <p class="report-summary" id="arrecadacao-summary"></p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Participante / Patrocinador</th>
+              <th>Tipo</th>
+              <th>Referência</th>
+              <th>Valor total</th>
+              <th>Pago</th>
+              <th>Falta pagar</th>
+              <th>Observações</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="arrecadacao-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-usuarios" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Gestão de Usuários</h1>
+          <p class="subtitle">Cadastre e gerencie os acessos ao sistema.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-user-new">Novo usuário</button>
+      </div>
+      <p class="report-summary" id="users-summary"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>E-mail</th>
+              <th>Celular</th>
+              <th>Cadastro</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="users-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <div class="modal-bg" id="modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <h2 id="modal-title">Espaço</h2>
+        <p class="msub" id="m-lbl"></p>
+        <div class="field">
+          <label for="m-status">Status</label>
+          <select id="m-status">
+            <option value="disp">Disponível</option>
+            <option value="neg">Em negociação</option>
+            <option value="res">Reservado</option>
+            <option value="vend">Vendido / Fechado</option>
+          </select>
+        </div>
+        <div class="field" id="m-custo-field">
+          <label for="m-custo">Custo do espaço (R$)</label>
+          <input
+            id="m-custo"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            placeholder="0,00"
+            maxlength="18"
+          />
+          <p class="field-hint">Valor pré-definido deste espaço, independente da negociação.</p>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="m-tipo">Tipo de comércio</label>
+            <input id="m-tipo" type="text" list="tipos-comercio" placeholder="Ex.: Alimentação" />
+            <datalist id="tipos-comercio"></datalist>
+          </div>
+          <div class="field">
+            <label for="m-valor">Valor negociado (R$)</label>
+            <input
+              id="m-valor"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="0,00"
+              maxlength="18"
+            />
+            <p class="field-hint" id="m-valor-hint"></p>
+          </div>
+        </div>
+        <div class="field" id="m-participante-field">
+          <label for="m-participante">Participante</label>
+          <input
+            id="m-participante"
+            type="text"
+            list="participantes-list"
+            placeholder="Nome do participante"
+            autocomplete="off"
+          />
+          <input id="m-participante-id" type="hidden" value="" />
+          <datalist id="participantes-list"></datalist>
+          <p class="field-hint">Selecione um cadastrado ou digite um nome novo — os dados completos podem ser preenchidos depois em Participantes.</p>
+        </div>
+        <div class="field">
+          <label for="m-obs">Observações</label>
+          <textarea id="m-obs" placeholder="Notas internas"></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="btn-cancel">Cancelar</button>
+          <button class="btn danger" type="button" id="btn-clear">Limpar</button>
+          <button class="btn primary" type="button" id="btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="participante-modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="participante-modal-title">
+        <h2 id="participante-modal-title">Participante</h2>
+        <p class="msub" id="participante-modal-sub"></p>
+        <div class="field">
+          <label for="p-nome">Nome</label>
+          <input id="p-nome" type="text" placeholder="Nome do participante" required />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="p-instagram">Instagram</label>
+            <input id="p-instagram" type="text" placeholder="@usuario" />
+          </div>
+          <div class="field">
+            <label for="p-seguidores">Seguidores</label>
+            <input id="p-seguidores" type="text" inputmode="numeric" placeholder="Ex.: 15000" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="p-contato-nome">Nome do contato</label>
+            <input id="p-contato-nome" type="text" placeholder="Pessoa de contato" />
+          </div>
+          <div class="field">
+            <label for="p-contato-telefone">Telefone do contato</label>
+            <input id="p-contato-telefone" type="text" inputmode="tel" placeholder="(11) 99999-9999" />
+          </div>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="participante-btn-cancel">Cancelar</button>
+          <button class="btn danger" type="button" id="participante-btn-delete">Excluir</button>
+          <button class="btn primary" type="button" id="participante-btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="arrecadacao-modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="arrecadacao-modal-title">
+        <h2 id="arrecadacao-modal-title">Arrecadação</h2>
+        <p class="msub" id="arrecadacao-modal-sub"></p>
+        <div class="field">
+          <label for="a-participante">Participante / Patrocinador</label>
+          <input
+            id="a-participante"
+            type="text"
+            list="arrecadacao-participantes-list"
+            placeholder="Nome"
+            autocomplete="off"
+          />
+          <input id="a-participante-id" type="hidden" value="" />
+          <datalist id="arrecadacao-participantes-list"></datalist>
+          <p class="field-hint">Selecione um cadastrado ou digite um nome novo.</p>
+        </div>
+        <div class="field" id="a-descricao-field">
+          <label for="a-descricao">Referência / descrição</label>
+          <input id="a-descricao" type="text" placeholder="Ex.: Patrocínio master" />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="a-valor-total">Valor total (R$)</label>
+            <input id="a-valor-total" type="text" inputmode="numeric" placeholder="0,00" maxlength="18" />
+            <p class="field-hint" id="a-valor-total-hint"></p>
+          </div>
+          <div class="field">
+            <label for="a-valor-pago">Valor pago (R$)</label>
+            <input id="a-valor-pago" type="text" inputmode="numeric" placeholder="0,00" maxlength="18" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="a-obs">Observações</label>
+          <textarea id="a-obs" placeholder="Notas sobre pagamentos"></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="arrecadacao-btn-cancel">Cancelar</button>
+          <button class="btn danger" type="button" id="arrecadacao-btn-delete">Excluir</button>
+          <button class="btn primary" type="button" id="arrecadacao-btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="user-modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+        <h2 id="user-modal-title">Usuário</h2>
+        <p class="msub" id="user-modal-sub"></p>
+        <div class="field">
+          <label for="u-name">Nome</label>
+          <input id="u-name" type="text" placeholder="Nome completo" required />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="u-email">E-mail</label>
+            <input id="u-email" type="email" placeholder="email@exemplo.com" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="u-phone">Celular</label>
+            <input id="u-phone" type="tel" inputmode="numeric" placeholder="(11) 99999-9999" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="u-password">Senha</label>
+          <input id="u-password" type="password" autocomplete="new-password" />
+          <p class="field-hint" id="u-password-hint"></p>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="user-btn-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="user-btn-delete">Excluir</button>
+          <button class="btn primary" type="button" id="user-btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.venv-poly/
+.DS_Store
+*.local
+.env
