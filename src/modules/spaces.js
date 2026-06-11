@@ -6,6 +6,7 @@ import { fetchTiposComercio } from '../lib/api.js';
 import {
   fmtDate,
   fmtMoney,
+  fmtPercent,
   parseValor,
   formatValorInput,
   maskValorInput,
@@ -46,6 +47,14 @@ export function initSpacesModule(store) {
     selCount: document.getElementById('sel-count'),
     selNums: document.getElementById('sel-nums'),
     btnContinue: document.getElementById('btn-continue'),
+    btnEditCusto: document.getElementById('btn-edit-custo'),
+    custoModalBg: document.getElementById('custo-modal-bg'),
+    custoModalTitle: document.getElementById('custo-modal-title'),
+    custoModalSub: document.getElementById('custo-modal-sub'),
+    bulkCusto: document.getElementById('bulk-custo'),
+    custoBtnCancel: document.getElementById('custo-btn-cancel'),
+    custoBtnSave: document.getElementById('custo-btn-save'),
+    mCustoHint: document.getElementById('m-custo-hint'),
     spacesTable: document.getElementById('spaces-table'),
     reportSummary: document.getElementById('report-summary'),
     chkAll: document.getElementById('chk-all'),
@@ -234,6 +243,11 @@ export function initSpacesModule(store) {
     els.btnContinue.disabled = sorted.length === 0;
     els.btnContinue.textContent =
       sorted.length > 1 ? `Continuar (${sorted.length} espaços)` : 'Continuar';
+    if (els.btnEditCusto) {
+      els.btnEditCusto.disabled = sorted.length === 0;
+      els.btnEditCusto.textContent =
+        sorted.length > 1 ? `Alterar custo (${sorted.length})` : 'Alterar custo';
+    }
 
     document.querySelectorAll('#map-svg polygon').forEach((poly) => {
       poly.classList.toggle('selected', selectedNumeros.has(poly.dataset.numero));
@@ -278,6 +292,78 @@ export function initSpacesModule(store) {
     openSpaces(sortIds(selectedNumeros));
   }
 
+  function buildSpacePayload(numero, patch) {
+    const prev = spaces[numero] || defaultSpace(Number(numero));
+    const next = { ...prev, ...patch };
+    spaces[numero] = next;
+    return {
+      numero: Number(numero),
+      status: next.status,
+      tipo: next.tipo || '',
+      client: next.client || '',
+      participanteId: next.participanteId ?? null,
+      participanteNome: next.participanteNome || '',
+      obs: next.obs || '',
+      custo: next.custo ?? null,
+      valor: next.valor ?? null,
+      saleGroup: next.saleGroup || '',
+      updatedAt: next.updatedAt,
+    };
+  }
+
+  function openBulkCustoModal() {
+    const list = sortIds(selectedNumeros);
+    if (!list.length) return;
+
+    const rows = list.map((n) => spaces[n]);
+    const first = rows[0];
+    const sameCusto = rows.every((r) => r.custo === first.custo);
+
+    els.custoModalTitle.textContent =
+      list.length === 1
+        ? `Alterar custo — ${spaceLabel(list[0])}`
+        : `Alterar custo — ${list.length} espaços`;
+    els.custoModalSub.textContent = list.length > 1 ? idsLabel(list) : '';
+    els.bulkCusto.value = sameCusto ? formatValorInput(first.custo) : '';
+    els.custoModalBg.classList.add('open');
+    els.bulkCusto.focus();
+  }
+
+  function closeBulkCustoModal() {
+    els.custoModalBg.classList.remove('open');
+  }
+
+  async function saveBulkCusto() {
+    const list = sortIds(selectedNumeros);
+    if (!list.length) return;
+
+    const custo = parseValor(els.bulkCusto.value);
+    if (custo == null) {
+      alert('Informe o valor de custo.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updates = list.map((numero) => buildSpacePayload(numero, { custo, updatedAt: now }));
+
+    els.custoBtnSave.disabled = true;
+    els.custoBtnSave.textContent = 'Salvando…';
+    updateSyncStatus();
+    try {
+      await persist(null, updates);
+      renderAll();
+      clearSelection();
+      closeBulkCustoModal();
+    } catch (err) {
+      renderAll();
+      alert(err.message || 'Falha ao salvar o custo');
+    } finally {
+      els.custoBtnSave.disabled = false;
+      els.custoBtnSave.textContent = 'Salvar';
+      updateSyncStatus();
+    }
+  }
+
   function readModalForm(isBulk) {
     const form = {
       status: els.mStatus.value,
@@ -286,10 +372,13 @@ export function initSpacesModule(store) {
       obs: els.mObs.value.trim(),
       valor: parseValor(els.mValor.value),
     };
-    if (!isBulk) {
-      form.custo = parseValor(els.mCusto.value);
-    }
     return form;
+  }
+
+  function resolveCustoForSave(isBulk, prev) {
+    const parsed = parseValor(els.mCusto.value);
+    if (isBulk && parsed == null) return prev.custo ?? null;
+    return parsed;
   }
 
   function buildSaveUpdates(isBulk, form, saleGroup, now) {
@@ -297,7 +386,7 @@ export function initSpacesModule(store) {
 
     return editNumeros.map((numero) => {
       const prev = spaces[numero] || defaultSpace(Number(numero));
-      const custo = isBulk ? (prev.custo ?? null) : parseValor(els.mCusto.value);
+      const custo = resolveCustoForSave(isBulk, prev);
       const participanteId = participanteInput.participanteId ?? null;
       const participanteNome = participanteInput.participanteNome || '';
       const next = {
@@ -334,7 +423,13 @@ export function initSpacesModule(store) {
     els.mObs.value = data.obs || '';
     els.mCusto.value = formatValorInput(data.custo);
     els.mValor.value = formatValorInput(data.valor);
-    els.mCustoField.classList.toggle('hidden', isBulk);
+
+    if (els.mCustoHint) {
+      els.mCustoHint.textContent =
+        isBulk && editNumeros.length > 1
+          ? 'Aplicado a todos os espaços selecionados. Deixe vazio para manter o custo atual de cada um.'
+          : 'Valor pré-definido deste espaço, independente da negociação.';
+    }
 
     if (isBulk && editNumeros.length > 1) {
       els.mValorHint.textContent = `Valor total da venda para os ${editNumeros.length} espaços (contado uma vez no relatório).`;
@@ -364,6 +459,7 @@ export function initSpacesModule(store) {
       const sameField = (key) => rows.every((r) => r[key] === first[key]);
       const sameParticipante =
         sameField('participanteId') && sameField('participanteNome');
+      const sameCusto = sameField('custo');
 
       els.modalTitle.innerHTML = `Venda em grupo <span id="m-num">${list.length} espaços</span>`;
       els.mLbl.textContent = idsLabel(list);
@@ -377,6 +473,7 @@ export function initSpacesModule(store) {
           participanteNome: sameParticipante ? first.participanteNome : '',
           obs: sameField('obs') ? first.obs : '',
           valor: sameField('valor') ? first.valor : null,
+          custo: sameCusto ? first.custo : null,
         },
         true,
       );
@@ -503,6 +600,19 @@ export function initSpacesModule(store) {
       `;
     }).join('');
 
+    const grandCount = STATUS_ORDER.reduce((sum, status) => sum + totals[status].count, 0);
+    const grandCusto = totalCusto();
+    const grandValor = totalNegociado();
+    const custoEmpenhado = STATUS_ORDER.filter((s) => s !== 'disp').reduce(
+      (sum, status) => sum + totals[status].custo,
+      0,
+    );
+    const pctCusto = fmtPercent(custoEmpenhado, grandCusto);
+    const pctValor = fmtPercent(grandValor, grandCusto);
+
+    const pctBlock = (pct, label) =>
+      pct ? `<span class="status-total-pct">${pct} ${label}</span>` : '';
+
     els.statusTotals.innerHTML = `
       <div class="status-totals-head">Totais por status</div>
       <div class="status-totals-grid status-totals-grid-head">
@@ -512,6 +622,18 @@ export function initSpacesModule(store) {
         <div>Valor negociado</div>
       </div>
       ${rows}
+      <div class="status-total-row grand-total">
+        <div class="status-total-label">Total geral</div>
+        <div class="status-total-val">${grandCount}</div>
+        <div class="status-total-val">
+          ${fmtMoney(grandCusto)}
+          ${pctBlock(pctCusto, 'empenhado')}
+        </div>
+        <div class="status-total-val">
+          ${grandValor > 0 ? fmtMoney(grandValor) : '—'}
+          ${pctBlock(pctValor, 'da meta')}
+        </div>
+      </div>
     `;
   }
 
@@ -581,6 +703,7 @@ export function initSpacesModule(store) {
 
   function bindEvents() {
     document.getElementById('btn-continue').addEventListener('click', continueSelection);
+    els.btnEditCusto?.addEventListener('click', openBulkCustoModal);
     document.getElementById('btn-clear-selection').addEventListener('click', clearSelection);
     els.chkAll.addEventListener('change', (e) => toggleSelectAll(e.target.checked));
 
@@ -596,6 +719,13 @@ export function initSpacesModule(store) {
       if (event.target === els.modalBg) closeModal();
     });
 
+    els.custoBtnCancel?.addEventListener('click', closeBulkCustoModal);
+    els.custoBtnSave?.addEventListener('click', saveBulkCusto);
+    els.custoModalBg?.addEventListener('click', (e) => {
+      if (e.target === els.custoModalBg) closeBulkCustoModal();
+    });
+    els.bulkCusto?.addEventListener('input', (e) => maskValorInput(e.target));
+
     els.mCusto.addEventListener('input', (e) => maskValorInput(e.target));
     els.mValor.addEventListener('input', (e) => maskValorInput(e.target));
     els.mParticipante.addEventListener('input', syncParticipanteIdFromInput);
@@ -605,7 +735,9 @@ export function initSpacesModule(store) {
     els.btnPrint.addEventListener('click', () => window.print());
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && els.modalBg.classList.contains('open')) closeModal();
+      if (e.key !== 'Escape') return;
+      if (els.custoModalBg?.classList.contains('open')) closeBulkCustoModal();
+      else if (els.modalBg.classList.contains('open')) closeModal();
     });
   }
 

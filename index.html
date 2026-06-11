@@ -123,15 +123,6 @@
       </div>
       <div id="map-empty" class="map-empty hidden"></div>
 
-      <div class="select-bar" id="select-bar">
-        <span>
-          <strong id="sel-count">0</strong> espaço(s) selecionado(s):
-          <span id="sel-nums" class="cell-muted"></span>
-        </span>
-        <button class="tbtn primary" type="button" id="btn-continue" disabled>Continuar</button>
-        <button class="tbtn" type="button" id="btn-clear-selection">Limpar</button>
-      </div>
-
       <div class="toolbar">
         <span id="sync-status" class="sync-status ok">Dados salvos no banco de dados</span>
         <button class="tbtn" type="button" id="btn-print">Imprimir</button>
@@ -150,6 +141,15 @@
           </div>
         </div>
         <p class="report-summary" id="report-summary"></p>
+        <div class="select-bar" id="select-bar">
+          <span>
+            <strong id="sel-count">0</strong> espaço(s) selecionado(s):
+            <span id="sel-nums" class="cell-muted"></span>
+          </span>
+          <button class="tbtn primary" type="button" id="btn-continue" disabled>Continuar</button>
+          <button class="tbtn" type="button" id="btn-edit-custo" disabled>Alterar custo</button>
+          <button class="tbtn" type="button" id="btn-clear-selection">Limpar</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -269,6 +269,29 @@
       </div>
     </main>
 
+    <div class="modal-bg" id="custo-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="custo-modal-title">
+        <h2 id="custo-modal-title">Alterar custo</h2>
+        <p class="msub" id="custo-modal-sub"></p>
+        <div class="field">
+          <label for="bulk-custo">Custo do espaço (R$)</label>
+          <input
+            id="bulk-custo"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            placeholder="0,00"
+            maxlength="18"
+          />
+          <p class="field-hint">Novo custo aplicado a todos os espaços selecionados.</p>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="custo-btn-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="custo-btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="modal-bg">
       <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <h2 id="modal-title">Espaço</h2>
@@ -292,7 +315,7 @@
             placeholder="0,00"
             maxlength="18"
           />
-          <p class="field-hint">Valor pré-definido deste espaço, independente da negociação.</p>
+          <p class="field-hint" id="m-custo-hint">Valor pré-definido deste espaço, independente da negociação.</p>
         </div>
         <div class="field-row">
           <div class="field">

@@ -398,6 +398,25 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+.status-total-row.grand-total {
+  border-top: 1px solid #333;
+  margin-top: 8px;
+  padding-top: 10px;
+  font-weight: 600;
+}
+
+.status-total-row.grand-total .status-total-label {
+  color: #fff;
+}
+
+.status-total-pct {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: #5dcaa5;
+  margin-top: 3px;
+}
+
 .legend {
   display: flex;
   gap: 14px;
@@ -466,10 +485,10 @@ polygon.selected {
 
 .select-bar {
   display: none;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  margin-top: 1rem;
+  margin: 0 0 12px;
   padding: 10px 14px;
   background: #1a2e28;
   border: 1px solid #1d9e75;
@@ -478,11 +497,20 @@ polygon.selected {
 
 .select-bar.visible {
   display: flex;
+  position: sticky;
+  bottom: 12px;
+  z-index: 30;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .select-bar span {
   font-size: 13px;
-  flex: 1;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.select-bar .tbtn {
+  flex-shrink: 0;
 }
 
 .select-bar strong {

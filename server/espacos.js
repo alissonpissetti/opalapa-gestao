@@ -1,5 +1,7 @@
 import { ESPACOS_SEED } from './data/espacos-seed.js';
 import { PRACA_ALIMENTACAO_SEED } from './data/praca-alimentacao-seed.js';
+import { EXPOSITORES_5X5_SEED } from './data/expositores-5x5-seed.js';
+import { FEIRA_COMERCIAL_2_SEED } from './data/feira-comercial-2-seed.js';
 import { migrateGrupos, findGrupoBySlug } from './grupos.js';
 import { resolveParticipanteId } from './participantes.js';
 import { syncArrecadacaoForGrupo } from './arrecadacao.js';
@@ -7,6 +9,8 @@ import { syncArrecadacaoForGrupo } from './arrecadacao.js';
 const SEEDS_BY_SLUG = {
   'feira-comercial-1': ESPACOS_SEED,
   'praca-alimentacao': PRACA_ALIMENTACAO_SEED,
+  'expositores-5x5': EXPOSITORES_5X5_SEED,
+  'feira-comercial-2': FEIRA_COMERCIAL_2_SEED,
 };
 
 function getSeedForGrupo(slug, numero) {
@@ -127,19 +131,21 @@ async function seedGrupoSpaces(pool, grupoId, seeds) {
   const existing = new Set(rows.map((r) => r.numero));
 
   for (const seed of seeds) {
+    const custo = seed.custo != null ? Number(seed.custo) : null;
     if (existing.has(seed.id)) {
       await pool.query(
         `UPDATE espacos SET
            label = COALESCE(NULLIF(label, ''), ?),
-           points = COALESCE(NULLIF(points, ''), ?)
+           points = COALESCE(NULLIF(points, ''), ?),
+           custo = COALESCE(custo, ?)
          WHERE grupo_id = ? AND numero = ?`,
-        [seed.label, seed.points, grupoId, seed.id],
+        [seed.label, seed.points, custo, grupoId, seed.id],
       );
     } else {
       await pool.query(
-        `INSERT INTO espacos (grupo_id, numero, label, points, status, tipo, client, obs, sale_group, valor, updated_at)
-         VALUES (?, ?, ?, ?, 'disp', '', '', NULL, '', NULL, NULL)`,
-        [grupoId, seed.id, seed.label, seed.points],
+        `INSERT INTO espacos (grupo_id, numero, label, points, status, tipo, client, obs, custo, sale_group, valor, updated_at)
+         VALUES (?, ?, ?, ?, 'disp', '', '', NULL, ?, '', NULL, NULL)`,
+        [grupoId, seed.id, seed.label, seed.points, custo],
       );
     }
   }
@@ -156,14 +162,24 @@ export async function migrateEspacos(pool) {
     await createEspacosTable(pool);
   }
 
+  await ensureCustoColumn(pool);
+
   await seedGrupoSpaces(pool, feira1.id, ESPACOS_SEED);
+
+  const feira2 = await findGrupoBySlug(pool, 'feira-comercial-2');
+  if (feira2) {
+    await seedGrupoSpaces(pool, feira2.id, FEIRA_COMERCIAL_2_SEED);
+  }
 
   const praca = await findGrupoBySlug(pool, 'praca-alimentacao');
   if (praca) {
     await seedGrupoSpaces(pool, praca.id, PRACA_ALIMENTACAO_SEED);
   }
 
-  await ensureCustoColumn(pool);
+  const expositores = await findGrupoBySlug(pool, 'expositores-5x5');
+  if (expositores) {
+    await seedGrupoSpaces(pool, expositores.id, EXPOSITORES_5X5_SEED);
+  }
 }
 
 async function ensureCustoColumn(pool) {

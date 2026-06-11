@@ -10,6 +10,13 @@ export function fmtMoney(val) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+export function fmtPercent(part, total) {
+  if (total == null || total <= 0 || part == null) return null;
+  const pct = (Number(part) / Number(total)) * 100;
+  if (Number.isNaN(pct)) return null;
+  return `${pct.toLocaleString('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: 0 })}%`;
+}
+
 export function parseValor(str) {
   if (!str || !String(str).trim()) return null;
   const digits = String(str).replace(/\D/g, '');
