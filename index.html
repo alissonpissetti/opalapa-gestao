@@ -49,9 +49,11 @@
       <div class="app-header-inner">
         <div class="brand">Opalapa <span>· Gestão</span></div>
         <nav class="nav" aria-label="Módulos">
+          <a href="#eventos" class="nav-link" data-view="eventos" id="nav-eventos">Eventos</a>
           <a href="#espacos" class="nav-link active" data-view="espacos" id="nav-espacos" aria-current="page">Espaços</a>
-          <a href="#participantes" class="nav-link" data-view="participantes" id="nav-participantes">Participantes</a>
           <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao">Arrecadação</a>
+          <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico">Artístico</a>
+          <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas">Tarefas</a>
           <div class="nav-dropdown" id="nav-acessos">
             <button type="button" class="nav-dropdown-toggle" id="nav-acessos-toggle" aria-expanded="false" aria-haspopup="true">
               Acessos
@@ -62,12 +64,42 @@
             </div>
           </div>
         </nav>
+        <div class="evento-selector">
+          <label for="evento-select" class="evento-select-label">Evento</label>
+          <select id="evento-select" class="evento-select" title="Evento ativo"></select>
+        </div>
         <div class="user-menu">
           <span id="user-name" class="user-name"></span>
           <button class="tbtn" type="button" id="btn-logout">Sair</button>
         </div>
       </div>
     </header>
+
+    <main id="view-eventos" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Eventos</h1>
+          <p class="subtitle">Cadastre cada edição do evento e compare com a anterior para análise.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-evento-new">Novo evento</button>
+      </div>
+      <p class="report-summary" id="eventos-summary"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>Edição (ano)</th>
+              <th>Edição anterior</th>
+              <th>Cadastro</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="eventos-table"></tbody>
+        </table>
+      </div>
+      <section id="eventos-comparacao" class="eventos-comparacao" aria-live="polite"></section>
+    </main>
 
     <main id="view-espacos" class="page view">
       <h1>Gestão de Espaços</h1>
@@ -90,6 +122,10 @@
           <div class="val" id="st-disp" style="color: #5dcaa5">16</div>
         </div>
         <div class="stat">
+          <div class="lbl">Lead</div>
+          <div class="val" id="st-lead" style="color: #c084fc">0</div>
+        </div>
+        <div class="stat">
           <div class="lbl">Negociação</div>
           <div class="val" id="st-neg" style="color: #85b7eb">0</div>
         </div>
@@ -107,6 +143,7 @@
 
       <div class="legend">
         <div class="leg"><div class="dot" style="background: #5dcaa5"></div>Disponível</div>
+        <div class="leg"><div class="dot" style="background: #c084fc"></div>Lead</div>
         <div class="leg"><div class="dot" style="background: #85b7eb"></div>Em negociação</div>
         <div class="leg"><div class="dot" style="background: #fac775"></div>Reservado</div>
         <div class="leg"><div class="dot" style="background: #e24b4a"></div>Vendido / Fechado</div>
@@ -129,15 +166,22 @@
         <button class="tbtn" type="button" id="btn-export">Exportar CSV</button>
       </div>
 
-      <section class="report">
+      <section class="report" id="espacos-report">
         <div class="report-head">
           <h2>Relatório de espaços</h2>
-          <div class="report-filters">
-            <button class="tbtn active" type="button" data-filter="all">Todos</button>
-            <button class="tbtn" type="button" data-filter="active">Ocupados</button>
-            <button class="tbtn" type="button" data-filter="res">Reservados</button>
-            <button class="tbtn" type="button" data-filter="neg">Negociação</button>
-            <button class="tbtn" type="button" data-filter="vend">Vendidos</button>
+          <div class="espacos-toolbar">
+            <div class="report-filters" role="tablist" aria-label="Visualização dos espaços">
+              <button class="tbtn active" type="button" data-esp-view="lista" role="tab" aria-selected="true">Lista</button>
+              <button class="tbtn" type="button" data-esp-view="kanban" role="tab" aria-selected="false">Kanban</button>
+            </div>
+            <div class="report-filters" aria-label="Filtros de status">
+              <button class="tbtn active" type="button" data-filter="all">Todos</button>
+              <button class="tbtn" type="button" data-filter="active">Ocupados</button>
+              <button class="tbtn" type="button" data-filter="lead">Lead</button>
+              <button class="tbtn" type="button" data-filter="res">Reservados</button>
+              <button class="tbtn" type="button" data-filter="neg">Negociação</button>
+              <button class="tbtn" type="button" data-filter="vend">Vendidos</button>
+            </div>
           </div>
         </div>
         <p class="report-summary" id="report-summary"></p>
@@ -150,96 +194,158 @@
           <button class="tbtn" type="button" id="btn-edit-custo" disabled>Alterar custo</button>
           <button class="tbtn" type="button" id="btn-clear-selection">Limpar</button>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>
-                  <input class="chk" type="checkbox" id="chk-all" title="Selecionar todos" />
-                </th>
-                <th>Espaço</th>
-                <th>Status</th>
-                <th>Tipo de comércio</th>
-                <th>Participante</th>
-                <th>Custo</th>
-                <th>Valor negociado</th>
-                <th>Observações</th>
-                <th>Última alteração</th>
-              </tr>
-            </thead>
-            <tbody id="spaces-table"></tbody>
-          </table>
+        <div id="espacos-lista-view">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>
+                    <input class="chk" type="checkbox" id="chk-all" title="Selecionar todos" />
+                  </th>
+                  <th>Espaço</th>
+                  <th>Status</th>
+                  <th>Tipo de comércio</th>
+                  <th>Participante</th>
+                  <th>Custo</th>
+                  <th>Valor negociado</th>
+                  <th>Já pago</th>
+                  <th>Faltante</th>
+                  <th>Observações</th>
+                  <th>Última alteração</th>
+                </tr>
+              </thead>
+              <tbody id="spaces-table"></tbody>
+            </table>
+          </div>
         </div>
+        <div id="espacos-kanban-view" class="arr-kanban hidden" hidden></div>
       </section>
-    </main>
-
-    <main id="view-participantes" class="page view hidden">
-      <div class="report-head">
-        <div>
-          <h1>Participantes do Evento</h1>
-          <p class="subtitle">Cadastre expositores e participantes vinculados aos espaços.</p>
-        </div>
-        <button class="tbtn primary" type="button" id="btn-participante-new">Novo participante</button>
-      </div>
-      <div class="select-bar" id="participantes-select-bar">
-        <span>
-          <strong id="participantes-sel-count">0</strong> participante(s) selecionado(s):
-          <span id="participantes-sel-names" class="cell-muted"></span>
-        </span>
-        <button class="tbtn danger-text" type="button" id="btn-participantes-delete-selected" disabled>
-          Excluir selecionados
-        </button>
-        <button class="tbtn" type="button" id="btn-participantes-clear-selection">Limpar</button>
-      </div>
-      <p class="report-summary" id="participantes-summary"></p>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>
-                <input class="chk" type="checkbox" id="participantes-chk-all" title="Selecionar todos" />
-              </th>
-              <th>Nome</th>
-              <th>Instagram</th>
-              <th>Seguidores</th>
-              <th>Contato</th>
-              <th>Telefone</th>
-              <th>Atualização</th>
-              <th>Ações</th>
-            </tr>
-          </thead>
-          <tbody id="participantes-table"></tbody>
-        </table>
-      </div>
     </main>
 
     <main id="view-arrecadacao" class="page view hidden">
       <div class="report-head">
         <div>
           <h1>Arrecadação</h1>
-          <p class="subtitle">Acompanhe pagamentos de participantes de espaços e patrocinadores.</p>
+          <p class="subtitle">Gerencie leads, espaços e patrocinadores no funil de arrecadação.</p>
         </div>
-        <button class="tbtn primary" type="button" id="btn-patrocinio-new">Novo patrocinador</button>
+        <button class="tbtn primary" type="button" id="btn-patrocinio-new">Novo lead</button>
       </div>
 
-      <div class="stats" id="arrecadacao-stats"></div>
+      <div class="arrecadacao-overview" id="arrecadacao-overview">
+        <div class="arrecadacao-donut" id="arrecadacao-donut" aria-hidden="true"></div>
+        <div class="stats arrecadacao-stats" id="arrecadacao-stats"></div>
+      </div>
+      <div class="arrecadacao-toolbar">
+        <div class="report-filters" role="tablist" aria-label="Visualização da arrecadação">
+          <button class="tbtn active" type="button" data-arr-view="lista" data-arr-scope="comercial" role="tab" aria-selected="true">Lista</button>
+          <button class="tbtn" type="button" data-arr-view="kanban" data-arr-scope="comercial" role="tab" aria-selected="false">Kanban</button>
+        </div>
+        <div class="arrecadacao-toolbar-actions">
+          <button class="tbtn hidden" type="button" id="btn-arrecadacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
+          <button class="tbtn" type="button" id="btn-funil-config">Configurar funil</button>
+        </div>
+      </div>
       <p class="report-summary" id="arrecadacao-summary"></p>
 
+      <div id="arrecadacao-lista-view">
+        <div class="table-wrap">
+          <table class="table-arrecadacao">
+            <thead>
+              <tr>
+                <th>Registro</th>
+                <th>Situação</th>
+                <th>Valores</th>
+                <th>Obs</th>
+                <th class="arr-th-acoes"></th>
+              </tr>
+            </thead>
+            <tbody id="arrecadacao-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="arrecadacao-kanban-view" class="arr-kanban hidden" hidden></div>
+
+      <section class="arrecadacao-disponiveis hidden" id="arrecadacao-disponiveis-section">
+        <h2 class="report-section-title">Espaços disponíveis à venda</h2>
+        <p class="report-summary" id="arrecadacao-disponiveis-summary"></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Espaço</th>
+                <th>Agrupamento</th>
+                <th>Custo</th>
+                <th>Valor tabela</th>
+              </tr>
+            </thead>
+            <tbody id="arrecadacao-disponiveis-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <main id="view-artistico" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Artístico</h1>
+          <p class="subtitle">Artistas, contatos e orçamentos — abra o lead para editar dados, registrar interações e agendar follow-ups.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-artistico-new">Novo lead</button>
+      </div>
+
+      <div class="artistico-overview" id="artistico-overview">
+        <div class="stats artistico-stats" id="artistico-stats"></div>
+      </div>
+      <p class="report-summary" id="artistico-summary"></p>
+
+      <div id="artistico-lista-view">
+        <div class="table-wrap">
+          <table class="table-artistico">
+            <thead>
+              <tr>
+                <th>Artista / contato</th>
+                <th>Atração</th>
+                <th>Status</th>
+                <th>Seguidores</th>
+                <th>Orçamento</th>
+                <th>Obs</th>
+                <th class="arr-th-acoes"></th>
+              </tr>
+            </thead>
+            <tbody id="artistico-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <main id="view-tarefas" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Tarefas</h1>
+          <p class="subtitle">Tudo que deve ser executado, ordenado por data e hora. Tarefas fora do prazo aparecem como atrasadas.</p>
+        </div>
+      </div>
+      <div class="report-filters" id="tarefas-filters" role="tablist" aria-label="Filtro de tarefas">
+        <button class="tbtn active" type="button" data-tarefas-filter="pendentes" role="tab" aria-selected="true">Pendentes</button>
+        <button class="tbtn" type="button" data-tarefas-filter="atrasadas" role="tab" aria-selected="false">Atrasadas</button>
+        <button class="tbtn" type="button" data-tarefas-filter="concluidas" role="tab" aria-selected="false">Concluídas</button>
+        <button class="tbtn" type="button" data-tarefas-filter="todas" role="tab" aria-selected="false">Todas</button>
+      </div>
+      <p class="report-summary" id="tarefas-summary"></p>
       <div class="table-wrap">
-        <table>
+        <table class="table-tarefas">
           <thead>
             <tr>
-              <th>Participante / Patrocinador</th>
-              <th>Tipo</th>
-              <th>Referência</th>
-              <th>Valor total</th>
-              <th>Pago</th>
-              <th>Falta pagar</th>
-              <th>Observações</th>
-              <th>Ações</th>
+              <th>Quando</th>
+              <th>Participante</th>
+              <th>Lead</th>
+              <th>Contato</th>
+              <th>Observação</th>
+              <th></th>
             </tr>
           </thead>
-          <tbody id="arrecadacao-table"></tbody>
+          <tbody id="tarefas-table"></tbody>
         </table>
       </div>
     </main>
@@ -298,12 +404,7 @@
         <p class="msub" id="m-lbl"></p>
         <div class="field">
           <label for="m-status">Status</label>
-          <select id="m-status">
-            <option value="disp">Disponível</option>
-            <option value="neg">Em negociação</option>
-            <option value="res">Reservado</option>
-            <option value="vend">Vendido / Fechado</option>
-          </select>
+          <select id="m-status"></select>
         </div>
         <div class="field" id="m-custo-field">
           <label for="m-custo">Custo do espaço (R$)</label>
@@ -336,6 +437,15 @@
             <p class="field-hint" id="m-valor-hint"></p>
           </div>
         </div>
+        <div class="field hidden" id="m-move-field">
+          <label for="m-move-destino">Mover reserva para outro espaço</label>
+          <select id="m-move-destino">
+            <option value="">Manter neste espaço</option>
+          </select>
+          <p class="field-hint" id="m-move-hint">
+            Transfere participante, status e valores para o espaço escolhido e libera o atual.
+          </p>
+        </div>
         <div class="field" id="m-participante-field">
           <label for="m-participante">Participante</label>
           <input
@@ -347,7 +457,7 @@
           />
           <input id="m-participante-id" type="hidden" value="" />
           <datalist id="participantes-list"></datalist>
-          <p class="field-hint">Selecione um cadastrado ou digite um nome novo — os dados completos podem ser preenchidos depois em Participantes.</p>
+          <p class="field-hint">Selecione um cadastrado ou digite um nome novo para vincular ao espaço.</p>
         </div>
         <div class="field">
           <label for="m-obs">Observações</label>
@@ -361,48 +471,12 @@
       </div>
     </div>
 
-    <div class="modal-bg" id="participante-modal-bg">
-      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="participante-modal-title">
-        <h2 id="participante-modal-title">Participante</h2>
-        <p class="msub" id="participante-modal-sub"></p>
-        <div class="field">
-          <label for="p-nome">Nome</label>
-          <input id="p-nome" type="text" placeholder="Nome do participante" required />
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="p-instagram">Instagram</label>
-            <input id="p-instagram" type="text" placeholder="@usuario" />
-          </div>
-          <div class="field">
-            <label for="p-seguidores">Seguidores</label>
-            <input id="p-seguidores" type="text" inputmode="numeric" placeholder="Ex.: 15000" />
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="p-contato-nome">Nome do contato</label>
-            <input id="p-contato-nome" type="text" placeholder="Pessoa de contato" />
-          </div>
-          <div class="field">
-            <label for="p-contato-telefone">Telefone do contato</label>
-            <input id="p-contato-telefone" type="text" inputmode="tel" placeholder="(11) 99999-9999" />
-          </div>
-        </div>
-        <div class="btns">
-          <button class="btn" type="button" id="participante-btn-cancel">Cancelar</button>
-          <button class="btn danger" type="button" id="participante-btn-delete">Excluir</button>
-          <button class="btn primary" type="button" id="participante-btn-save">Salvar</button>
-        </div>
-      </div>
-    </div>
-
     <div class="modal-bg" id="arrecadacao-modal-bg">
       <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="arrecadacao-modal-title">
         <h2 id="arrecadacao-modal-title">Arrecadação</h2>
         <p class="msub" id="arrecadacao-modal-sub"></p>
         <div class="field">
-          <label for="a-participante">Participante / Patrocinador</label>
+          <label for="a-participante" id="a-participante-label">Participante / Patrocinador</label>
           <input
             id="a-participante"
             type="text"
@@ -412,31 +486,304 @@
           />
           <input id="a-participante-id" type="hidden" value="" />
           <datalist id="arrecadacao-participantes-list"></datalist>
-          <p class="field-hint">Selecione um cadastrado ou digite um nome novo.</p>
+          <p class="field-hint" id="a-participante-hint">Selecione um cadastrado ou digite um nome novo.</p>
+        </div>
+        <div class="field-panel hidden" id="a-novo-participante-panel">
+          <p class="field-panel-title">Dados do novo participante</p>
+          <div class="field-row">
+            <div class="field">
+              <label for="a-instagram">Instagram</label>
+              <input id="a-instagram" type="text" placeholder="@usuario" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="a-whatsapp">WhatsApp</label>
+              <input id="a-whatsapp" type="text" inputmode="tel" placeholder="(11) 99999-9999" autocomplete="off" />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="a-proximo-contato">Agendar tarefa</label>
+              <input id="a-proximo-contato" type="datetime-local" />
+            </div>
+            <div class="field">
+              <label for="a-obs-contato">Observação do contato</label>
+              <input id="a-obs-contato" type="text" placeholder="Ex.: Enviar proposta de patrocínio" />
+            </div>
+          </div>
+          <p class="field-hint">Opcional — cria uma tarefa na área Tarefas com data e hora.</p>
+        </div>
+        <div class="field" id="a-status-field">
+          <label for="a-status">Status</label>
+          <select id="a-status">
+            <option value="disp">Disponível</option>
+            <option value="lead">Lead</option>
+            <option value="neg">Em negociação</option>
+            <option value="res">Reservado</option>
+            <option value="vend">Vendido / Fechado</option>
+          </select>
+          <p class="field-hint" id="a-status-hint"></p>
         </div>
         <div class="field" id="a-descricao-field">
           <label for="a-descricao">Referência / descrição</label>
           <input id="a-descricao" type="text" placeholder="Ex.: Patrocínio master" />
         </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="a-valor-total">Valor total (R$)</label>
+        <div class="field-row" id="a-valores-row">
+          <div class="field" id="a-valor-total-field">
+            <label for="a-valor-total" id="a-valor-total-label">Valor total (R$)</label>
             <input id="a-valor-total" type="text" inputmode="numeric" placeholder="0,00" maxlength="18" />
             <p class="field-hint" id="a-valor-total-hint"></p>
           </div>
-          <div class="field">
+          <div class="field" id="a-valor-pago-field">
             <label for="a-valor-pago">Valor pago (R$)</label>
-            <input id="a-valor-pago" type="text" inputmode="numeric" placeholder="0,00" maxlength="18" />
+            <input id="a-valor-pago" type="text" inputmode="numeric" placeholder="0,00" maxlength="18" readonly />
+            <p class="field-hint" id="a-valor-pago-hint">Atualizado pelos registros de pagamento.</p>
           </div>
         </div>
-        <div class="field">
+        <div class="field" id="a-obs-field">
           <label for="a-obs">Observações</label>
           <textarea id="a-obs" placeholder="Notas sobre pagamentos"></textarea>
         </div>
+        <div class="field-panel hidden" id="a-migrate-artistico-panel">
+          <p class="field-panel-title">Tipo do lead</p>
+          <p class="field-hint">Este lead é de atração artística? Ele passará a aparecer só no menu Artístico.</p>
+          <button class="tbtn" type="button" id="a-migrate-artistico-btn">Mover para Artístico</button>
+        </div>
         <div class="btns">
+          <button class="btn danger hidden" type="button" id="arrecadacao-btn-delete">Excluir</button>
           <button class="btn" type="button" id="arrecadacao-btn-cancel">Cancelar</button>
-          <button class="btn danger" type="button" id="arrecadacao-btn-delete">Excluir</button>
           <button class="btn primary" type="button" id="arrecadacao-btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="pagamento-modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="pagamento-modal-title">
+        <h2 id="pagamento-modal-title">Registrar pagamento</h2>
+        <p class="msub" id="pagamento-modal-sub"></p>
+        <div class="pagamento-resumo" id="pagamento-resumo"></div>
+        <div class="field">
+          <label for="pagamento-valor">Valor recebido (R$)</label>
+          <input
+            id="pagamento-valor"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            placeholder="0,00"
+            maxlength="18"
+          />
+        </div>
+        <div class="field">
+          <label for="pagamento-obs">Observações</label>
+          <textarea id="pagamento-obs" placeholder="Ex.: PIX, parcela 1 de 3, comprovante…"></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="pagamento-btn-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="pagamento-btn-save">Registrar pagamento</button>
+        </div>
+        <div class="pagamento-historico">
+          <div class="pagamento-historico-head">
+            <h3>Histórico deste registro</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Valor</th>
+                  <th>Observações</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="pagamento-historico-registro"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="pagamento-historico">
+          <div class="pagamento-historico-head">
+            <h3>Histórico do participante</h3>
+            <p class="field-hint" id="pagamento-historico-participante-sub"></p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Referência</th>
+                  <th>Valor</th>
+                  <th>Observações</th>
+                </tr>
+              </thead>
+              <tbody id="pagamento-historico-participante"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="lead-workspace" class="lead-workspace hidden" role="dialog" aria-modal="true" aria-labelledby="lead-detail-title">
+      <header class="lw-header">
+        <button class="lw-back" type="button" id="lead-workspace-back" aria-label="Voltar">
+          <span aria-hidden="true">←</span> Voltar
+        </button>
+        <div class="lw-header-identity">
+          <div class="lw-avatar" id="lead-avatar" aria-hidden="true"></div>
+          <div class="lw-header-text">
+            <h1 id="lead-detail-title">Lead</h1>
+            <div class="lw-badges" id="lead-detail-badges"></div>
+            <p class="lw-sub" id="lead-detail-sub"></p>
+          </div>
+        </div>
+        <div class="lw-header-actions row-actions" id="lead-detail-actions"></div>
+      </header>
+
+      <div class="lw-body">
+        <aside class="lw-panel lw-panel-left">
+          <section class="lw-card lw-deal-panel" id="lead-deal-panel" aria-label="Dados do lead"></section>
+        </aside>
+
+        <main class="lw-panel lw-panel-center">
+          <div class="lw-center-head">
+            <h2>Interações</h2>
+            <p class="lw-hint">Registre ligações, mensagens e combinações. Alterações automáticas também aparecem aqui.</p>
+          </div>
+          <form class="lw-compose" id="lead-interacao-form">
+            <div class="lw-compose-bar">
+              <label class="lw-compose-label" for="lead-interacao-tipo">Tipo</label>
+              <select id="lead-interacao-tipo" class="lw-compose-select">
+                <option value="nota">Nota</option>
+                <option value="ligacao">Ligação</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="email">E-mail</option>
+                <option value="reuniao">Reunião</option>
+              </select>
+              <button class="tbtn primary lw-compose-submit" type="submit">Registrar interação</button>
+            </div>
+            <textarea
+              id="lead-interacao-texto"
+              class="lw-compose-input"
+              rows="5"
+              placeholder="O que foi conversado, combinado ou observado neste contato?"
+            ></textarea>
+          </form>
+          <div class="lw-timeline" id="lead-interacoes-list" aria-live="polite"></div>
+        </main>
+
+        <aside class="lw-panel lw-panel-right">
+          <section class="lw-card lw-tarefas-card">
+            <h2 class="lw-card-title">Próximas ações</h2>
+            <p class="lw-hint lw-tarefas-hint">Agende follow-ups para não perder o timing do contato.</p>
+            <form class="lw-tarefa-form" id="lead-tarefa-form">
+              <div class="field">
+                <label for="lead-tarefa-data">Data e hora</label>
+                <input id="lead-tarefa-data" type="datetime-local" required />
+              </div>
+              <div class="field">
+                <label for="lead-tarefa-obs">O que fazer</label>
+                <input id="lead-tarefa-obs" type="text" placeholder="Ex.: retornar proposta, enviar contrato" />
+              </div>
+              <button class="tbtn primary" type="submit">Agendar tarefa</button>
+            </form>
+            <ul class="lead-tarefas-list" id="lead-tarefas-list" aria-live="polite"></ul>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="tarefa-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tarefa-modal-title">
+        <h2 id="tarefa-modal-title">Editar tarefa</h2>
+        <p class="msub" id="tarefa-modal-sub"></p>
+        <div class="field">
+          <label for="tarefa-modal-data">Data e hora</label>
+          <input id="tarefa-modal-data" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="tarefa-modal-obs">O que fazer</label>
+          <input id="tarefa-modal-obs" type="text" placeholder="Ex.: retornar proposta, enviar contrato" />
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="tarefa-modal-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="tarefa-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="funil-modal-bg">
+      <div class="modal modal-funil" role="dialog" aria-modal="true" aria-labelledby="funil-modal-title">
+        <h2 id="funil-modal-title">Configurar funil</h2>
+        <p class="msub">Crie etapas com nomes personalizados, defina uma coluna de Perda e uma de Venda.</p>
+        <div class="funil-etapas-head" aria-hidden="true">
+          <span></span>
+          <span>Nome da etapa</span>
+          <span>Tipo</span>
+          <span>Cor</span>
+          <span>Ativa</span>
+          <span></span>
+        </div>
+        <div class="funil-etapas-list" id="funil-etapas-list"></div>
+        <div class="funil-add-row">
+          <input id="funil-new-titulo" type="text" placeholder="Nome da nova etapa" aria-label="Nome da nova etapa" />
+          <button class="tbtn" type="button" id="funil-btn-add">Adicionar etapa</button>
+        </div>
+        <p class="field-hint">Arraste para reordenar. A 1ª etapa normal ativa recebe novos leads. Tipos: etapas do funil, uma coluna de Perda e uma de Venda.</p>
+        <div class="btns">
+          <button class="btn" type="button" id="funil-btn-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="funil-btn-save">Salvar funil</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="perda-lead-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="perda-lead-modal-title">
+        <h2 id="perda-lead-modal-title">Perda do lead</h2>
+        <p class="msub" id="perda-lead-modal-sub"></p>
+        <div class="field">
+          <label for="perda-motivo">Motivo da perda</label>
+          <select id="perda-motivo" required>
+            <option value="">Selecione…</option>
+            <option value="preco">Preço alto</option>
+            <option value="desistiu">Desistiu do evento</option>
+            <option value="outro_evento">Escolheu outro evento</option>
+            <option value="sem_retorno">Sem retorno / não respondeu</option>
+            <option value="perfil">Fora do perfil</option>
+            <option value="outro">Outro</option>
+          </select>
+        </div>
+        <div class="field hidden" id="perda-outro-field">
+          <label for="perda-outro">Descreva o motivo</label>
+          <textarea id="perda-outro" placeholder="Informe o motivo da perda"></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="perda-lead-btn-cancel">Cancelar</button>
+          <button class="btn danger" type="button" id="perda-lead-btn-save">Confirmar perda</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="evento-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="evento-modal-title">
+        <h2 id="evento-modal-title">Evento</h2>
+        <div class="field">
+          <label for="ev-nome">Nome do evento</label>
+          <input id="ev-nome" type="text" placeholder="Ex.: Opalapa" required />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="ev-edicao">Edição (ano)</label>
+            <input id="ev-edicao" type="number" min="2000" max="2100" placeholder="2026" required />
+          </div>
+          <div class="field">
+            <label for="ev-anterior">Comparar com edição anterior</label>
+            <select id="ev-anterior">
+              <option value="">— Nenhuma —</option>
+            </select>
+          </div>
+        </div>
+        <p class="field-hint">Ao criar um novo evento, a estrutura de espaços é copiada automaticamente (vazia).</p>
+        <div class="btns">
+          <button class="btn" type="button" id="evento-btn-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="evento-btn-delete">Excluir</button>
+          <button class="btn primary" type="button" id="evento-btn-save">Salvar</button>
         </div>
       </div>
     </div>

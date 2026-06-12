@@ -1,8 +1,6 @@
-import { COLORS, LABELS } from '../lib/constants.js';
-
-const STATUS_ORDER = ['disp', 'neg', 'res', 'vend'];
+import { COLORS, LABELS, STATUS_ORDER } from '../lib/constants.js';
 import { defaultSpace } from '../lib/store.js';
-import { fetchTiposComercio } from '../lib/api.js';
+import { fetchTiposComercio, fetchFunilEtapas } from '../lib/api.js';
 import {
   fmtDate,
   fmtMoney,
@@ -16,15 +14,21 @@ import {
   isSaleGroupValorLeader,
   saleGroupLeader,
   valorNegociadoExibido,
+  valoresPagamentoExibidos,
 } from '../lib/format.js';
 import { exportCSV } from './export.js';
+
+const VIEW_MODE_KEY = 'espacos-view-mode';
 
 export function initSpacesModule(store) {
   const {
     spaces,
     persist,
+    moveReserva,
     isActiveStatus,
     totalNegociado,
+    totalPago,
+    totalFalta,
     totalCusto,
     totalsByStatus,
     spaceNumeros,
@@ -33,12 +37,17 @@ export function initSpacesModule(store) {
 
   let editNumeros = [];
   let listFilter = 'all';
+  let viewMode = localStorage.getItem(VIEW_MODE_KEY) === 'kanban' ? 'kanban' : 'lista';
+  let funilEtapas = [];
+  let draggingNumero = null;
+  let kanbanCardWasDragged = false;
   const selectedNumeros = new Set();
   const els = {
     grupoTabs: document.getElementById('grupo-tabs'),
     grupoTitle: document.getElementById('grupo-title'),
     stTotal: document.getElementById('st-total'),
     stDisp: document.getElementById('st-disp'),
+    stLead: document.getElementById('st-lead'),
     stNeg: document.getElementById('st-neg'),
     stRes: document.getElementById('st-res'),
     stVend: document.getElementById('st-vend'),
@@ -56,6 +65,9 @@ export function initSpacesModule(store) {
     custoBtnSave: document.getElementById('custo-btn-save'),
     mCustoHint: document.getElementById('m-custo-hint'),
     spacesTable: document.getElementById('spaces-table'),
+    reportRoot: document.getElementById('espacos-report'),
+    listaView: document.getElementById('espacos-lista-view'),
+    kanbanView: document.getElementById('espacos-kanban-view'),
     reportSummary: document.getElementById('report-summary'),
     chkAll: document.getElementById('chk-all'),
     modalBg: document.getElementById('modal-bg'),
@@ -71,6 +83,9 @@ export function initSpacesModule(store) {
     mParticipante: document.getElementById('m-participante'),
     mParticipanteId: document.getElementById('m-participante-id'),
     mObs: document.getElementById('m-obs'),
+    mMoveField: document.getElementById('m-move-field'),
+    mMoveDestino: document.getElementById('m-move-destino'),
+    mMoveHint: document.getElementById('m-move-hint'),
     btnClear: document.getElementById('btn-clear'),
     btnSave: document.getElementById('btn-save'),
     mapWrap: document.getElementById('map-wrap'),
@@ -84,6 +99,60 @@ export function initSpacesModule(store) {
 
   function spaceLabel(numero) {
     return spaces[numero]?.label || `Espaço ${numero}`;
+  }
+
+  function statusLabel(status) {
+    const etapa = funilEtapas.find((e) => e.status === status);
+    return etapa?.titulo || LABELS[status] || status;
+  }
+
+  function statusColor(status) {
+    const etapa = funilEtapas.find((e) => e.status === status);
+    return etapa?.cor || COLORS[status] || COLORS.disp;
+  }
+
+  /** Etapas do funil usadas nos espaços: Disponível + pipeline comercial (sem Perda). */
+  function spaceStatusEtapas() {
+    const fromFunil = funilEtapas
+      .filter((e) => e.ativo !== false && e.tipo !== 'perda')
+      .sort((a, b) => a.ordem - b.ordem);
+
+    if (fromFunil.length) {
+      if (!fromFunil.some((e) => e.status === 'disp')) {
+        return [
+          { status: 'disp', titulo: LABELS.disp, cor: COLORS.disp },
+          ...fromFunil,
+        ];
+      }
+      return fromFunil;
+    }
+
+    return STATUS_ORDER.map((status) => ({
+      status,
+      titulo: LABELS[status],
+      cor: COLORS[status],
+    }));
+  }
+
+  function renderStatusSelectOptions(selected = 'disp') {
+    if (!els.mStatus) return;
+    const etapas = spaceStatusEtapas();
+    els.mStatus.innerHTML = etapas
+      .map(
+        (e) =>
+          `<option value="${escapeHtml(e.status)}"${e.status === selected ? ' selected' : ''}>${escapeHtml(e.titulo || LABELS[e.status] || e.status)}</option>`,
+      )
+      .join('');
+  }
+
+  async function loadFunilEtapas() {
+    try {
+      const data = await fetchFunilEtapas();
+      funilEtapas = data.etapas || [];
+    } catch (_) {
+      funilEtapas = [];
+    }
+    renderStatusSelectOptions();
   }
 
   function hasSpaces() {
@@ -415,7 +484,52 @@ export function initSpacesModule(store) {
     });
   }
 
+  function renderMoveDestinoOptions(origemNumero) {
+    if (!els.mMoveDestino) return;
+
+    const origem = String(origemNumero);
+    const disponiveis = spaceNumeros()
+      .filter((n) => {
+        const s = spaces[n];
+        return String(n) !== origem && s?.status === 'disp' && !s?.participanteId && !s?.saleGroup;
+      })
+      .sort((a, b) => a - b);
+
+    const options = [
+      '<option value="">Manter neste espaço</option>',
+      ...disponiveis.map(
+        (n) => `<option value="${n}">${escapeHtml(spaceLabel(n))}</option>`,
+      ),
+    ];
+    els.mMoveDestino.innerHTML = options.join('');
+    els.mMoveDestino.value = '';
+  }
+
+  function syncMoveField(list, isBulk) {
+    if (!els.mMoveField || !els.mMoveDestino) return;
+
+    const canMove =
+      !isBulk &&
+      list.length === 1 &&
+      isActiveStatus(spaces[list[0]]?.status) &&
+      !spaces[list[0]]?.saleGroup;
+
+    els.mMoveField.classList.toggle('hidden', !canMove);
+    if (!canMove) {
+      els.mMoveDestino.value = '';
+      return;
+    }
+
+    renderMoveDestinoOptions(list[0]);
+    if (els.mMoveHint) {
+      els.mMoveHint.textContent = spaces[list[0]]?.saleGroup
+        ? 'Espaços em venda em grupo não podem ser movidos individualmente.'
+        : 'Transfere participante, status e valores para o espaço escolhido e libera o atual. Pagamentos registrados na arrecadação são mantidos.';
+    }
+  }
+
   function fillModalForm(data, isBulk) {
+    renderStatusSelectOptions(data.status || 'disp');
     els.mStatus.value = data.status || 'disp';
     els.mTipo.value = data.tipo || '';
     els.mParticipante.value = data.participanteNome || '';
@@ -443,7 +557,8 @@ export function initSpacesModule(store) {
     document.querySelectorAll('[data-filter]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.filter === filter);
     });
-    renderTable();
+    if (viewMode === 'kanban') renderKanban();
+    else renderTable();
   }
 
   function openSpaces(numeros) {
@@ -486,6 +601,7 @@ export function initSpacesModule(store) {
       fillModalForm(spaces[numero], false);
     }
 
+    syncMoveField(list, isBulk);
     els.modalBg.classList.add('open');
   }
 
@@ -496,7 +612,23 @@ export function initSpacesModule(store) {
 
   function closeModal() {
     els.modalBg.classList.remove('open');
+    if (els.mMoveDestino) els.mMoveDestino.value = '';
     editNumeros = [];
+  }
+
+  function buildMovePayload(form, destinoNumero, now) {
+    const participanteInput = readParticipanteInput();
+    return {
+      destinoNumero: Number(destinoNumero),
+      status: form.status,
+      tipo: form.tipo,
+      client: '',
+      obs: form.obs,
+      valor: form.valor,
+      participanteId: participanteInput.participanteId,
+      participanteNome: participanteInput.participanteNome,
+      updatedAt: now,
+    };
   }
 
   async function saveSpace() {
@@ -504,13 +636,19 @@ export function initSpacesModule(store) {
     const isBulk = editNumeros.length > 1;
     const form = readModalForm(isBulk);
     const now = new Date().toISOString();
-    const saleGroup = isBulk ? `grupo-${store.currentGrupo.slug}-${Date.now()}` : '';
-    const updates = buildSaveUpdates(isBulk, form, saleGroup, now);
+    const destinoNumero = !isBulk ? els.mMoveDestino?.value : '';
+    const isMove = Boolean(destinoNumero);
 
     els.btnSave.disabled = true;
     updateSyncStatus();
     try {
-      await persist(null, updates);
+      if (isMove) {
+        await moveReserva(editNumeros[0], buildMovePayload(form, destinoNumero, now));
+      } else {
+        const saleGroup = isBulk ? `grupo-${store.currentGrupo.slug}-${Date.now()}` : '';
+        const updates = buildSaveUpdates(isBulk, form, saleGroup, now);
+        await persist(null, updates);
+      }
       renderTiposComercio();
       renderParticipantesDatalist();
       renderAll();
@@ -518,7 +656,7 @@ export function initSpacesModule(store) {
       closeModal();
     } catch (err) {
       renderAll();
-      alert(err.message || 'Falha ao salvar o espaço');
+      alert(err.message || (isMove ? 'Falha ao mover a reserva' : 'Falha ao salvar o espaço'));
     } finally {
       els.btnSave.disabled = false;
       updateSyncStatus();
@@ -555,8 +693,180 @@ export function initSpacesModule(store) {
     }
   }
 
+  function filteredSpaceNumeros() {
+    const numeros = spaceNumeros();
+    return numeros.filter((numero) => {
+      const data = spaces[numero];
+      if (listFilter === 'active' && !isActiveStatus(data.status)) return false;
+      if (listFilter !== 'all' && listFilter !== 'active' && data.status !== listFilter) return false;
+      return true;
+    });
+  }
+
+  function applyViewModeUi() {
+    const isKanban = viewMode === 'kanban';
+    els.reportRoot?.classList.toggle('page--kanban', isKanban);
+    els.listaView?.classList.toggle('hidden', isKanban);
+    if (els.listaView) els.listaView.hidden = isKanban;
+    els.kanbanView?.classList.toggle('hidden', !isKanban);
+    if (els.kanbanView) els.kanbanView.hidden = !isKanban;
+  }
+
+  function setViewMode(mode) {
+    viewMode = mode === 'kanban' ? 'kanban' : 'lista';
+    localStorage.setItem(VIEW_MODE_KEY, viewMode);
+    document.querySelectorAll('[data-esp-view]').forEach((btn) => {
+      const active = btn.dataset.espView === viewMode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    applyViewModeUi();
+    if (viewMode === 'kanban') renderKanban();
+    else renderTable();
+  }
+
+  async function moveSpaceToStatus(numero, newStatus) {
+    const key = String(numero);
+    const prev = spaces[key];
+    if (!prev || prev.status === newStatus) return;
+
+    if (prev.saleGroup) {
+      alert('Espaços em venda em grupo não podem ser movidos individualmente no kanban.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    let patch;
+
+    if (newStatus === 'disp') {
+      patch = {
+        status: 'disp',
+        tipo: '',
+        client: '',
+        participanteId: null,
+        participanteNome: '',
+        obs: '',
+        valor: null,
+        saleGroup: '',
+        updatedAt: now,
+      };
+    } else {
+      patch = { status: newStatus, updatedAt: now };
+    }
+
+    try {
+      await persist(null, [buildSpacePayload(key, patch)]);
+      renderAll();
+    } catch (err) {
+      renderAll();
+      alert(err.message || 'Falha ao atualizar o status do espaço');
+    }
+  }
+
+  function renderKanbanCard(numero) {
+    const data = spaces[numero];
+    const participante = data.participanteNome || '';
+    const valorExibido = valorNegociadoExibido(spaces, numero, data);
+    const groupNote = data.saleGroup ? ' · grupo' : '';
+    const draggable = data.saleGroup ? 'false' : 'true';
+
+    return `
+      <article class="arr-kanban-card" draggable="${draggable}" data-numero="${numero}">
+        <div class="arr-kanban-card-head">
+          <strong>${escapeHtml(spaceLabel(numero))}${groupNote}</strong>
+        </div>
+        <div class="arr-kanban-card-ref">${participante ? escapeHtml(participante) : 'Sem participante'}</div>
+        <div class="arr-kanban-card-valores">
+          <span>${data.tipo ? escapeHtml(data.tipo) : '—'}</span>
+          <span>${valorExibido != null ? fmtMoney(valorExibido) : '—'}</span>
+        </div>
+      </article>
+    `;
+  }
+
+  function bindKanbanInteractions(root) {
+    if (!root) return;
+
+    root.querySelectorAll('.arr-kanban-card[draggable="true"]').forEach((card) => {
+      card.addEventListener('dragstart', (e) => {
+        kanbanCardWasDragged = false;
+        draggingNumero = card.dataset.numero;
+        e.dataTransfer.setData('text/plain', draggingNumero);
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dragging');
+        kanbanCardWasDragged = true;
+      });
+      card.addEventListener('dragend', () => {
+        draggingNumero = null;
+        card.classList.remove('dragging');
+        root.querySelectorAll('.arr-kanban-col-body').forEach((col) => {
+          col.classList.remove('drag-over');
+        });
+        setTimeout(() => {
+          kanbanCardWasDragged = false;
+        }, 0);
+      });
+      card.addEventListener('click', () => {
+        if (kanbanCardWasDragged) return;
+        openSpace(card.dataset.numero);
+      });
+    });
+
+    root.querySelectorAll('.arr-kanban-col-body').forEach((body) => {
+      body.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        body.classList.add('drag-over');
+      });
+      body.addEventListener('dragleave', () => body.classList.remove('drag-over'));
+      body.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        body.classList.remove('drag-over');
+        const numero = e.dataTransfer.getData('text/plain') || draggingNumero;
+        const status = body.closest('.arr-kanban-col')?.dataset.status;
+        if (numero && status) await moveSpaceToStatus(numero, status);
+      });
+    });
+  }
+
+  function renderKanban() {
+    if (!els.kanbanView) return;
+
+    const etapas = spaceStatusEtapas();
+    const numeros = filteredSpaceNumeros();
+
+    const columns = etapas
+      .map((etapa) => {
+        const colItems = numeros.filter((n) => spaces[n]?.status === etapa.status);
+        const total = colItems.reduce((sum, n) => {
+          const v = valorNegociadoExibido(spaces, n, spaces[n]);
+          return sum + (v != null ? Number(v) : 0);
+        }, 0);
+        return `
+          <div class="arr-kanban-col" data-status="${escapeHtml(etapa.status)}">
+            <header class="arr-kanban-col-head" style="--col-color:${escapeHtml(etapa.cor || statusColor(etapa.status))}">
+              <span class="arr-kanban-col-title">${escapeHtml(etapa.titulo || statusLabel(etapa.status))}</span>
+              <span class="arr-kanban-col-meta">${colItems.length} · ${fmtMoney(total)}</span>
+            </header>
+            <div class="arr-kanban-col-body">
+              ${
+                colItems.length
+                  ? colItems.map((n) => renderKanbanCard(n)).join('')
+                  : '<p class="arr-kanban-empty">Nenhum espaço</p>'
+              }
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    els.kanbanView.innerHTML = columns;
+    bindKanbanInteractions(els.kanbanView);
+    renderReportSummary(numeros.length);
+  }
+
   function renderAll() {
-    const counts = { disp: 0, neg: 0, res: 0, vend: 0 };
+    const counts = { disp: 0, lead: 0, neg: 0, res: 0, vend: 0 };
     const numeros = spaceNumeros();
 
     renderMapPolygons();
@@ -564,7 +874,7 @@ export function initSpacesModule(store) {
     document.querySelectorAll('#map-svg polygon').forEach((poly) => {
       const numero = poly.dataset.numero;
       const data = spaces[numero];
-      const color = COLORS[data.status] || COLORS.disp;
+      const color = statusColor(data.status);
       poly.setAttribute('fill', color);
       poly.setAttribute('fill-opacity', '0.55');
       counts[data.status] = (counts[data.status] || 0) + 1;
@@ -572,12 +882,15 @@ export function initSpacesModule(store) {
 
     els.stTotal.textContent = numeros.length;
     els.stDisp.textContent = counts.disp || 0;
+    if (els.stLead) els.stLead.textContent = counts.lead || 0;
     els.stNeg.textContent = counts.neg || 0;
     els.stRes.textContent = counts.res || 0;
     els.stVend.textContent = counts.vend || 0;
 
     renderStatusTotals();
-    renderTable();
+    applyViewModeUi();
+    if (viewMode === 'kanban') renderKanban();
+    else renderTable();
     updateSelectionUi();
   }
 
@@ -590,12 +903,14 @@ export function initSpacesModule(store) {
       return `
         <div class="status-total-row">
           <div class="status-total-label">
-            <span class="dot" style="background: ${COLORS[status]}"></span>
-            ${LABELS[status]}
+            <span class="dot" style="background: ${statusColor(status)}"></span>
+            ${statusLabel(status)}
           </div>
           <div class="status-total-val">${data.count}</div>
           <div class="status-total-val">${fmtMoney(data.custo)}</div>
           <div class="status-total-val">${data.valor > 0 ? fmtMoney(data.valor) : '—'}</div>
+          <div class="status-total-val status-total-val--pago">${data.valorPago != null ? fmtMoney(data.valorPago) : '—'}</div>
+          <div class="status-total-val status-total-val--falta">${data.valorFalta != null ? fmtMoney(data.valorFalta) : '—'}</div>
         </div>
       `;
     }).join('');
@@ -603,12 +918,15 @@ export function initSpacesModule(store) {
     const grandCount = STATUS_ORDER.reduce((sum, status) => sum + totals[status].count, 0);
     const grandCusto = totalCusto();
     const grandValor = totalNegociado();
+    const grandPago = totalPago();
+    const grandFalta = totalFalta();
     const custoEmpenhado = STATUS_ORDER.filter((s) => s !== 'disp').reduce(
       (sum, status) => sum + totals[status].custo,
       0,
     );
     const pctCusto = fmtPercent(custoEmpenhado, grandCusto);
     const pctValor = fmtPercent(grandValor, grandCusto);
+    const pctPago = fmtPercent(grandPago, grandValor);
 
     const pctBlock = (pct, label) =>
       pct ? `<span class="status-total-pct">${pct} ${label}</span>` : '';
@@ -620,6 +938,8 @@ export function initSpacesModule(store) {
         <div>Espaços</div>
         <div>Custo total</div>
         <div>Valor negociado</div>
+        <div>Já pago</div>
+        <div>Faltante</div>
       </div>
       ${rows}
       <div class="status-total-row grand-total">
@@ -633,18 +953,47 @@ export function initSpacesModule(store) {
           ${grandValor > 0 ? fmtMoney(grandValor) : '—'}
           ${pctBlock(pctValor, 'da meta')}
         </div>
+        <div class="status-total-val status-total-val--pago">
+          ${grandValor > 0 || grandPago > 0 ? fmtMoney(grandPago) : '—'}
+          ${pctBlock(pctPago, 'do negociado')}
+        </div>
+        <div class="status-total-val status-total-val--falta">
+          ${grandValor > 0 || grandFalta > 0 ? fmtMoney(grandFalta) : '—'}
+        </div>
       </div>
     `;
   }
 
+  function renderReportSummary(displayedCount) {
+    const reserved = Object.values(spaces).filter((s) => s.status === 'res').length;
+    const occupied = Object.values(spaces).filter((s) => isActiveStatus(s.status)).length;
+    const totalValor = totalNegociado();
+    const totalPagoVal = totalPago();
+    const totalFaltaVal = totalFalta();
+    const custoTotal = totalCusto();
+    const filterLabels = {
+      all: 'Todos os espaços',
+      active: 'Espaços ocupados (lead, negociação, reservados ou vendidos)',
+      lead: 'Espaços em lead',
+      res: 'Espaços reservados',
+      neg: 'Espaços em negociação',
+      vend: 'Espaços vendidos / fechados',
+    };
+    const pagoPart =
+      totalValor > 0 || totalPagoVal > 0 ? ` · ${fmtMoney(totalPagoVal)} pago(s)` : '';
+    const faltaPart =
+      totalValor > 0 || totalFaltaVal > 0 ? ` · ${fmtMoney(totalFaltaVal)} faltante(s)` : '';
+    const viewLabel = viewMode === 'kanban' ? 'Kanban' : 'Lista';
+    els.reportSummary.textContent =
+      `${viewLabel} · ${filterLabels[listFilter]}: ${displayedCount} exibido(s) · ${reserved} reservado(s) · ${occupied} ocupado(s) · ${fmtMoney(custoTotal)} em custos · ${fmtMoney(totalValor)} negociado(s)${pagoPart}${faltaPart}`;
+  }
+
   function renderTable() {
     const rows = [];
-    const numeros = spaceNumeros();
+    const numeros = filteredSpaceNumeros();
 
     for (const i of numeros) {
       const data = spaces[i];
-      if (listFilter === 'active' && !isActiveStatus(data.status)) continue;
-      if (listFilter !== 'all' && listFilter !== 'active' && data.status !== listFilter) continue;
 
       const tipo = data.tipo || '';
       const participante = data.participanteNome || '';
@@ -653,9 +1002,11 @@ export function initSpacesModule(store) {
         ? ` <span class="cell-muted" title="Venda em grupo">· grupo</span>`
         : '';
       const valorExibido = valorNegociadoExibido(spaces, i, data);
+      const pagamento = valoresPagamentoExibidos(spaces, i, data);
+      const groupLeader = data.saleGroup ? saleGroupLeader(spaces, data.saleGroup) : null;
       const valorTitle =
         data.saleGroup && !isSaleGroupValorLeader(spaces, i, data)
-          ? `Valor contado no Espaço ${saleGroupLeader(spaces, data.saleGroup)}`
+          ? `Valor contado no Espaço ${groupLeader}`
           : '';
 
       rows.push(`
@@ -664,11 +1015,13 @@ export function initSpacesModule(store) {
             <input class="chk row-chk" type="checkbox" ${selectedNumeros.has(String(i)) ? 'checked' : ''} data-numero="${i}">
           </td>
           <td><strong>${escapeHtml(spaceLabel(i))}</strong>${groupNote}</td>
-          <td><span class="badge ${data.status}">${LABELS[data.status]}</span></td>
+          <td><span class="badge ${data.status}">${statusLabel(data.status)}</span></td>
           <td class="${tipo ? '' : 'cell-empty'}">${tipo ? escapeHtml(tipo) : '—'}</td>
           <td class="${participante ? '' : 'cell-empty'}">${participante ? escapeHtml(participante) : '—'}</td>
           <td class="cell-money ${data.custo != null ? '' : 'cell-empty'}">${fmtMoney(data.custo)}</td>
           <td class="cell-money ${valorExibido != null ? '' : 'cell-empty'}"${valorTitle ? ` title="${valorTitle}"` : ''}>${fmtMoney(valorExibido)}</td>
+          <td class="cell-money cell-money--pago ${pagamento ? '' : 'cell-empty'}"${valorTitle ? ` title="${valorTitle}"` : ''}>${pagamento ? fmtMoney(pagamento.pago) : '—'}</td>
+          <td class="cell-money cell-money--falta ${pagamento ? '' : 'cell-empty'}"${valorTitle ? ` title="${valorTitle}"` : ''}>${pagamento ? fmtMoney(pagamento.falta) : '—'}</td>
           <td class="${obs ? 'cell-muted' : 'cell-empty'}">${obs ? escapeHtml(obs) : '—'}</td>
           <td class="cell-muted">${fmtDate(data.updatedAt)}</td>
         </tr>
@@ -677,7 +1030,7 @@ export function initSpacesModule(store) {
 
     els.spacesTable.innerHTML =
       rows.join('') ||
-      '<tr><td colspan="9" class="cell-empty">Nenhum espaço neste agrupamento ou filtro.</td></tr>';
+      '<tr><td colspan="11" class="cell-empty">Nenhum espaço neste agrupamento ou filtro.</td></tr>';
 
     els.spacesTable.querySelectorAll('tr[data-numero]').forEach((row) => {
       row.addEventListener('click', () => openSpace(row.dataset.numero));
@@ -686,19 +1039,7 @@ export function initSpacesModule(store) {
       chk.addEventListener('change', () => toggleSelect(chk.dataset.numero, chk.checked));
     });
 
-    const reserved = Object.values(spaces).filter((s) => s.status === 'res').length;
-    const occupied = Object.values(spaces).filter((s) => isActiveStatus(s.status)).length;
-    const totalValor = totalNegociado();
-    const custoTotal = totalCusto();
-    const filterLabels = {
-      all: 'Todos os espaços',
-      active: 'Espaços ocupados (negociação, reservados ou vendidos)',
-      res: 'Espaços reservados',
-      neg: 'Espaços em negociação',
-      vend: 'Espaços vendidos / fechados',
-    };
-    els.reportSummary.textContent =
-      `${filterLabels[listFilter]}: ${rows.length} exibido(s) · ${reserved} reservado(s) · ${occupied} ocupado(s) · ${fmtMoney(custoTotal)} em custos · ${fmtMoney(totalValor)} negociado(s)`;
+    renderReportSummary(rows.length);
   }
 
   function bindEvents() {
@@ -709,6 +1050,10 @@ export function initSpacesModule(store) {
 
     document.querySelectorAll('[data-filter]').forEach((btn) => {
       btn.addEventListener('click', () => setFilter(btn.dataset.filter));
+    });
+
+    document.querySelectorAll('[data-esp-view]').forEach((btn) => {
+      btn.addEventListener('click', () => setViewMode(btn.dataset.espView));
     });
 
     document.getElementById('btn-cancel').addEventListener('click', closeModal);
@@ -743,9 +1088,17 @@ export function initSpacesModule(store) {
 
   renderGrupoTabs();
   bindEvents();
+  loadFunilEtapas();
   loadTiposComercio();
   renderParticipantesDatalist();
+  setViewMode(viewMode);
   updateSyncStatus();
 
-  return { renderAll, updateSyncStatus, renderGrupoTabs, renderParticipantesDatalist };
+  return {
+    renderAll,
+    updateSyncStatus,
+    renderGrupoTabs,
+    renderParticipantesDatalist,
+    reloadFunilEtapas: loadFunilEtapas,
+  };
 }

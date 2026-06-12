@@ -1,5 +1,10 @@
 import { LABELS } from '../lib/constants.js';
-import { fmtDate, formatValorInput, valorNegociadoExibido } from '../lib/format.js';
+import {
+  fmtDate,
+  formatValorInput,
+  valorNegociadoExibido,
+  valoresPagamentoExibidos,
+} from '../lib/format.js';
 
 export function exportCSV(store) {
   const { spaces, currentGrupo, spaceNumeros } = store;
@@ -12,6 +17,8 @@ export function exportCSV(store) {
     'Participante',
     'Custo',
     'ValorNegociado',
+    'JaPago',
+    'Faltante',
     'GrupoVenda',
     'Observacoes',
     'UltimaAlteracao',
@@ -32,6 +39,14 @@ export function exportCSV(store) {
       (() => {
         const v = valorNegociadoExibido(spaces, numero, data);
         return v != null ? formatValorInput(v) : '';
+      })(),
+      (() => {
+        const v = valoresPagamentoExibidos(spaces, numero, data);
+        return v ? formatValorInput(v.pago) : '';
+      })(),
+      (() => {
+        const v = valoresPagamentoExibidos(spaces, numero, data);
+        return v ? formatValorInput(v.falta) : '';
       })(),
       data.saleGroup || '',
       data.obs || '',

@@ -2,7 +2,7 @@ import { ESPACOS_SEED } from './data/espacos-seed.js';
 import { PRACA_ALIMENTACAO_SEED } from './data/praca-alimentacao-seed.js';
 import { EXPOSITORES_5X5_SEED } from './data/expositores-5x5-seed.js';
 import { FEIRA_COMERCIAL_2_SEED } from './data/feira-comercial-2-seed.js';
-import { migrateGrupos, findGrupoBySlug } from './grupos.js';
+import { migrateGrupos, ensureGruposForEvento, findGrupoBySlug } from './grupos.js';
 import { resolveParticipanteId } from './participantes.js';
 import { syncArrecadacaoForGrupo } from './arrecadacao.js';
 
@@ -17,9 +17,63 @@ function getSeedForGrupo(slug, numero) {
   return SEEDS_BY_SLUG[slug]?.find((s) => s.id === numero);
 }
 
-const VALID_STATUS = new Set(['disp', 'neg', 'res', 'vend']);
+const VALID_STATUS = new Set(['disp', 'lead', 'neg', 'res', 'vend']);
+
+const ACTIVE_STATUSES = new Set(['lead', 'neg', 'res', 'vend']);
+
+function isSaleGroupNonLeader(row) {
+  if (!row.sale_group) return false;
+  const espacoValor = row.valor != null && row.valor !== '' ? Number(row.valor) : null;
+  const arrTotal =
+    row.arrecadacao_valor_total != null && row.arrecadacao_valor_total !== ''
+      ? Number(row.arrecadacao_valor_total)
+      : null;
+  return espacoValor != null && espacoValor > 0 && arrTotal === 0;
+}
+
+function resolvePaymentFields(row) {
+  if (isSaleGroupNonLeader(row)) {
+    return { valorPago: null, valorFalta: null };
+  }
+
+  const espacoValor = row.valor != null && row.valor !== '' ? Number(row.valor) : null;
+  const temArrecadacao =
+    row.arrecadacao_id != null ||
+    (row.arrecadacao_valor_total != null && row.arrecadacao_valor_total !== '') ||
+    (row.valor_pago != null && row.valor_pago !== '');
+
+  let valorTotal =
+    row.arrecadacao_valor_total != null && row.arrecadacao_valor_total !== ''
+      ? Number(row.arrecadacao_valor_total)
+      : null;
+  let valorPago =
+    row.valor_pago != null && row.valor_pago !== '' ? Number(row.valor_pago) : null;
+
+  const ocupado = ACTIVE_STATUSES.has(row.status);
+  const temParticipante = row.participante_id != null;
+
+  if (ocupado && temParticipante) {
+    if ((valorTotal == null || Number.isNaN(valorTotal)) && espacoValor != null && !Number.isNaN(espacoValor)) {
+      valorTotal = espacoValor;
+    }
+    if (valorPago == null || Number.isNaN(valorPago)) {
+      valorPago = temArrecadacao || valorTotal != null ? 0 : null;
+    }
+  }
+
+  if (valorTotal == null || Number.isNaN(valorTotal) || valorPago == null || Number.isNaN(valorPago)) {
+    return { valorPago: null, valorFalta: null };
+  }
+
+  return {
+    valorPago,
+    valorFalta: Math.max(0, valorTotal - valorPago),
+  };
+}
 
 function rowToSpace(row) {
+  const { valorPago, valorFalta } = resolvePaymentFields(row);
+
   return {
     id: row.id,
     numero: row.numero,
@@ -33,6 +87,8 @@ function rowToSpace(row) {
     obs: row.obs || '',
     custo: row.custo != null ? Number(row.custo) : null,
     valor: row.valor != null ? Number(row.valor) : null,
+    valorPago,
+    valorFalta,
     saleGroup: row.sale_group || '',
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
@@ -151,35 +207,41 @@ async function seedGrupoSpaces(pool, grupoId, seeds) {
   }
 }
 
+async function getDefaultEventoId(pool) {
+  const [rows] = await pool.query('SELECT id FROM eventos ORDER BY edicao ASC LIMIT 1');
+  if (!rows[0]) throw new Error('Nenhum evento configurado');
+  return rows[0].id;
+}
+
+export async function seedEspacosForEvento(pool, eventoId) {
+  await ensureGruposForEvento(pool, eventoId);
+
+  const seeds = [
+    ['feira-comercial-1', ESPACOS_SEED],
+    ['feira-comercial-2', FEIRA_COMERCIAL_2_SEED],
+    ['praca-alimentacao', PRACA_ALIMENTACAO_SEED],
+    ['expositores-5x5', EXPOSITORES_5X5_SEED],
+  ];
+
+  for (const [slug, data] of seeds) {
+    const grupo = await findGrupoBySlug(pool, slug, eventoId);
+    if (grupo) await seedGrupoSpaces(pool, grupo.id, data);
+  }
+}
+
 export async function migrateEspacos(pool) {
   await migrateGrupos(pool);
 
-  const feira1 = await findGrupoBySlug(pool, 'feira-comercial-1');
-  if (!feira1) throw new Error('Grupo feira-comercial-1 não encontrado');
+  const eventoId = await getDefaultEventoId(pool);
+  const feira1 = await findGrupoBySlug(pool, 'feira-comercial-1', eventoId);
 
-  const migrated = await migrateLegacyEspacos(pool, feira1.id);
+  const migrated = feira1 ? await migrateLegacyEspacos(pool, feira1.id) : false;
   if (!migrated) {
     await createEspacosTable(pool);
   }
 
   await ensureCustoColumn(pool);
-
-  await seedGrupoSpaces(pool, feira1.id, ESPACOS_SEED);
-
-  const feira2 = await findGrupoBySlug(pool, 'feira-comercial-2');
-  if (feira2) {
-    await seedGrupoSpaces(pool, feira2.id, FEIRA_COMERCIAL_2_SEED);
-  }
-
-  const praca = await findGrupoBySlug(pool, 'praca-alimentacao');
-  if (praca) {
-    await seedGrupoSpaces(pool, praca.id, PRACA_ALIMENTACAO_SEED);
-  }
-
-  const expositores = await findGrupoBySlug(pool, 'expositores-5x5');
-  if (expositores) {
-    await seedGrupoSpaces(pool, expositores.id, EXPOSITORES_5X5_SEED);
-  }
+  await seedEspacosForEvento(pool, eventoId);
 }
 
 async function ensureCustoColumn(pool) {
@@ -236,18 +298,25 @@ export function normalizeSpaceUpdate(item) {
   };
 }
 
-export async function fetchSpacesByGrupo(pool, grupoSlug) {
-  const grupo = await findGrupoBySlug(pool, grupoSlug);
+export async function fetchSpacesByGrupo(pool, grupoSlug, eventoId) {
+  const grupo = await findGrupoBySlug(pool, grupoSlug, eventoId);
   if (!grupo) {
     throw Object.assign(new Error('Agrupamento não encontrado'), { status: 404 });
   }
 
+  // Garante registro em arrecadacao para espaços com participante (valor_pago / valor_total).
+  await syncArrecadacaoForGrupo(pool, grupo.id);
+
   const [rows] = await pool.query(
     `SELECT e.id, e.numero, e.label, e.points, e.status, e.tipo, e.client, e.participante_id,
             e.obs, e.custo, e.valor, e.sale_group, e.updated_at,
-            p.nome AS participante_nome
+            p.nome AS participante_nome,
+            a.id AS arrecadacao_id,
+            a.valor_total AS arrecadacao_valor_total,
+            a.valor_pago
      FROM espacos e
      LEFT JOIN participantes p ON p.id = e.participante_id
+     LEFT JOIN arrecadacao a ON a.espaco_id = e.id AND a.tipo = 'espaco' AND a.status != 'perda'
      WHERE e.grupo_id = ? ORDER BY e.numero`,
     [grupo.id],
   );
@@ -261,8 +330,8 @@ export async function fetchSpacesByGrupo(pool, grupoSlug) {
   return { grupo, spaces };
 }
 
-export async function upsertSpaces(pool, grupoSlug, updates) {
-  const grupo = await findGrupoBySlug(pool, grupoSlug);
+export async function upsertSpaces(pool, grupoSlug, updates, eventoId) {
+  const grupo = await findGrupoBySlug(pool, grupoSlug, eventoId);
   if (!grupo) {
     throw Object.assign(new Error('Agrupamento não encontrado'), { status: 404 });
   }
@@ -328,6 +397,144 @@ export async function upsertSpaces(pool, grupoSlug, updates) {
         );
       }
     }
+
+    await conn.commit();
+    await syncArrecadacaoForGrupo(pool, grupo.id);
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function moveEspacoReserva(pool, grupoSlug, origemNumero, rawDestino, eventoId) {
+  const grupo = await findGrupoBySlug(pool, grupoSlug, eventoId);
+  if (!grupo) {
+    throw Object.assign(new Error('Agrupamento não encontrado'), { status: 404 });
+  }
+
+  const origem = Number(origemNumero);
+  const destino = Number(rawDestino?.destinoNumero ?? rawDestino?.numero);
+  if (!Number.isInteger(origem) || origem < 1) {
+    throw Object.assign(new Error('Espaço de origem inválido'), { status: 400 });
+  }
+  if (!Number.isInteger(destino) || destino < 1) {
+    throw Object.assign(new Error('Espaço de destino inválido'), { status: 400 });
+  }
+  if (origem === destino) {
+    throw Object.assign(new Error('Selecione um espaço diferente do atual'), { status: 400 });
+  }
+
+  const data = normalizeSpaceUpdate({ ...rawDestino, numero: destino });
+  const now = new Date(data.updatedAt);
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [origemRows] = await conn.query(
+      `SELECT e.id, e.numero, e.label, e.status, e.sale_group, e.participante_id,
+              g.nome AS grupo_nome
+       FROM espacos e
+       JOIN grupos_espacos g ON g.id = e.grupo_id
+       WHERE e.grupo_id = ? AND e.numero = ? FOR UPDATE`,
+      [grupo.id, origem],
+    );
+    const [destinoRows] = await conn.query(
+      `SELECT id, numero, label, status, participante_id, sale_group
+       FROM espacos WHERE grupo_id = ? AND numero = ? FOR UPDATE`,
+      [grupo.id, destino],
+    );
+
+    const origemEspaco = origemRows[0];
+    const destinoEspaco = destinoRows[0];
+    if (!origemEspaco) {
+      throw Object.assign(new Error(`Espaço ${origem} não encontrado`), { status: 404 });
+    }
+    if (!destinoEspaco) {
+      throw Object.assign(new Error(`Espaço ${destino} não encontrado`), { status: 404 });
+    }
+    if (!ACTIVE_STATUSES.has(origemEspaco.status)) {
+      throw Object.assign(new Error('Só é possível mover reservas de espaços ocupados'), {
+        status: 400,
+      });
+    }
+    if (origemEspaco.sale_group) {
+      throw Object.assign(
+        new Error('Espaços em venda em grupo não podem ser movidos individualmente'),
+        { status: 400 },
+      );
+    }
+    if (destinoEspaco.status !== 'disp' || destinoEspaco.participante_id) {
+      throw Object.assign(new Error('O espaço de destino precisa estar disponível'), {
+        status: 400,
+      });
+    }
+    if (destinoEspaco.sale_group) {
+      throw Object.assign(new Error('O espaço de destino não pode fazer parte de outra venda em grupo'), {
+        status: 400,
+      });
+    }
+
+    const participanteId = await resolveParticipanteId(
+      conn,
+      rawDestino,
+      origemEspaco.participante_id,
+    );
+    if (!participanteId) {
+      throw Object.assign(new Error('Informe o participante da reserva'), { status: 400 });
+    }
+
+    const [arrRows] = await conn.query(
+      `SELECT id, valor_pago, status FROM arrecadacao
+       WHERE espaco_id = ? AND tipo = 'espaco' LIMIT 1`,
+      [origemEspaco.id],
+    );
+    const arrecadacao = arrRows[0];
+
+    const descricao = `${destinoEspaco.label || `Espaço ${destino}`} — ${origemEspaco.grupo_nome}`;
+
+    await conn.query(
+      `UPDATE espacos SET
+         status = ?, tipo = ?, client = ?, participante_id = ?, obs = ?, valor = ?,
+         sale_group = '', updated_at = ?
+       WHERE id = ?`,
+      [
+        data.status,
+        data.tipo,
+        data.client,
+        participanteId,
+        data.obs || null,
+        data.valor,
+        now,
+        destinoEspaco.id,
+      ],
+    );
+
+    if (arrecadacao) {
+      if (arrecadacao.status === 'perda') {
+        throw Object.assign(
+          new Error('Não é possível mover um espaço marcado como perda de lead'),
+          { status: 400 },
+        );
+      }
+      await conn.query(
+        `UPDATE arrecadacao SET
+           participante_id = ?, espaco_id = ?, descricao = ?, valor_total = ?, status = ?,
+           updated_at = CURRENT_TIMESTAMP(3)
+         WHERE id = ?`,
+        [participanteId, destinoEspaco.id, descricao, data.valor ?? 0, data.status, arrecadacao.id],
+      );
+    }
+
+    await conn.query(
+      `UPDATE espacos SET
+         status = 'disp', tipo = '', client = '', participante_id = NULL, obs = NULL,
+         valor = NULL, sale_group = '', updated_at = ?
+       WHERE id = ?`,
+      [now, origemEspaco.id],
+    );
 
     await conn.commit();
     await syncArrecadacaoForGrupo(pool, grupo.id);

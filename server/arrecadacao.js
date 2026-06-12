@@ -1,24 +1,55 @@
 import { ensureParticipante } from './participantes.js';
+import { createTarefaContato } from './tarefas.js';
+import {
+  etapaByStatus,
+  isPerdaStatus,
+  listFunilEtapas,
+  perdaEtapa,
+  perdaStatuses,
+} from './funil.js';
+const MOTIVOS_PERDA = new Set(['preco', 'desistiu', 'outro_evento', 'sem_retorno', 'perfil', 'outro']);
 
-const ACTIVE_STATUS = new Set(['neg', 'res', 'vend']);
+function parseStatus(value, fallback = 'neg') {
+  const status = String(value || fallback).trim();
+  if (!status || status.length > 32 || !/^[a-z0-9_]+$/.test(status)) {
+    throw Object.assign(new Error(`Etapa inválida: ${status}`), { status: 400 });
+  }
+  return status;
+}
 
 function rowToArrecadacao(row) {
   const valorTotal = Number(row.valor_total);
   const valorPago = Number(row.valor_pago);
   return {
     id: row.id,
-    participanteId: row.participante_id,
+    participanteId: row.participante_id != null ? Number(row.participante_id) : null,
     participanteNome: row.participante_nome || '',
     tipo: row.tipo,
+    status: row.status || 'neg',
     espacoId: row.espaco_id != null ? Number(row.espaco_id) : null,
     descricao: row.descricao || '',
     valorTotal,
     valorPago,
     valorFalta: Math.max(0, valorTotal - valorPago),
     obs: row.obs || '',
+    motivoPerda: row.motivo_perda || '',
+    motivoPerdaOutro: row.motivo_perda_outro || '',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
+}
+
+const ESPACO_STATUS = new Set(['disp', 'lead', 'neg', 'res', 'vend']);
+
+async function espacoStatusForArrecadacao(pool, eventoId, arrecadacaoStatus) {
+  if (!ESPACO_STATUS.has(arrecadacaoStatus)) {
+    const etapas = eventoId != null ? await listFunilEtapas(pool, eventoId) : [];
+    const etapa = etapaByStatus(etapas, arrecadacaoStatus);
+    if (etapa?.tipo === 'venda') return 'vend';
+    if (etapa?.tipo === 'perda') return 'disp';
+    return 'neg';
+  }
+  return arrecadacaoStatus;
 }
 
 function parseMoney(value, label) {
@@ -35,7 +66,7 @@ export async function migrateArrecadacao(pool) {
     CREATE TABLE IF NOT EXISTS arrecadacao (
       id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       participante_id INT UNSIGNED NOT NULL,
-      tipo ENUM('espaco', 'patrocinio') NOT NULL DEFAULT 'patrocinio',
+      tipo ENUM('espaco', 'patrocinio', 'artistico') NOT NULL DEFAULT 'patrocinio',
       espaco_id INT UNSIGNED NULL,
       descricao VARCHAR(255) NOT NULL DEFAULT '',
       valor_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
@@ -50,6 +81,98 @@ export async function migrateArrecadacao(pool) {
       CONSTRAINT fk_arrecadacao_espaco FOREIGN KEY (espaco_id) REFERENCES espacos(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  const [cols] = await pool.query(
+    `SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'participante_id'`,
+  );
+  if (cols[0]?.IS_NULLABLE === 'NO') {
+    await pool.query('ALTER TABLE arrecadacao MODIFY participante_id INT UNSIGNED NULL');
+  }
+
+  const [statusCol] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'status'`,
+  );
+  if (statusCol.length === 0) {
+    await pool.query(
+      `ALTER TABLE arrecadacao
+         ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'neg' AFTER tipo,
+         ADD INDEX idx_arrecadacao_status (status)`,
+    );
+  }
+
+  const [motivoCol] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'motivo_perda'`,
+  );
+  if (motivoCol.length === 0) {
+    await pool.query(
+      `ALTER TABLE arrecadacao
+         ADD COLUMN motivo_perda VARCHAR(100) NULL AFTER obs,
+         ADD COLUMN motivo_perda_outro TEXT NULL AFTER motivo_perda`,
+    );
+  }
+
+  const [tipoCol] = await pool.query(
+    `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'tipo'`,
+  );
+  const tipoEnum = tipoCol[0]?.COLUMN_TYPE || '';
+  if (tipoEnum && !tipoEnum.includes('artistico')) {
+    await pool.query(
+      `ALTER TABLE arrecadacao MODIFY tipo ENUM('espaco', 'patrocinio', 'artistico') NOT NULL DEFAULT 'patrocinio'`,
+    );
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS arrecadacao_pagamentos (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      arrecadacao_id INT UNSIGNED NOT NULL,
+      participante_id INT UNSIGNED NOT NULL,
+      valor DECIMAL(12, 2) NOT NULL,
+      obs TEXT NULL,
+      registrado_em DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      INDEX idx_pagamentos_arrecadacao (arrecadacao_id),
+      INDEX idx_pagamentos_participante (participante_id),
+      CONSTRAINT fk_pagamentos_arrecadacao
+        FOREIGN KEY (arrecadacao_id) REFERENCES arrecadacao(id) ON DELETE CASCADE,
+      CONSTRAINT fk_pagamentos_participante
+        FOREIGN KEY (participante_id) REFERENCES participantes(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const [semHistorico] = await pool.query(
+    `SELECT a.id, a.participante_id, a.valor_pago
+     FROM arrecadacao a
+     WHERE a.valor_pago > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM arrecadacao_pagamentos p WHERE p.arrecadacao_id = a.id
+       )`,
+  );
+  for (const row of semHistorico) {
+    await pool.query(
+      `INSERT INTO arrecadacao_pagamentos (arrecadacao_id, participante_id, valor, obs, registrado_em)
+       VALUES (?, ?, ?, 'Saldo importado do cadastro anterior', COALESCE(
+         (SELECT updated_at FROM arrecadacao WHERE id = ?),
+         (SELECT created_at FROM arrecadacao WHERE id = ?)
+       ))`,
+      [row.id, row.participante_id, row.valor_pago, row.id, row.id],
+    );
+  }
+}
+
+function rowToPagamento(row) {
+  return {
+    id: row.id,
+    arrecadacaoId: Number(row.arrecadacao_id),
+    participanteId: Number(row.participante_id),
+    valor: Number(row.valor),
+    obs: row.obs || '',
+    registradoEm: row.registrado_em ? new Date(row.registrado_em).toISOString() : null,
+    arrecadacaoDescricao: row.arrecadacao_descricao || '',
+    arrecadacaoTipo: row.arrecadacao_tipo || '',
+  };
 }
 
 function pickSaleGroupLeaders(espacos) {
@@ -64,11 +187,18 @@ function pickSaleGroupLeaders(espacos) {
 }
 
 function valorEspacoParaArrecadacao(espaco, leaders) {
-  if (espaco.sale_group && !leaders.has(espaco.id)) return null;
+  if (espaco.sale_group && !leaders.has(espaco.id)) return 0;
   return espaco.valor != null ? Number(espaco.valor) : 0;
 }
 
 export async function syncArrecadacaoForGrupo(pool, grupoId) {
+  const [grupoRows] = await pool.query(
+    'SELECT evento_id FROM grupos_espacos WHERE id = ? LIMIT 1',
+    [grupoId],
+  );
+  const eventoId = grupoRows[0]?.evento_id;
+  if (!eventoId) return;
+
   const [espacos] = await pool.query(
     `SELECT e.id, e.numero, e.label, e.participante_id, e.status, e.valor, e.sale_group,
             g.nome AS grupo_nome
@@ -82,33 +212,34 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
   const keepEspacoIds = [];
 
   for (const e of espacos) {
-    if (!e.participante_id || !ACTIVE_STATUS.has(e.status)) continue;
+    if (!e.participante_id) continue;
 
     const valorTotal = valorEspacoParaArrecadacao(e, leaders);
-    if (valorTotal === null) continue;
 
     keepEspacoIds.push(e.id);
     const descricao = `${e.label || `Espaço ${e.numero}`} — ${e.grupo_nome}`;
     const grupoSuffix = e.sale_group ? ' · venda em grupo' : '';
 
     const [existing] = await pool.query(
-      'SELECT id, valor_pago FROM arrecadacao WHERE espaco_id = ? LIMIT 1',
+      'SELECT id, valor_pago, status FROM arrecadacao WHERE espaco_id = ? LIMIT 1',
       [e.id],
     );
+
+    if (existing[0]?.status === 'perda') continue;
 
     if (existing[0]) {
       await pool.query(
         `UPDATE arrecadacao SET
-           participante_id = ?, descricao = ?, valor_total = ?, updated_at = CURRENT_TIMESTAMP(3)
+           participante_id = ?, descricao = ?, valor_total = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
          WHERE id = ?`,
-        [e.participante_id, descricao + grupoSuffix, valorTotal, existing[0].id],
+        [e.participante_id, descricao + grupoSuffix, valorTotal, e.status, existing[0].id],
       );
     } else {
       await pool.query(
         `INSERT INTO arrecadacao
-           (participante_id, tipo, espaco_id, descricao, valor_total, valor_pago, updated_at)
-         VALUES (?, 'espaco', ?, ?, ?, 0, CURRENT_TIMESTAMP(3))`,
-        [e.participante_id, e.id, descricao + grupoSuffix, valorTotal],
+           (evento_id, participante_id, tipo, status, espaco_id, descricao, valor_total, valor_pago, updated_at)
+         VALUES (?, ?, 'espaco', ?, ?, ?, ?, 0, CURRENT_TIMESTAMP(3))`,
+        [eventoId, e.participante_id, e.status, e.id, descricao + grupoSuffix, valorTotal],
       );
     }
   }
@@ -117,7 +248,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
     await pool.query(
       `DELETE a FROM arrecadacao a
        INNER JOIN espacos e ON e.id = a.espaco_id
-       WHERE e.grupo_id = ? AND a.tipo = 'espaco'`,
+       WHERE e.grupo_id = ? AND a.tipo = 'espaco' AND a.status != 'perda'`,
       [grupoId],
     );
     return;
@@ -127,7 +258,8 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
   await pool.query(
     `DELETE a FROM arrecadacao a
      INNER JOIN espacos e ON e.id = a.espaco_id
-     WHERE e.grupo_id = ? AND a.tipo = 'espaco' AND a.espaco_id NOT IN (${placeholders})`,
+     WHERE e.grupo_id = ? AND a.tipo = 'espaco' AND a.status != 'perda'
+       AND a.espaco_id NOT IN (${placeholders})`,
     [grupoId, ...keepEspacoIds],
   );
 }
@@ -139,23 +271,55 @@ export async function syncAllArrecadacaoFromEspacos(pool) {
   }
 }
 
-export async function listArrecadacao(pool) {
+function scopeTipoClause(scope) {
+  if (scope === 'artistico') return " AND a.tipo = 'artistico'";
+  return " AND a.tipo IN ('espaco', 'patrocinio')";
+}
+
+export async function listArrecadacao(pool, eventoId, { scope } = {}) {
   const [rows] = await pool.query(
-    `SELECT a.id, a.participante_id, a.tipo, a.espaco_id, a.descricao,
-            a.valor_total, a.valor_pago, a.obs, a.created_at, a.updated_at,
-            p.nome AS participante_nome
+    `SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
+            a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
+            a.created_at, a.updated_at, p.nome AS participante_nome
      FROM arrecadacao a
      JOIN participantes p ON p.id = a.participante_id
+     WHERE a.evento_id = ?${scopeTipoClause(scope)}
      ORDER BY p.nome, a.tipo, a.descricao`,
+    [eventoId],
   );
   return rows.map(rowToArrecadacao);
 }
 
+function rowToEspacoDisponivel(row) {
+  return {
+    id: row.id,
+    numero: row.numero,
+    label: row.label || `Espaço ${row.numero}`,
+    grupoNome: row.grupo_nome || '',
+    grupoSlug: row.grupo_slug || '',
+    custo: row.custo != null ? Number(row.custo) : null,
+    valor: row.valor != null ? Number(row.valor) : null,
+  };
+}
+
+export async function listEspacosDisponiveis(pool, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT e.id, e.numero, e.label, e.custo, e.valor,
+            g.nome AS grupo_nome, g.slug AS grupo_slug
+     FROM espacos e
+     JOIN grupos_espacos g ON g.id = e.grupo_id
+     WHERE g.evento_id = ? AND e.participante_id IS NULL AND e.status = 'disp'
+     ORDER BY g.nome, e.numero`,
+    [eventoId],
+  );
+  return rows.map(rowToEspacoDisponivel);
+}
+
 export async function findArrecadacaoById(pool, id) {
   const [rows] = await pool.query(
-    `SELECT a.id, a.participante_id, a.tipo, a.espaco_id, a.descricao,
-            a.valor_total, a.valor_pago, a.obs, a.created_at, a.updated_at,
-            p.nome AS participante_nome
+    `SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
+            a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
+            a.created_at, a.updated_at, p.nome AS participante_nome
      FROM arrecadacao a
      JOIN participantes p ON p.id = a.participante_id
      WHERE a.id = ? LIMIT 1`,
@@ -164,7 +328,7 @@ export async function findArrecadacaoById(pool, id) {
   return rows[0] ? rowToArrecadacao(rows[0]) : null;
 }
 
-export async function createPatrocinio(pool, raw) {
+export async function createPatrocinio(pool, eventoId, raw) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -172,15 +336,36 @@ export async function createPatrocinio(pool, raw) {
     const participanteId = await resolveParticipanteFromBody(conn, raw);
     const valorTotal = parseMoney(raw.valorTotal ?? raw.valor_total, 'Valor total');
     const valorPago = parseMoney(raw.valorPago ?? raw.valor_pago ?? 0, 'Valor pago');
-    const descricao = String(raw.descricao || 'Patrocínio').trim() || 'Patrocínio';
+    const tipo = raw.tipo === 'artistico' ? 'artistico' : 'patrocinio';
+    const descricaoPadrao = tipo === 'artistico' ? 'Artístico' : 'Patrocínio';
+    const descricao = String(raw.descricao || descricaoPadrao).trim() || descricaoPadrao;
     const obs = String(raw.obs || '').trim();
+    const status = parseStatus(raw.status, 'neg');
 
     const [result] = await conn.query(
       `INSERT INTO arrecadacao
-         (participante_id, tipo, espaco_id, descricao, valor_total, valor_pago, obs, updated_at)
-       VALUES (?, 'patrocinio', NULL, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
-      [participanteId, descricao, valorTotal, valorPago, obs || null],
+         (evento_id, participante_id, tipo, status, espaco_id, descricao, valor_total, valor_pago, obs, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+      [eventoId, participanteId, tipo, status, descricao, valorTotal, valorPago, obs || null],
     );
+
+    if (valorPago > 0) {
+      await conn.query(
+        `INSERT INTO arrecadacao_pagamentos (arrecadacao_id, participante_id, valor, obs)
+         VALUES (?, ?, ?, ?)`,
+        [result.insertId, participanteId, valorPago, 'Pagamento inicial no cadastro'],
+      );
+    }
+
+    const proximoContato = raw.proximoContato ?? raw.proximo_contato;
+    if (proximoContato) {
+      await createTarefaContato(conn, eventoId, {
+        participanteId,
+        arrecadacaoId: result.insertId,
+        proximoContato,
+        obsProximoContato: raw.obsProximoContato ?? raw.obs_proximo_contato,
+      });
+    }
 
     await conn.commit();
     return findArrecadacaoById(pool, result.insertId);
@@ -200,24 +385,34 @@ export async function updateArrecadacao(pool, id, raw) {
     raw.valorTotal ?? raw.valor_total ?? existing.valorTotal,
     'Valor total',
   );
-  const valorPago = parseMoney(
-    raw.valorPago ?? raw.valor_pago ?? existing.valorPago,
-    'Valor pago',
-  );
-  if (valorPago > valorTotal) {
-    throw Object.assign(new Error('Valor pago não pode ser maior que o valor total'), {
-      status: 400,
-    });
+  const valorPago = existing.valorPago;
+
+  if (valorTotal < valorPago) {
+    throw Object.assign(
+      new Error('Valor total não pode ser menor que o valor já pago'),
+      { status: 400 },
+    );
   }
 
   const obs = raw.obs !== undefined ? String(raw.obs || '').trim() : existing.obs;
   let descricao = existing.descricao;
-  if (existing.tipo === 'patrocinio' && raw.descricao !== undefined) {
-    descricao = String(raw.descricao || 'Patrocínio').trim() || 'Patrocínio';
+  if ((existing.tipo === 'patrocinio' || existing.tipo === 'artistico') && raw.descricao !== undefined) {
+    const padrao = existing.tipo === 'artistico' ? 'Artístico' : 'Patrocínio';
+    descricao = String(raw.descricao || padrao).trim() || padrao;
   }
 
   let participanteId = existing.participanteId;
-  if (existing.tipo === 'patrocinio' && (raw.participanteId || raw.participanteNome)) {
+  const shouldUpdateParticipante =
+    raw.participanteId != null ||
+    raw.participanteNome ||
+    raw.participanteInstagram != null ||
+    raw.participante_instagram != null ||
+    raw.participanteWhatsapp != null ||
+    raw.participante_whatsapp != null ||
+    raw.participanteSeguidores !== undefined ||
+    raw.participante_seguidores !== undefined;
+
+  if ((existing.tipo === 'patrocinio' || existing.tipo === 'artistico') && shouldUpdateParticipante) {
     const conn = await pool.getConnection();
     try {
       participanteId = await resolveParticipanteFromBody(conn, raw);
@@ -226,14 +421,143 @@ export async function updateArrecadacao(pool, id, raw) {
     }
   }
 
+  let status = existing.status;
+  if (raw.status !== undefined) {
+    status = parseStatus(raw.status, existing.status);
+  }
+
+  let tipo = existing.tipo;
+  if (raw.tipo !== undefined) {
+    const next = String(raw.tipo || '').trim();
+    if (next !== 'patrocinio' && next !== 'artistico') {
+      throw Object.assign(new Error('Tipo de lead inválido'), { status: 400 });
+    }
+    if (existing.tipo === 'espaco') {
+      throw Object.assign(
+        new Error('Registros de espaço não podem ser movidos para outro tipo'),
+        { status: 400 },
+      );
+    }
+    if (existing.tipo === 'patrocinio' || existing.tipo === 'artistico') {
+      tipo = next;
+      if (tipo === 'artistico' && existing.tipo === 'patrocinio' && descricao === 'Patrocínio') {
+        descricao = 'Artístico';
+      }
+      if (tipo === 'patrocinio' && existing.tipo === 'artistico' && descricao === 'Artístico') {
+        descricao = 'Patrocínio';
+      }
+    }
+  }
+
+  if (existing.tipo === 'espaco' && existing.espacoId) {
+    const [eventoRows] = await pool.query('SELECT evento_id FROM arrecadacao WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    const espacoStatus = await espacoStatusForArrecadacao(
+      pool,
+      eventoRows[0]?.evento_id,
+      status,
+    );
+    await pool.query(
+      `UPDATE espacos SET
+         valor = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ?`,
+      [valorTotal, espacoStatus, existing.espacoId],
+    );
+  }
+
   await pool.query(
     `UPDATE arrecadacao SET
-       participante_id = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, updated_at = CURRENT_TIMESTAMP(3)
+       participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
-    [participanteId, descricao, valorTotal, valorPago, obs || null, id],
+    [participanteId, tipo, descricao, valorTotal, valorPago, obs || null, status, id],
   );
 
   return findArrecadacaoById(pool, id);
+}
+
+export async function migrateArrecadacaoToArtistico(pool, id) {
+  const existing = await findArrecadacaoById(pool, id);
+  if (!existing) return null;
+  if (existing.tipo === 'espaco') {
+    throw Object.assign(
+      new Error('Registros de espaço não podem ser movidos para Artístico'),
+      { status: 400 },
+    );
+  }
+  if (existing.tipo === 'artistico') return existing;
+  return updateArrecadacao(pool, id, { tipo: 'artistico' });
+}
+
+function parseMotivoPerda(raw) {
+  const motivo = String(raw.motivo ?? raw.motivoPerda ?? '').trim();
+  if (!MOTIVOS_PERDA.has(motivo)) {
+    throw Object.assign(new Error('Selecione o motivo da perda do lead'), { status: 400 });
+  }
+  const motivoOutro = String(raw.motivoOutro ?? raw.motivo_perda_outro ?? '').trim();
+  if (motivo === 'outro' && !motivoOutro) {
+    throw Object.assign(new Error('Descreva o motivo da perda'), { status: 400 });
+  }
+  return { motivo, motivoOutro: motivo === 'outro' ? motivoOutro : null };
+}
+
+export async function registerPerdaLead(pool, id, raw) {
+  const existing = await findArrecadacaoById(pool, id);
+  if (!existing) return null;
+
+  const [eventoRows] = await pool.query('SELECT evento_id FROM arrecadacao WHERE id = ? LIMIT 1', [
+    id,
+  ]);
+  const eventoId = eventoRows[0]?.evento_id;
+  const etapas = eventoId != null ? await listFunilEtapas(pool, eventoId) : [];
+  if (isPerdaStatus(existing.status, etapas)) {
+    throw Object.assign(new Error('Este registro já foi marcado como perda de lead'), {
+      status: 400,
+    });
+  }
+
+  const perdaStatus = perdaEtapa(etapas)?.status || 'perda';
+  const { motivo, motivoOutro } = parseMotivoPerda(raw);
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    await conn.query(
+      `UPDATE arrecadacao SET
+         status = ?, motivo_perda = ?, motivo_perda_outro = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ?`,
+      [perdaStatus, motivo, motivoOutro, id],
+    );
+
+    if (existing.tipo === 'espaco' && existing.espacoId) {
+      await conn.query(
+        `UPDATE espacos SET
+           status = 'disp', participante_id = NULL, client = '', valor = NULL,
+           sale_group = '', updated_at = CURRENT_TIMESTAMP(3)
+         WHERE id = ?`,
+        [existing.espacoId],
+      );
+    }
+
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+
+  const [rows] = await pool.query(
+    `SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
+            a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
+            a.created_at, a.updated_at, p.nome AS participante_nome
+     FROM arrecadacao a
+     JOIN participantes p ON p.id = a.participante_id
+     WHERE a.id = ? LIMIT 1`,
+    [id],
+  );
+  return rows[0] ? rowToArrecadacao(rows[0]) : null;
 }
 
 export async function deleteArrecadacao(pool, id) {
@@ -258,30 +582,185 @@ export async function countArrecadacaoByParticipante(pool, participanteId) {
 }
 
 async function resolveParticipanteFromBody(conn, raw) {
+  const novoParticipante = Boolean(raw.novoParticipante ?? raw.novo_participante);
   const id =
-    raw.participanteId != null && raw.participanteId !== '' ? Number(raw.participanteId) : null;
+    !novoParticipante && raw.participanteId != null && raw.participanteId !== ''
+      ? Number(raw.participanteId)
+      : null;
   const nome = String(raw.participanteNome || raw.participante_nome || '').trim();
   if (!id && !nome) {
     throw Object.assign(new Error('Informe o participante ou patrocinador'), { status: 400 });
   }
-  const participanteId = await ensureParticipante(conn, { id, nome });
+
+  const instagram = raw.participanteInstagram ?? raw.participante_instagram;
+  const contatoTelefone = raw.participanteWhatsapp ?? raw.participante_whatsapp;
+  const seguidores = raw.participanteSeguidores ?? raw.participante_seguidores;
+  const atualizarContato =
+    novoParticipante ||
+    instagram != null ||
+    contatoTelefone != null ||
+    seguidores !== undefined ||
+    raw.participante_instagram != null ||
+    raw.participante_whatsapp != null ||
+    raw.participante_seguidores !== undefined;
+
+  const participanteId = await ensureParticipante(conn, {
+    id,
+    nome,
+    instagram: atualizarContato ? instagram : undefined,
+    contatoTelefone: atualizarContato ? contatoTelefone : undefined,
+    seguidores: atualizarContato ? seguidores : undefined,
+  });
   if (!participanteId) {
     throw Object.assign(new Error('Participante inválido'), { status: 400 });
   }
   return participanteId;
 }
 
-export function summarizeArrecadacao(items) {
+export async function listPagamentosByArrecadacao(pool, arrecadacaoId) {
+  const [rows] = await pool.query(
+    `SELECT p.id, p.arrecadacao_id, p.participante_id, p.valor, p.obs, p.registrado_em,
+            a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo
+     FROM arrecadacao_pagamentos p
+     JOIN arrecadacao a ON a.id = p.arrecadacao_id
+     WHERE p.arrecadacao_id = ?
+     ORDER BY p.registrado_em DESC, p.id DESC`,
+    [arrecadacaoId],
+  );
+  return rows.map(rowToPagamento);
+}
+
+export async function listPagamentosByParticipante(pool, participanteId) {
+  const [rows] = await pool.query(
+    `SELECT p.id, p.arrecadacao_id, p.participante_id, p.valor, p.obs, p.registrado_em,
+            a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo
+     FROM arrecadacao_pagamentos p
+     JOIN arrecadacao a ON a.id = p.arrecadacao_id
+     WHERE p.participante_id = ?
+     ORDER BY p.registrado_em DESC, p.id DESC`,
+    [participanteId],
+  );
+  return rows.map(rowToPagamento);
+}
+
+async function recalculateValorPago(conn, arrecadacaoId) {
+  const [rows] = await conn.query(
+    `SELECT COALESCE(SUM(valor), 0) AS total
+     FROM arrecadacao_pagamentos WHERE arrecadacao_id = ?`,
+    [arrecadacaoId],
+  );
+  const total = Number(rows[0]?.total || 0);
+  await conn.query(
+    `UPDATE arrecadacao SET valor_pago = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+    [total, arrecadacaoId],
+  );
+  return total;
+}
+
+export async function deletePagamento(pool, arrecadacaoId, pagamentoId, eventoId = null) {
+  const [pagamentoRows] = await pool.query(
+    `SELECT p.id, p.arrecadacao_id, p.valor
+     FROM arrecadacao_pagamentos p
+     JOIN arrecadacao a ON a.id = p.arrecadacao_id
+     WHERE p.id = ? AND p.arrecadacao_id = ?
+       ${eventoId != null ? 'AND a.evento_id = ?' : ''}
+     LIMIT 1`,
+    eventoId != null ? [pagamentoId, arrecadacaoId, eventoId] : [pagamentoId, arrecadacaoId],
+  );
+  if (!pagamentoRows[0]) return null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM arrecadacao_pagamentos WHERE id = ? AND arrecadacao_id = ?', [
+      pagamentoId,
+      arrecadacaoId,
+    ]);
+    await recalculateValorPago(conn, arrecadacaoId);
+    await conn.commit();
+    return { item: await findArrecadacaoById(pool, arrecadacaoId) };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function registerPagamento(pool, arrecadacaoId, raw) {
+  const existing = await findArrecadacaoById(pool, arrecadacaoId);
+  if (!existing) return null;
+
+  const valor = parseMoney(raw.valor ?? raw.valorPagamento, 'Valor do pagamento');
+  if (valor <= 0) {
+    throw Object.assign(new Error('Informe um valor de pagamento maior que zero'), { status: 400 });
+  }
+
+  const novoPago = existing.valorPago + valor;
+  if (novoPago > existing.valorTotal) {
+    throw Object.assign(
+      new Error(
+        `Pagamento excede o saldo. Falta pagar: ${(existing.valorTotal - existing.valorPago).toFixed(2)}`,
+      ),
+      { status: 400 },
+    );
+  }
+
+  const obs = String(raw.obs || '').trim() || null;
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [result] = await conn.query(
+      `INSERT INTO arrecadacao_pagamentos (arrecadacao_id, participante_id, valor, obs)
+       VALUES (?, ?, ?, ?)`,
+      [arrecadacaoId, existing.participanteId, valor, obs],
+    );
+
+    await conn.query(
+      `UPDATE arrecadacao SET valor_pago = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+      [novoPago, arrecadacaoId],
+    );
+
+    await conn.commit();
+
+    const [rows] = await conn.query(
+      `SELECT p.id, p.arrecadacao_id, p.participante_id, p.valor, p.obs, p.registrado_em,
+              a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo
+       FROM arrecadacao_pagamentos p
+       JOIN arrecadacao a ON a.id = p.arrecadacao_id
+       WHERE p.id = ? LIMIT 1`,
+      [result.insertId],
+    );
+
+    return {
+      pagamento: rows[0] ? rowToPagamento(rows[0]) : null,
+      item: await findArrecadacaoById(pool, arrecadacaoId),
+    };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export function summarizeArrecadacao(items, etapas = []) {
+  const perdas = perdaStatuses(etapas);
   let total = 0;
   let pago = 0;
+  let count = 0;
   for (const item of items) {
+    if (perdas.has(item.status)) continue;
     total += item.valorTotal;
     pago += item.valorPago;
+    count += 1;
   }
   return {
     total,
     pago,
     falta: Math.max(0, total - pago),
-    count: items.length,
+    count,
   };
 }

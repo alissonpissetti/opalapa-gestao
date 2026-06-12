@@ -1,6 +1,13 @@
+import { getActiveEventoId } from './evento.js';
+
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 let onUnauthorized = null;
+
+function eventoHeaders() {
+  const id = getActiveEventoId();
+  return id ? { 'X-Evento-Id': String(id) } : {};
+}
 
 export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler;
@@ -22,7 +29,7 @@ export async function apiRequest(path, options = {}) {
     res = await fetch(`${API_BASE}${path}`, {
       ...options,
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...options.headers },
+      headers: { 'Content-Type': 'application/json', ...eventoHeaders(), ...options.headers },
       signal: controller.signal,
     });
   } catch (err) {
@@ -71,6 +78,16 @@ export function saveGrupoSpaces(slug, updates) {
   });
 }
 
+export function moveEspacoReserva(slug, origemNumero, data) {
+  return apiRequest(
+    `/api/grupos/${encodeURIComponent(slug)}/espacos/${encodeURIComponent(origemNumero)}/mover`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    },
+  );
+}
+
 export function fetchTiposComercio() {
   return apiRequest('/api/tipos-comercio');
 }
@@ -115,18 +132,29 @@ export function updateParticipante(id, data) {
   });
 }
 
+export function fetchSeguidoresHistorico(participanteId) {
+  return apiRequest(`/api/participantes/${participanteId}/seguidores-historico`);
+}
+
 export function deleteParticipante(id) {
   return apiRequest(`/api/participantes/${id}`, { method: 'DELETE' });
 }
 
-export function fetchArrecadacao() {
-  return apiRequest('/api/arrecadacao');
+export function fetchArrecadacao({ scope = 'comercial' } = {}) {
+  return apiRequest(`/api/arrecadacao?scope=${encodeURIComponent(scope)}`);
 }
 
 export function createPatrocinio(data) {
   return apiRequest('/api/arrecadacao', {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export function createArtisticoLead(data) {
+  return apiRequest('/api/arrecadacao', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, tipo: 'artistico' }),
   });
 }
 
@@ -137,6 +165,120 @@ export function updateArrecadacao(id, data) {
   });
 }
 
+export async function migrateArrecadacaoToArtistico(id) {
+  try {
+    return await apiRequest(`/api/arrecadacao/${id}/migrar-artistico`, { method: 'POST' });
+  } catch (err) {
+    if (err.status === 404) {
+      return updateArrecadacao(id, { tipo: 'artistico' });
+    }
+    throw err;
+  }
+}
+
 export function deleteArrecadacao(id) {
   return apiRequest(`/api/arrecadacao/${id}`, { method: 'DELETE' });
+}
+
+export function registerPerdaLead(id, data) {
+  return apiRequest(`/api/arrecadacao/${id}/perda-lead`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchPagamentosArrecadacao(arrecadacaoId) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/pagamentos`);
+}
+
+export function fetchPagamentosParticipante(participanteId) {
+  return apiRequest(`/api/participantes/${participanteId}/pagamentos`);
+}
+
+export function registerPagamento(arrecadacaoId, data) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/pagamentos`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchTarefasContato({ status = 'pendentes' } = {}) {
+  const q = status && status !== 'pendentes' ? `?status=${encodeURIComponent(status)}` : '';
+  return apiRequest(`/api/tarefas-contato${q}`);
+}
+
+export function fetchTarefasLead(arrecadacaoId) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/tarefas-contato`);
+}
+
+export function createTarefaContato(data) {
+  return apiRequest('/api/tarefas-contato', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateTarefaContato(id, data) {
+  return apiRequest(`/api/tarefas-contato/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function concluirTarefaContato(id) {
+  return apiRequest(`/api/tarefas-contato/${id}/concluir`, { method: 'POST' });
+}
+
+export function fetchFunilEtapas() {
+  return apiRequest('/api/funil-etapas');
+}
+
+export function saveFunilEtapas(etapas) {
+  return apiRequest('/api/funil-etapas', {
+    method: 'PUT',
+    body: JSON.stringify({ etapas }),
+  });
+}
+
+export function fetchInteracoes(arrecadacaoId) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/interacoes`);
+}
+
+export function createInteracao(arrecadacaoId, data) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/interacoes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deletePagamento(arrecadacaoId, pagamentoId) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/pagamentos/${pagamentoId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function fetchEventos() {
+  return apiRequest('/api/eventos');
+}
+
+export function createEvento(data) {
+  return apiRequest('/api/eventos', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateEvento(id, data) {
+  return apiRequest(`/api/eventos/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteEvento(id) {
+  return apiRequest(`/api/eventos/${id}`, { method: 'DELETE' });
+}
+
+export function fetchEventoComparacao(id) {
+  return apiRequest(`/api/eventos/${id}/comparacao`);
 }

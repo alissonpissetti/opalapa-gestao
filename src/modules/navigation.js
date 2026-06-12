@@ -1,7 +1,9 @@
 const VIEWS = {
+  eventos: { viewId: 'view-eventos', navId: 'nav-eventos' },
   espacos: { viewId: 'view-espacos', navId: 'nav-espacos' },
-  participantes: { viewId: 'view-participantes', navId: 'nav-participantes' },
   arrecadacao: { viewId: 'view-arrecadacao', navId: 'nav-arrecadacao' },
+  artistico: { viewId: 'view-artistico', navId: 'nav-artistico' },
+  tarefas: { viewId: 'view-tarefas', navId: 'nav-tarefas' },
   usuarios: { viewId: 'view-usuarios', navId: 'nav-usuarios', parentId: 'nav-acessos' },
 };
 
@@ -62,12 +64,15 @@ export function initNavigation({ onViewChange }) {
   document.addEventListener('click', () => dropdown?.classList.remove('open'));
 
   window.addEventListener('popstate', (e) => {
-    const view = e.state?.view || location.hash.replace('#', '') || 'espacos';
+    let view = e.state?.view || location.hash.replace('#', '') || 'espacos';
+    if (view === 'participantes') view = 'arrecadacao';
     if (VIEWS[view]) navigate(view, { replace: true });
   });
 
   const initial = location.hash.replace('#', '');
-  navigate(VIEWS[initial] ? initial : 'espacos', { replace: true });
+  const initialView =
+    initial === 'participantes' ? 'arrecadacao' : VIEWS[initial] ? initial : 'espacos';
+  navigate(initialView, { replace: true });
 
   return { navigate, getCurrentView: () => currentView };
 }

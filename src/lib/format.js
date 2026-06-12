@@ -3,6 +3,57 @@ export function fmtDate(iso) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/** Interpreta datetime sem fuso (horário de parede). */
+function parseNaiveDatetime(value) {
+  if (!value) return null;
+  const s = String(value).trim().replace(' ', 'T');
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!m) return null;
+  return {
+    y: Number(m[1]),
+    mo: Number(m[2]),
+    d: Number(m[3]),
+    h: m[4] != null ? Number(m[4]) : 9,
+    mi: m[5] != null ? Number(m[5]) : 0,
+    s: m[6] != null ? Number(m[6]) : 0,
+  };
+}
+
+/** Formata data/hora de agendamento (valor local YYYY-MM-DDTHH:mm:ss). */
+export function fmtAgendado(value) {
+  if (!value) return '—';
+  const p = parseNaiveDatetime(value);
+  if (!p) return String(value).trim() || '—';
+  const d = new Date(p.y, p.mo - 1, p.d, p.h, p.mi, p.s);
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function parseAgendadoDate(value) {
+  const p = parseNaiveDatetime(value);
+  if (!p) return null;
+  return new Date(p.y, p.mo - 1, p.d, p.h, p.mi, p.s);
+}
+
+export function isTarefaAtrasada(agendadoPara, concluida = false) {
+  if (concluida || !agendadoPara) return false;
+  const d = parseAgendadoDate(agendadoPara);
+  return d != null && d.getTime() < Date.now();
+}
+
+/** Valor para input datetime-local a partir do agendado da API. */
+export function toDatetimeLocalValue(value) {
+  const p = parseNaiveDatetime(value);
+  if (!p) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${p.y}-${pad(p.mo)}-${pad(p.d)}T${pad(p.h)}:${pad(p.mi)}`;
+}
+
 export function fmtMoney(val) {
   if (val == null || val === '') return '—';
   const n = Number(val);
@@ -74,4 +125,27 @@ export function valorNegociadoExibido(spaces, numero, data) {
   if (data.valor == null) return null;
   if (!isSaleGroupValorLeader(spaces, numero, data)) return null;
   return data.valor;
+}
+
+/**
+ * Pago e faltante para a tabela de espaços (mesma base da arrecadação vinculada).
+ */
+export function valoresPagamentoExibidos(spaces, numero, data) {
+  if (!isSaleGroupValorLeader(spaces, numero, data)) return null;
+  if (data?.valorPago == null && data?.valorFalta == null) return null;
+
+  const pago = Number(data.valorPago) || 0;
+  const falta =
+    data.valorFalta != null
+      ? Number(data.valorFalta)
+      : Math.max(0, (Number(valorNegociadoExibido(spaces, numero, data)) || 0) - pago);
+
+  return { pago, falta };
+}
+
+/** @deprecated use valoresPagamentoExibidos */
+export function valorArrecadacaoExibido(spaces, numero, data, field) {
+  const vals = valoresPagamentoExibidos(spaces, numero, data);
+  if (!vals) return null;
+  return field === 'valorPago' ? vals.pago : vals.falta;
 }

@@ -1,3 +1,5 @@
+import { recordSeguidoresHistorico } from './seguidores-historico.js';
+
 function rowToParticipante(row) {
   return {
     id: row.id,
@@ -103,11 +105,26 @@ export async function createParticipante(pool, input) {
      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [data.nome, data.instagram, data.seguidores, data.contatoNome, data.contatoTelefone],
   );
-  return findParticipanteById(pool, result.insertId);
+  const created = await findParticipanteById(pool, result.insertId);
+  if (created && data.seguidores != null) {
+    await recordSeguidoresHistorico(pool, {
+      participanteId: created.id,
+      anterior: null,
+      novo: data.seguidores,
+    });
+  }
+  return created;
 }
 
 export async function updateParticipante(pool, id, input) {
+  const existing = await findParticipanteById(pool, id);
+  if (!existing) return null;
+
   const data = normalizeParticipanteInput(input);
+  const arrecadacaoIdRaw = input?.arrecadacaoId ?? input?.arrecadacao_id;
+  const arrecadacaoId =
+    arrecadacaoIdRaw != null && arrecadacaoIdRaw !== '' ? Number(arrecadacaoIdRaw) : null;
+
   const [result] = await pool.query(
     `UPDATE participantes SET
        nome = ?, instagram = ?, seguidores = ?, contato_nome = ?, contato_telefone = ?, updated_at = CURRENT_TIMESTAMP(3)
@@ -115,6 +132,16 @@ export async function updateParticipante(pool, id, input) {
     [data.nome, data.instagram, data.seguidores, data.contatoNome, data.contatoTelefone, id],
   );
   if (result.affectedRows === 0) return null;
+
+  if (data.seguidores !== existing.seguidores) {
+    await recordSeguidoresHistorico(pool, {
+      participanteId: id,
+      anterior: existing.seguidores,
+      novo: data.seguidores,
+      arrecadacaoId: Number.isInteger(arrecadacaoId) && arrecadacaoId > 0 ? arrecadacaoId : null,
+    });
+  }
+
   return findParticipanteById(pool, id);
 }
 
@@ -143,36 +170,114 @@ export async function countEspacosByParticipante(pool, id) {
   return Number(rows[0]?.total || 0);
 }
 
-export async function countReferenciasParticipante(pool, id) {
-  const espacos = await countEspacosByParticipante(pool, id);
+export async function countReferenciasParticipante(pool, id, eventoId = null) {
+  let espacos = 0;
+  if (eventoId) {
+    const [rows] = await pool.query(
+      `SELECT COUNT(*) AS total FROM espacos e
+       JOIN grupos_espacos g ON g.id = e.grupo_id
+       WHERE e.participante_id = ? AND g.evento_id = ?`,
+      [id, eventoId],
+    );
+    espacos = Number(rows[0]?.total || 0);
+  } else {
+    espacos = await countEspacosByParticipante(pool, id);
+  }
+
   const [rows] = await pool.query(
-    'SELECT COUNT(*) AS total FROM arrecadacao WHERE participante_id = ?',
-    [id],
+    eventoId
+      ? 'SELECT COUNT(*) AS total FROM arrecadacao WHERE participante_id = ? AND evento_id = ?'
+      : 'SELECT COUNT(*) AS total FROM arrecadacao WHERE participante_id = ?',
+    eventoId ? [id, eventoId] : [id],
   );
   const arrecadacao = Number(rows[0]?.total || 0);
   return { espacos, arrecadacao, total: espacos + arrecadacao };
 }
 
-/** Busca por nome (case-insensitive) ou cria só com o nome. */
-export async function ensureParticipante(conn, { id, nome }) {
+async function updateParticipanteContato(conn, id, { instagram, contatoTelefone, seguidores }) {
+  const sets = [];
+  const params = [];
+
+  if (instagram !== undefined) {
+    const ig = normalizeInstagram(instagram);
+    sets.push('instagram = ?');
+    params.push(ig);
+  }
+  if (contatoTelefone !== undefined) {
+    const tel = normalizePhone(contatoTelefone);
+    sets.push('contato_telefone = ?');
+    params.push(tel);
+  }
+  let seguidoresAnterior;
+  let seguidoresNovo;
+  if (seguidores !== undefined) {
+    const [atualRows] = await conn.query('SELECT seguidores FROM participantes WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    seguidoresAnterior =
+      atualRows[0]?.seguidores != null ? Number(atualRows[0].seguidores) : null;
+    seguidoresNovo = seguidores != null && seguidores !== '' ? Number(seguidores) : null;
+    if (seguidoresNovo != null && (!Number.isInteger(seguidoresNovo) || seguidoresNovo < 0)) {
+      throw Object.assign(new Error('Número de seguidores inválido'), { status: 400 });
+    }
+    sets.push('seguidores = ?');
+    params.push(seguidoresNovo);
+  }
+
+  if (!sets.length) return;
+
+  sets.push('updated_at = CURRENT_TIMESTAMP(3)');
+  params.push(id);
+  await conn.query(`UPDATE participantes SET ${sets.join(', ')} WHERE id = ?`, params);
+
+  if (seguidores !== undefined && seguidoresAnterior !== seguidoresNovo) {
+    await recordSeguidoresHistorico(conn, {
+      participanteId: id,
+      anterior: seguidoresAnterior,
+      novo: seguidoresNovo,
+    });
+  }
+}
+
+/** Busca por nome (case-insensitive) ou cria com os dados informados. */
+export async function ensureParticipante(conn, { id, nome, instagram, contatoTelefone, seguidores }) {
   if (id) {
     const [rows] = await conn.query('SELECT id FROM participantes WHERE id = ? LIMIT 1', [id]);
-    if (rows[0]) return rows[0].id;
+    if (rows[0]) {
+      await updateParticipanteContato(conn, rows[0].id, {
+        instagram,
+        contatoTelefone,
+        seguidores,
+      });
+      return rows[0].id;
+    }
   }
 
   const trimmed = String(nome || '').trim();
   if (!trimmed) return null;
 
+  const data = normalizeParticipanteInput(
+    { nome: trimmed, instagram, contatoTelefone },
+    { requireNome: true },
+  );
+
   const [existing] = await conn.query(
     'SELECT id FROM participantes WHERE LOWER(nome) = LOWER(?) LIMIT 1',
     [trimmed],
   );
-  if (existing[0]) return existing[0].id;
+  if (existing[0]) {
+    await updateParticipanteContato(conn, existing[0].id, {
+      instagram: data.instagram,
+      contatoTelefone: data.contatoTelefone,
+      seguidores,
+    });
+    return existing[0].id;
+  }
 
   const [result] = await conn.query(
     `INSERT INTO participantes (nome, instagram, seguidores, contato_nome, contato_telefone, updated_at)
-     VALUES (?, '', NULL, '', '', CURRENT_TIMESTAMP(3))`,
-    [trimmed],
+     VALUES (?, ?, NULL, '', ?, CURRENT_TIMESTAMP(3))`,
+    [data.nome, data.instagram, data.contatoTelefone],
   );
   return result.insertId;
 }

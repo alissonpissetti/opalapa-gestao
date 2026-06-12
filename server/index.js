@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createPool } from './db.js';
-import { migrateEspacos, fetchSpacesByGrupo, upsertSpaces } from './espacos.js';
+import { migrateEspacos, fetchSpacesByGrupo, upsertSpaces, moveEspacoReserva } from './espacos.js';
 import { fetchGrupos } from './grupos.js';
 import { migrateTiposComercio, fetchTiposComercio, ensureTiposComercio } from './tipos.js';
 import {
@@ -32,11 +32,43 @@ import {
   migrateArrecadacao,
   syncAllArrecadacaoFromEspacos,
   listArrecadacao,
+  listEspacosDisponiveis,
   createPatrocinio,
   updateArrecadacao,
+  migrateArrecadacaoToArtistico,
   deleteArrecadacao,
+  registerPerdaLead,
+  registerPagamento,
+  deletePagamento,
+  listPagamentosByArrecadacao,
+  listPagamentosByParticipante,
   summarizeArrecadacao,
+  findArrecadacaoById,
 } from './arrecadacao.js';
+import {
+  migrateEventos,
+  listEventos,
+  findEventoById,
+  createEvento,
+  updateEvento,
+  deleteEvento,
+  compararEvento,
+  createRequireEvento,
+} from './eventos.js';
+import {
+  migrateTarefas,
+  listTarefasContato,
+  listTarefasContatoByArrecadacao,
+  createTarefaContato,
+  updateTarefaContato,
+  concluirTarefaContato,
+} from './tarefas.js';
+import { migrateFunil, listFunilEtapas, saveFunilEtapas } from './funil.js';
+import { migrateInteracoes, listInteracoes, createInteracao } from './interacoes.js';
+import {
+  migrateSeguidoresHistorico,
+  getSeguidoresHistoricoResumo,
+} from './seguidores-historico.js';
 import {
   normalizeLogin,
   verifyPassword,
@@ -58,6 +90,7 @@ if (!DATABASE_URL) {
 }
 
 const pool = createPool(DATABASE_URL);
+const requireEvento = createRequireEvento(pool);
 const app = express();
 
 app.set('trust proxy', 1);
@@ -129,9 +162,77 @@ app.get('/api/tipos-comercio', requireAuth, async (_req, res) => {
   }
 });
 
-app.get('/api/grupos', requireAuth, async (_req, res) => {
+app.get('/api/eventos', requireAuth, async (_req, res) => {
   try {
-    const grupos = await fetchGrupos(pool);
+    const eventos = await listEventos(pool);
+    res.json({ eventos });
+  } catch (err) {
+    console.error('GET /api/eventos', err);
+    res.status(500).json({ error: 'Falha ao carregar eventos' });
+  }
+});
+
+app.post('/api/eventos', requireAuth, async (req, res) => {
+  try {
+    const evento = await createEvento(pool, req.body);
+    res.status(201).json({ evento });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/eventos', err);
+    res.status(500).json({ error: 'Falha ao criar evento' });
+  }
+});
+
+app.put('/api/eventos/:id', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const evento = await updateEvento(pool, id, req.body);
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json({ evento });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/eventos/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar evento' });
+  }
+});
+
+app.delete('/api/eventos/:id', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const deleted = await deleteEvento(pool, id);
+    if (!deleted) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/eventos/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir evento' });
+  }
+});
+
+app.get('/api/eventos/:id/comparacao', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const data = await compararEvento(pool, id);
+    if (!data) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/eventos/:id/comparacao', err);
+    res.status(500).json({ error: 'Falha ao carregar comparação' });
+  }
+});
+
+app.get('/api/grupos', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const grupos = await fetchGrupos(pool, req.eventoId);
     res.json({ grupos });
   } catch (err) {
     console.error('GET /api/grupos', err);
@@ -139,9 +240,9 @@ app.get('/api/grupos', requireAuth, async (_req, res) => {
   }
 });
 
-app.get('/api/grupos/:slug/espacos', requireAuth, async (req, res) => {
+app.get('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res) => {
   try {
-    const result = await fetchSpacesByGrupo(pool, req.params.slug);
+    const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
     const participantes = await listParticipantes(pool);
     res.json({ ...result, participantes });
   } catch (err) {
@@ -188,13 +289,27 @@ app.put('/api/participantes/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/participantes/:id', requireAuth, async (req, res) => {
+app.get('/api/participantes/:id/seguidores-historico', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
       return res.status(400).json({ error: 'ID inválido' });
     }
-    const refs = await countReferenciasParticipante(pool, id);
+    const data = await getSeguidoresHistoricoResumo(pool, id);
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/participantes/:id/seguidores-historico', err);
+    res.status(500).json({ error: 'Falha ao carregar histórico de seguidores' });
+  }
+});
+
+app.delete('/api/participantes/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const refs = await countReferenciasParticipante(pool, id, req.eventoId);
     if (refs.total > 0) {
       const partes = [];
       if (refs.espacos > 0) partes.push(`${refs.espacos} espaço(s)`);
@@ -212,25 +327,166 @@ app.delete('/api/participantes/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/arrecadacao', requireAuth, async (_req, res) => {
+app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
   try {
-    const items = await listArrecadacao(pool);
+    const scope = String(req.query.scope || 'comercial');
+    const allowedScopes = new Set(['comercial', 'artistico']);
+    if (!allowedScopes.has(scope)) {
+      return res.status(400).json({ error: 'Escopo inválido' });
+    }
+    const items = await listArrecadacao(pool, req.eventoId, { scope });
+    const espacosDisponiveis = await listEspacosDisponiveis(pool, req.eventoId);
     const participantes = await listParticipantes(pool);
-    res.json({ items, resumo: summarizeArrecadacao(items), participantes });
+    const funilEtapas = await listFunilEtapas(pool, req.eventoId);
+    res.json({
+      items,
+      espacosDisponiveis,
+      resumo: summarizeArrecadacao(items, funilEtapas),
+      participantes,
+      funilEtapas,
+    });
   } catch (err) {
     console.error('GET /api/arrecadacao', err);
     res.status(500).json({ error: 'Falha ao carregar arrecadação' });
   }
 });
 
-app.post('/api/arrecadacao', requireAuth, async (req, res) => {
+app.get('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
   try {
-    const item = await createPatrocinio(pool, req.body);
+    const etapas = await listFunilEtapas(pool, req.eventoId);
+    res.json({ etapas });
+  } catch (err) {
+    console.error('GET /api/funil-etapas', err);
+    res.status(500).json({ error: 'Falha ao carregar funil' });
+  }
+});
+
+app.put('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const etapas = await saveFunilEtapas(pool, req.eventoId, req.body?.etapas);
+    res.json({ etapas });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/funil-etapas', err);
+    res.status(500).json({ error: 'Falha ao salvar funil' });
+  }
+});
+
+app.get('/api/tarefas-contato', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const status = String(req.query.status || 'pendentes');
+    const allowed = new Set(['pendentes', 'concluidas', 'todas']);
+    if (!allowed.has(status)) {
+      return res.status(400).json({ error: 'Filtro de status inválido' });
+    }
+    const tarefas = await listTarefasContato(pool, req.eventoId, { status });
+    res.json({ tarefas });
+  } catch (err) {
+    console.error('GET /api/tarefas-contato', err);
+    res.status(500).json({ error: 'Falha ao carregar tarefas' });
+  }
+});
+
+app.post('/api/tarefas-contato', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const tarefa = await createTarefaContato(pool, req.eventoId, req.body);
+    res.status(201).json({ tarefa });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/tarefas-contato', err);
+    res.status(500).json({ error: 'Falha ao criar tarefa' });
+  }
+});
+
+app.put('/api/tarefas-contato/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const tarefa = await updateTarefaContato(pool, id, req.body, req.eventoId);
+    if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    res.json({ tarefa });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/tarefas-contato/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar tarefa' });
+  }
+});
+
+app.post('/api/tarefas-contato/:id/concluir', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const tarefa = await concluirTarefaContato(pool, id, req.eventoId);
+    if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    res.json({ tarefa });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/tarefas-contato/:id/concluir', err);
+    res.status(500).json({ error: 'Falha ao concluir tarefa' });
+  }
+});
+
+app.post('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const item = await createPatrocinio(pool, req.eventoId, req.body);
     res.status(201).json({ item });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/arrecadacao', err);
     res.status(500).json({ error: 'Falha ao cadastrar patrocínio' });
+  }
+});
+
+app.get('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    const interacoes = await listInteracoes(pool, id);
+    res.json({ interacoes });
+  } catch (err) {
+    console.error('GET /api/arrecadacao/:id/interacoes', err);
+    res.status(500).json({ error: 'Falha ao carregar interações' });
+  }
+});
+
+app.get('/api/arrecadacao/:id/tarefas-contato', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    const tarefas = await listTarefasContatoByArrecadacao(pool, id);
+    res.json({ tarefas });
+  } catch (err) {
+    console.error('GET /api/arrecadacao/:id/tarefas-contato', err);
+    res.status(500).json({ error: 'Falha ao carregar tarefas do lead' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    const interacao = await createInteracao(pool, id, req.body);
+    res.status(201).json({ interacao });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/interacoes', err);
+    res.status(500).json({ error: 'Falha ao registrar interação' });
   }
 });
 
@@ -247,6 +503,99 @@ app.put('/api/arrecadacao/:id', requireAuth, async (req, res) => {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PUT /api/arrecadacao/:id', err);
     res.status(500).json({ error: 'Falha ao atualizar arrecadação' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/migrar-artistico', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await migrateArrecadacaoToArtistico(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/migrar-artistico', err);
+    res.status(500).json({ error: 'Falha ao migrar lead para artístico' });
+  }
+});
+
+app.get('/api/arrecadacao/:id/pagamentos', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const pagamentos = await listPagamentosByArrecadacao(pool, id);
+    res.json({ pagamentos });
+  } catch (err) {
+    console.error('GET /api/arrecadacao/:id/pagamentos', err);
+    res.status(500).json({ error: 'Falha ao carregar pagamentos' });
+  }
+});
+
+app.delete('/api/arrecadacao/:id/pagamentos/:pagamentoId', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const pagamentoId = Number(req.params.pagamentoId);
+    if (!Number.isInteger(id) || id < 1 || !Number.isInteger(pagamentoId) || pagamentoId < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const result = await deletePagamento(pool, id, pagamentoId, req.eventoId);
+    if (!result) return res.status(404).json({ error: 'Pagamento não encontrado' });
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/arrecadacao/:id/pagamentos/:pagamentoId', err);
+    res.status(500).json({ error: 'Falha ao remover pagamento' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/pagamentos', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const result = await registerPagamento(pool, id, req.body);
+    if (!result) return res.status(404).json({ error: 'Registro não encontrado' });
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/pagamentos', err);
+    res.status(500).json({ error: 'Falha ao registrar pagamento' });
+  }
+});
+
+app.get('/api/participantes/:id/pagamentos', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const pagamentos = await listPagamentosByParticipante(pool, id);
+    res.json({ pagamentos });
+  } catch (err) {
+    console.error('GET /api/participantes/:id/pagamentos', err);
+    res.status(500).json({ error: 'Falha ao carregar histórico de pagamentos' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/perda-lead', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await registerPerdaLead(pool, id, req.body);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/perda-lead', err);
+    res.status(500).json({ error: 'Falha ao registrar perda do lead' });
   }
 });
 
@@ -346,19 +695,45 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/grupos/:slug/espacos', requireAuth, async (req, res) => {
+app.post('/api/grupos/:slug/espacos/:numero/mover', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const destinoNumero = req.body?.destinoNumero;
+    if (destinoNumero == null) {
+      return res.status(400).json({ error: 'Campo destinoNumero é obrigatório' });
+    }
+
+    await moveEspacoReserva(
+      pool,
+      req.params.slug,
+      req.params.numero,
+      req.body,
+      req.eventoId,
+    );
+    await ensureTiposComercio(pool, [req.body?.tipo]);
+    const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
+    const tipos = await fetchTiposComercio(pool);
+    const participantes = await listParticipantes(pool);
+    res.json({ ...result, tipos, participantes });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/grupos/:slug/espacos/:numero/mover', err);
+    res.status(500).json({ error: 'Falha ao mover reserva de espaço' });
+  }
+});
+
+app.put('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res) => {
   try {
     const updates = req.body?.updates;
     if (!Array.isArray(updates) || updates.length === 0) {
       return res.status(400).json({ error: 'Campo updates é obrigatório' });
     }
 
-    await upsertSpaces(pool, req.params.slug, updates);
+    await upsertSpaces(pool, req.params.slug, updates, req.eventoId);
     await ensureTiposComercio(
       pool,
       updates.map((u) => u.tipo),
     );
-    const result = await fetchSpacesByGrupo(pool, req.params.slug);
+    const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
     const tipos = await fetchTiposComercio(pool);
     const participantes = await listParticipantes(pool);
     res.json({ ...result, tipos, participantes });
@@ -384,8 +759,13 @@ app.use((req, res, next) => {
 
 async function start() {
   await migrateParticipantes(pool);
+  await migrateEventos(pool);
   await migrateEspacos(pool);
   await migrateArrecadacao(pool);
+  await migrateTarefas(pool);
+  await migrateFunil(pool);
+  await migrateInteracoes(pool);
+  await migrateSeguidoresHistorico(pool);
   await migrateTiposComercio(pool);
   await migrateUsers(pool);
 
