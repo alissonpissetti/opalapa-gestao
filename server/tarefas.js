@@ -10,6 +10,8 @@ function formatAgendadoFromDb(value) {
   return s.includes('T') ? s : s.replace(' ', 'T');
 }
 
+const TIPOS_TAREFA = new Set(['presencial', 'ligacao', 'whatsapp', 'email', 'reuniao_online', 'outro']);
+
 function rowToTarefa(row) {
   return {
     id: row.id,
@@ -23,6 +25,9 @@ function rowToTarefa(row) {
     arrecadacaoTipo: row.arrecadacao_tipo || '',
     agendadoPara: formatAgendadoFromDb(row.agendado_para),
     observacao: row.observacao || '',
+    tipoTarefa: row.tipo_tarefa || '',
+    responsavelId: row.responsavel_id != null ? Number(row.responsavel_id) : null,
+    responsavelNome: row.responsavel_nome || '',
     concluida: Boolean(row.concluida),
     concluidaEm: row.concluida_em ? new Date(row.concluida_em).toISOString() : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -96,6 +101,22 @@ export async function migrateTarefas(pool) {
        WHERE TIME(agendado_para) = '00:00:00'`,
     );
   }
+
+  const [cols] = await pool.query(
+    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tarefas_contato'`,
+  );
+  const colSet = new Set(cols.map((c) => c.name));
+  if (!colSet.has('tipo_tarefa')) {
+    await pool.query(
+      'ALTER TABLE tarefas_contato ADD COLUMN tipo_tarefa VARCHAR(32) NULL AFTER observacao',
+    );
+  }
+  if (!colSet.has('responsavel_id')) {
+    await pool.query(
+      'ALTER TABLE tarefas_contato ADD COLUMN responsavel_id INT UNSIGNED NULL AFTER tipo_tarefa',
+    );
+  }
 }
 
 export async function createTarefaContato(conn, eventoId, raw) {
@@ -113,12 +134,25 @@ export async function createTarefaContato(conn, eventoId, raw) {
   }
 
   const observacao = String(raw.observacao ?? raw.obsProximoContato ?? raw.obs_proximo_contato ?? '').trim();
+  const tipoTarefaRaw = String(raw.tipoTarefa ?? raw.tipo_tarefa ?? '').trim();
+  const tipoTarefa = TIPOS_TAREFA.has(tipoTarefaRaw) ? tipoTarefaRaw : null;
+  const responsavelIdRaw = raw.responsavelId ?? raw.responsavel_id;
+  const responsavelId =
+    responsavelIdRaw != null && responsavelIdRaw !== '' ? Number(responsavelIdRaw) : null;
 
   const [result] = await conn.query(
     `INSERT INTO tarefas_contato
-       (evento_id, participante_id, arrecadacao_id, agendado_para, observacao, updated_at)
-     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
-    [eventoId, participanteId, arrecadacaoId, agendadoPara, observacao || null],
+       (evento_id, participante_id, arrecadacao_id, agendado_para, observacao, tipo_tarefa, responsavel_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+    [
+      eventoId,
+      participanteId,
+      arrecadacaoId,
+      agendadoPara,
+      observacao || null,
+      tipoTarefa,
+      responsavelId,
+    ],
   );
 
   return findTarefaContatoById(conn, result.insertId);
@@ -127,13 +161,15 @@ export async function createTarefaContato(conn, eventoId, raw) {
 export async function findTarefaContatoById(connOrPool, id) {
   const [rows] = await connOrPool.query(
     `SELECT t.id, t.evento_id, t.participante_id, t.arrecadacao_id, t.agendado_para, t.observacao,
-            t.concluida, t.concluida_em, t.created_at,
+            t.tipo_tarefa, t.responsavel_id, t.concluida, t.concluida_em, t.created_at,
             p.nome AS participante_nome, p.instagram AS participante_instagram,
             p.contato_telefone AS participante_whatsapp,
-            a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo
+            a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo,
+            u.name AS responsavel_nome
      FROM tarefas_contato t
      JOIN participantes p ON p.id = t.participante_id
      LEFT JOIN arrecadacao a ON a.id = t.arrecadacao_id
+     LEFT JOIN users u ON u.id = t.responsavel_id
      WHERE t.id = ? LIMIT 1`,
     [id],
   );
@@ -142,13 +178,15 @@ export async function findTarefaContatoById(connOrPool, id) {
 
 const TAREFA_SELECT = `
   SELECT t.id, t.evento_id, t.participante_id, t.arrecadacao_id, t.agendado_para, t.observacao,
-         t.concluida, t.concluida_em, t.created_at,
+         t.tipo_tarefa, t.responsavel_id, t.concluida, t.concluida_em, t.created_at,
          p.nome AS participante_nome, p.instagram AS participante_instagram,
          p.contato_telefone AS participante_whatsapp,
-         a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo
+         a.descricao AS arrecadacao_descricao, a.tipo AS arrecadacao_tipo,
+         u.name AS responsavel_nome
   FROM tarefas_contato t
   JOIN participantes p ON p.id = t.participante_id
-  LEFT JOIN arrecadacao a ON a.id = t.arrecadacao_id`;
+  LEFT JOIN arrecadacao a ON a.id = t.arrecadacao_id
+  LEFT JOIN users u ON u.id = t.responsavel_id`;
 
 export async function listTarefasContato(pool, eventoId, { status = 'pendentes' } = {}) {
   const params = [eventoId];
@@ -200,11 +238,24 @@ export async function updateTarefaContato(pool, id, raw, eventoId = null) {
       ? String(raw.observacao || '').trim()
       : existing.observacao || '';
 
+  let tipoTarefa = existing.tipoTarefa || null;
+  if (raw.tipoTarefa !== undefined || raw.tipo_tarefa !== undefined) {
+    const tipoTarefaRaw = String(raw.tipoTarefa ?? raw.tipo_tarefa ?? '').trim();
+    tipoTarefa = TIPOS_TAREFA.has(tipoTarefaRaw) ? tipoTarefaRaw : null;
+  }
+
+  let responsavelId = existing.responsavelId ?? null;
+  if (raw.responsavelId !== undefined || raw.responsavel_id !== undefined) {
+    const responsavelIdRaw = raw.responsavelId ?? raw.responsavel_id;
+    responsavelId =
+      responsavelIdRaw != null && responsavelIdRaw !== '' ? Number(responsavelIdRaw) : null;
+  }
+
   await pool.query(
     `UPDATE tarefas_contato
-     SET agendado_para = ?, observacao = ?, updated_at = CURRENT_TIMESTAMP(3)
+     SET agendado_para = ?, observacao = ?, tipo_tarefa = ?, responsavel_id = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
-    [agendadoPara, observacao || null, id],
+    [agendadoPara, observacao || null, tipoTarefa, responsavelId, id],
   );
 
   return findTarefaContatoById(pool, id);

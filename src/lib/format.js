@@ -34,6 +34,41 @@ export function fmtAgendado(value) {
   });
 }
 
+/** Ex.: 24/04/2025 às 20:00 */
+export function fmtAgendadoComAs(value) {
+  if (!value) return '—';
+  const p = parseNaiveDatetime(value);
+  if (!p) return String(value).trim() || '—';
+  const d = new Date(p.y, p.mo - 1, p.d, p.h, p.mi, p.s);
+  const data = d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return `${data} às ${hora}`;
+}
+
+/** Combina date + time inputs em valor datetime-local (YYYY-MM-DDTHH:mm). */
+export function combineDateAndTime(dateValue, timeValue) {
+  const date = String(dateValue || '').trim();
+  const time = String(timeValue || '').trim();
+  if (!date) return '';
+  const hhmm = time || '09:00';
+  return `${date}T${hhmm.length === 5 ? hhmm : hhmm.slice(0, 5)}`;
+}
+
+/** Separa agendado em date e time para inputs. */
+export function splitAgendadoInputs(value) {
+  const p = parseNaiveDatetime(value);
+  if (!p) return { date: '', time: '' };
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    date: `${p.y}-${pad(p.mo)}-${pad(p.d)}`,
+    time: `${pad(p.h)}:${pad(p.mi)}`,
+  };
+}
+
 export function parseAgendadoDate(value) {
   const p = parseNaiveDatetime(value);
   if (!p) return null;

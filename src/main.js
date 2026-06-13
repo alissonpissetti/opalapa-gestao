@@ -11,6 +11,8 @@ import { initArrecadacaoModule } from './modules/arrecadacao.js';
 import { initTarefasModule } from './modules/tarefas.js';
 import { initTarefaEditor } from './modules/tarefa-editor.js';
 import { initEventosModule, initEventoSelector } from './modules/eventos.js';
+import { initMarketingModule } from './modules/marketing.js';
+import { initWhatsappConnect } from './modules/whatsapp-connect.js';
 
 const loadingEl = document.getElementById('app-loading');
 const appScreen = document.getElementById('app-screen');
@@ -18,6 +20,7 @@ const userNameEl = document.getElementById('user-name');
 let spacesModule = null;
 let arrecadacaoModule = null;
 let tarefasModule = null;
+let marketingModule = null;
 let usersModule = null;
 let eventosModule = null;
 let eventoSelector = null;
@@ -35,6 +38,7 @@ function showLoginOnly() {
   spacesModule = null;
   arrecadacaoModule = null;
   tarefasModule = null;
+  marketingModule = null;
   usersModule = null;
   eventosModule = null;
   eventoSelector = null;
@@ -79,6 +83,9 @@ async function reloadEventoData() {
   if (navigation?.getCurrentView() === 'tarefas') {
     tarefasModule?.loadTarefas();
   }
+  if (navigation?.getCurrentView() === 'marketing') {
+    marketingModule?.loadMarketing();
+  }
 }
 
 async function refreshEventoList() {
@@ -109,11 +116,12 @@ async function initApp(user) {
   arrecadacaoModule = initArrecadacaoModule(store, {
     onTarefaChanged: () => tarefasModule?.loadTarefas(),
     onNavigate: (view) => navigation?.navigate(view),
-    openTarefaEditor: (tarefa) => tarefaEditor.open(tarefa),
+    openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
     onEspacosDataChanged: () => reloadEspacosFromServer(),
+    currentUser: user,
   });
   tarefasModule = initTarefasModule({
-    openTarefaEditor: (tarefa) => tarefaEditor.open(tarefa),
+    openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
     onOpenLead: async (arrecadacaoId, { tipo } = {}) => {
       const view = tipo === 'artistico' ? 'artistico' : 'arrecadacao';
       navigation?.navigate(view);
@@ -121,6 +129,7 @@ async function initApp(user) {
     },
   });
   await syncParticipantesList();
+  marketingModule = initMarketingModule();
   usersModule = initUsersModule(user);
 
   eventoSelector = initEventoSelector({ onChange: reloadEventoData });
@@ -137,9 +146,12 @@ async function initApp(user) {
       if (view === 'arrecadacao') arrecadacaoModule.setLeadScope('comercial');
       if (view === 'artistico') arrecadacaoModule.setLeadScope('artistico');
       if (view === 'tarefas') tarefasModule.loadTarefas();
+      if (view === 'marketing') marketingModule.loadMarketing();
       if (view === 'usuarios') usersModule.loadUsers();
     },
   });
+
+  initWhatsappConnect();
 }
 
 const loginScreen = initLoginScreen(async (user) => {

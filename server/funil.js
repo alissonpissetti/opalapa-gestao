@@ -1,5 +1,12 @@
 const ETAPA_TIPOS = new Set(['normal', 'perda', 'venda']);
 
+export const FUNIL_ESCOPOS = [
+  { id: 'comercial', label: 'Arrecadação', descricao: 'Patrocínios e negociações comerciais' },
+  { id: 'artistico', label: 'Artístico', descricao: 'Artistas, atrações e orçamentos' },
+];
+
+const ESCOPO_IDS = new Set(FUNIL_ESCOPOS.map((e) => e.id));
+
 const DEFAULT_LABELS = {
   disp: 'Disponível',
   lead: 'Lead',
@@ -26,10 +33,38 @@ const DEFAULT_FUNIL = [
   { status: 'perda', titulo: 'Perda', cor: DEFAULT_COLORS.perda, tipo: 'perda', ordem: 4, ativo: true },
 ];
 
+const DEFAULT_FUNIL_ARTISTICO = [
+  { status: 'lead', titulo: 'Novo lead', cor: DEFAULT_COLORS.lead, tipo: 'normal', ordem: 0, ativo: true },
+  { status: 'neg', titulo: 'Primeiro contato', cor: DEFAULT_COLORS.neg, tipo: 'normal', ordem: 1, ativo: true },
+  {
+    status: 'proposta',
+    titulo: 'Proposta enviada',
+    cor: '#FAC775',
+    tipo: 'normal',
+    ordem: 2,
+    ativo: true,
+  },
+  { status: 'vend', titulo: 'Fechado', cor: DEFAULT_COLORS.vend, tipo: 'venda', ordem: 3, ativo: true },
+  { status: 'perda', titulo: 'Perda', cor: DEFAULT_COLORS.perda, tipo: 'perda', ordem: 4, ativo: true },
+];
+
+export function normalizeFunilEscopo(value, fallback = 'comercial') {
+  const escopo = String(value || fallback).trim();
+  if (!ESCOPO_IDS.has(escopo)) {
+    throw Object.assign(new Error(`Escopo de funil inválido: ${escopo}`), { status: 400 });
+  }
+  return escopo;
+}
+
+export function funilEscopoForTipo(tipo) {
+  return tipo === 'artistico' ? 'artistico' : 'comercial';
+}
+
 function rowToEtapa(row) {
   return {
     id: row.id,
     eventoId: Number(row.evento_id),
+    escopo: row.escopo || 'comercial',
     status: row.status,
     titulo: row.titulo,
     tipo: row.tipo || 'normal',
@@ -39,12 +74,18 @@ function rowToEtapa(row) {
   };
 }
 
-export function defaultFunilEtapas() {
-  return DEFAULT_FUNIL.map((e) => ({
+function defaultEtapasForEscopo(escopo) {
+  const base = escopo === 'artistico' ? DEFAULT_FUNIL_ARTISTICO : DEFAULT_FUNIL;
+  return base.map((e) => ({
     id: null,
     eventoId: null,
+    escopo,
     ...e,
   }));
+}
+
+export function defaultFunilEtapas(escopo = 'comercial') {
+  return defaultEtapasForEscopo(normalizeFunilEscopo(escopo));
 }
 
 function slugify(text) {
@@ -150,6 +191,36 @@ export async function migrateFunil(pool) {
     await pool.query(`UPDATE arrecadacao_funil_etapas SET tipo = 'perda' WHERE status = 'perda'`);
   }
 
+  const [escopoCol] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao_funil_etapas' AND COLUMN_NAME = 'escopo'`,
+  );
+  if (!escopoCol.length) {
+    await pool.query(
+      `ALTER TABLE arrecadacao_funil_etapas
+         ADD COLUMN escopo VARCHAR(32) NOT NULL DEFAULT 'comercial' AFTER evento_id`,
+    );
+    await pool.query(`UPDATE arrecadacao_funil_etapas SET escopo = 'comercial'`);
+  }
+
+  const [indexes] = await pool.query(
+    `SELECT INDEX_NAME AS name FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao_funil_etapas' AND INDEX_NAME = 'uq_funil_evento_status'`,
+  );
+  if (indexes.length) {
+    await pool.query('ALTER TABLE arrecadacao_funil_etapas DROP INDEX uq_funil_evento_status');
+  }
+
+  const [escopoIndex] = await pool.query(
+    `SELECT INDEX_NAME AS name FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao_funil_etapas' AND INDEX_NAME = 'uq_funil_evento_escopo_status'`,
+  );
+  if (!escopoIndex.length) {
+    await pool.query(
+      'ALTER TABLE arrecadacao_funil_etapas ADD UNIQUE KEY uq_funil_evento_escopo_status (evento_id, escopo, status)',
+    );
+  }
+
   const [statusArrec] = await pool.query(
     `SELECT CHARACTER_MAXIMUM_LENGTH AS max_len FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'status'`,
@@ -159,15 +230,16 @@ export async function migrateFunil(pool) {
   }
 }
 
-export async function listFunilEtapas(pool, eventoId) {
+export async function listFunilEtapas(pool, eventoId, { escopo = 'comercial' } = {}) {
+  const escopoNorm = normalizeFunilEscopo(escopo);
   const [rows] = await pool.query(
-    `SELECT id, evento_id, status, titulo, tipo, cor, ordem, ativo
+    `SELECT id, evento_id, escopo, status, titulo, tipo, cor, ordem, ativo
      FROM arrecadacao_funil_etapas
-     WHERE evento_id = ?
+     WHERE evento_id = ? AND escopo = ?
      ORDER BY ordem ASC, id ASC`,
-    [eventoId],
+    [eventoId, escopoNorm],
   );
-  if (!rows.length) return defaultFunilEtapas();
+  if (!rows.length) return defaultEtapasForEscopo(escopoNorm);
   return rows.map(rowToEtapa);
 }
 
@@ -196,7 +268,9 @@ export function vendaEtapa(etapas) {
   return etapas.find((e) => e.tipo === 'venda') || null;
 }
 
-export async function saveFunilEtapas(pool, eventoId, rawEtapas) {
+export async function saveFunilEtapas(pool, eventoId, rawEtapas, { escopo = 'comercial' } = {}) {
+  const escopoNorm = normalizeFunilEscopo(escopo);
+
   if (!Array.isArray(rawEtapas) || rawEtapas.length === 0) {
     throw Object.assign(new Error('Informe ao menos uma etapa do funil'), { status: 400 });
   }
@@ -230,13 +304,25 @@ export async function saveFunilEtapas(pool, eventoId, rawEtapas) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    await conn.query('DELETE FROM arrecadacao_funil_etapas WHERE evento_id = ?', [eventoId]);
+    await conn.query('DELETE FROM arrecadacao_funil_etapas WHERE evento_id = ? AND escopo = ?', [
+      eventoId,
+      escopoNorm,
+    ]);
     for (const etapa of etapas) {
       await conn.query(
         `INSERT INTO arrecadacao_funil_etapas
-           (evento_id, status, titulo, tipo, cor, ordem, ativo, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
-        [eventoId, etapa.status, etapa.titulo, etapa.tipo, etapa.cor, etapa.ordem, etapa.ativo ? 1 : 0],
+           (evento_id, escopo, status, titulo, tipo, cor, ordem, ativo, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+        [
+          eventoId,
+          escopoNorm,
+          etapa.status,
+          etapa.titulo,
+          etapa.tipo,
+          etapa.cor,
+          etapa.ordem,
+          etapa.ativo ? 1 : 0,
+        ],
       );
     }
     await conn.commit();
@@ -247,7 +333,7 @@ export async function saveFunilEtapas(pool, eventoId, rawEtapas) {
     conn.release();
   }
 
-  return listFunilEtapas(pool, eventoId);
+  return listFunilEtapas(pool, eventoId, { escopo: escopoNorm });
 }
 
 export function labelForStatus(status, etapas) {

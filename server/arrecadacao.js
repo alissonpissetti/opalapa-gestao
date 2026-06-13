@@ -6,6 +6,7 @@ import {
   listFunilEtapas,
   perdaEtapa,
   perdaStatuses,
+  funilEscopoForTipo,
 } from './funil.js';
 const MOTIVOS_PERDA = new Set(['preco', 'desistiu', 'outro_evento', 'sem_retorno', 'perfil', 'outro']);
 
@@ -34,6 +35,12 @@ function rowToArrecadacao(row) {
     obs: row.obs || '',
     motivoPerda: row.motivo_perda || '',
     motivoPerdaOutro: row.motivo_perda_outro || '',
+    marketingCanalId: row.marketing_canal_id != null ? Number(row.marketing_canal_id) : null,
+    marketingCampanhaId: row.marketing_campanha_id != null ? Number(row.marketing_campanha_id) : null,
+    marketingCriativoId: row.marketing_criativo_id != null ? Number(row.marketing_criativo_id) : null,
+    marketingCanalNome: row.marketing_canal_nome || '',
+    marketingCampanhaNome: row.marketing_campanha_nome || '',
+    marketingCriativoNome: row.marketing_criativo_nome || '',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
@@ -43,7 +50,8 @@ const ESPACO_STATUS = new Set(['disp', 'lead', 'neg', 'res', 'vend']);
 
 async function espacoStatusForArrecadacao(pool, eventoId, arrecadacaoStatus) {
   if (!ESPACO_STATUS.has(arrecadacaoStatus)) {
-    const etapas = eventoId != null ? await listFunilEtapas(pool, eventoId) : [];
+    const etapas =
+      eventoId != null ? await listFunilEtapas(pool, eventoId, { escopo: 'comercial' }) : [];
     const etapa = etapaByStatus(etapas, arrecadacaoStatus);
     if (etapa?.tipo === 'venda') return 'vend';
     if (etapa?.tipo === 'perda') return 'disp';
@@ -276,13 +284,23 @@ function scopeTipoClause(scope) {
   return " AND a.tipo IN ('espaco', 'patrocinio')";
 }
 
+const ARRECADACAO_SELECT = `
+  SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
+         a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
+         a.marketing_canal_id, a.marketing_campanha_id, a.marketing_criativo_id,
+         a.created_at, a.updated_at, p.nome AS participante_nome,
+         mc.nome AS marketing_canal_nome,
+         mcp.nome AS marketing_campanha_nome,
+         mcr.nome AS marketing_criativo_nome
+  FROM arrecadacao a
+  JOIN participantes p ON p.id = a.participante_id
+  LEFT JOIN marketing_canais mc ON mc.id = a.marketing_canal_id
+  LEFT JOIN marketing_campanhas mcp ON mcp.id = a.marketing_campanha_id
+  LEFT JOIN marketing_criativos mcr ON mcr.id = a.marketing_criativo_id`;
+
 export async function listArrecadacao(pool, eventoId, { scope } = {}) {
   const [rows] = await pool.query(
-    `SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
-            a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
-            a.created_at, a.updated_at, p.nome AS participante_nome
-     FROM arrecadacao a
-     JOIN participantes p ON p.id = a.participante_id
+    `${ARRECADACAO_SELECT}
      WHERE a.evento_id = ?${scopeTipoClause(scope)}
      ORDER BY p.nome, a.tipo, a.descricao`,
     [eventoId],
@@ -316,15 +334,7 @@ export async function listEspacosDisponiveis(pool, eventoId) {
 }
 
 export async function findArrecadacaoById(pool, id) {
-  const [rows] = await pool.query(
-    `SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
-            a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
-            a.created_at, a.updated_at, p.nome AS participante_nome
-     FROM arrecadacao a
-     JOIN participantes p ON p.id = a.participante_id
-     WHERE a.id = ? LIMIT 1`,
-    [id],
-  );
+  const [rows] = await pool.query(`${ARRECADACAO_SELECT} WHERE a.id = ? LIMIT 1`, [id]);
   return rows[0] ? rowToArrecadacao(rows[0]) : null;
 }
 
@@ -466,11 +476,45 @@ export async function updateArrecadacao(pool, id, raw) {
     );
   }
 
+  let marketingCanalId = existing.marketingCanalId ?? null;
+  let marketingCampanhaId = existing.marketingCampanhaId ?? null;
+  let marketingCriativoId = existing.marketingCriativoId ?? null;
+
+  if (raw.marketingCanalId !== undefined || raw.marketing_canal_id !== undefined) {
+    const v = raw.marketingCanalId ?? raw.marketing_canal_id;
+    marketingCanalId = v != null && v !== '' ? Number(v) : null;
+    marketingCampanhaId = null;
+    marketingCriativoId = null;
+  }
+  if (raw.marketingCampanhaId !== undefined || raw.marketing_campanha_id !== undefined) {
+    const v = raw.marketingCampanhaId ?? raw.marketing_campanha_id;
+    marketingCampanhaId = v != null && v !== '' ? Number(v) : null;
+    marketingCriativoId = null;
+  }
+  if (raw.marketingCriativoId !== undefined || raw.marketing_criativo_id !== undefined) {
+    const v = raw.marketingCriativoId ?? raw.marketing_criativo_id;
+    marketingCriativoId = v != null && v !== '' ? Number(v) : null;
+  }
+
   await pool.query(
     `UPDATE arrecadacao SET
-       participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
+       participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, status = ?,
+       marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?,
+       updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
-    [participanteId, tipo, descricao, valorTotal, valorPago, obs || null, status, id],
+    [
+      participanteId,
+      tipo,
+      descricao,
+      valorTotal,
+      valorPago,
+      obs || null,
+      status,
+      marketingCanalId,
+      marketingCampanhaId,
+      marketingCriativoId,
+      id,
+    ],
   );
 
   return findArrecadacaoById(pool, id);
@@ -509,7 +553,8 @@ export async function registerPerdaLead(pool, id, raw) {
     id,
   ]);
   const eventoId = eventoRows[0]?.evento_id;
-  const etapas = eventoId != null ? await listFunilEtapas(pool, eventoId) : [];
+  const escopo = funilEscopoForTipo(existing.tipo);
+  const etapas = eventoId != null ? await listFunilEtapas(pool, eventoId, { escopo }) : [];
   if (isPerdaStatus(existing.status, etapas)) {
     throw Object.assign(new Error('Este registro já foi marcado como perda de lead'), {
       status: 400,

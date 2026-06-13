@@ -16,13 +16,20 @@ import {
   fetchTarefasLead,
   concluirTarefaContato,
   saveFunilEtapas,
+  fetchFunilEtapas,
   fetchInteracoes,
   createInteracao,
+  fetchUsers,
+  fetchMarketing,
+  fetchLeadWhatsapp,
+  syncLeadWhatsapp,
+  sendLeadWhatsapp,
 } from '../lib/api.js';
 import {
   fmtMoney,
   fmtDate,
-  fmtAgendado,
+  fmtAgendadoComAs,
+  combineDateAndTime,
   isTarefaAtrasada,
   fmtPercent,
   escapeHtml,
@@ -66,7 +73,7 @@ const PAGE_CONFIG = {
       disponiveisSummary: null,
       disponiveisTable: null,
       btnNew: 'btn-artistico-new',
-      btnFunilConfig: null,
+      btnFunilConfig: 'btn-funil-config-artistico',
       listaView: 'artistico-lista-view',
       kanbanView: null,
     },
@@ -117,6 +124,28 @@ const INTERACAO_TIPO_LABELS = {
   email: 'E-mail',
   reuniao: 'Reunião',
   sistema: 'Registro automático',
+};
+
+const FUNIL_ESCOPO_LABELS = {
+  comercial: 'Arrecadação',
+  artistico: 'Artístico',
+};
+
+function funilEscopoForLeadScope(scope) {
+  return scope === 'artistico' ? 'artistico' : 'comercial';
+}
+
+function funilEscopoForItem(item) {
+  return item?.tipo === 'artistico' ? 'artistico' : 'comercial';
+}
+
+const TAREFA_TIPO_LABELS = {
+  presencial: 'Presencial',
+  ligacao: 'Ligação',
+  whatsapp: 'WhatsApp',
+  email: 'E-mail',
+  reuniao_online: 'Reunião online',
+  outro: 'Outro',
 };
 
 const ETAPA_TIPO_LABELS = {
@@ -184,7 +213,7 @@ function actionIconBtn({ action, id, title, icon, danger = false }) {
 
 export function initArrecadacaoModule(
   store,
-  { onTarefaChanged, onNavigate, openTarefaEditor, onEspacosDataChanged } = {},
+  { onTarefaChanged, onNavigate, openTarefaEditor, onEspacosDataChanged, currentUser } = {},
 ) {
   let leadScope = 'comercial';
 
@@ -247,6 +276,8 @@ export function initArrecadacaoModule(
     proximoContato: document.getElementById('a-proximo-contato'),
     obsContato: document.getElementById('a-obs-contato'),
     funilModalBg: document.getElementById('funil-modal-bg'),
+    funilModalTitle: document.getElementById('funil-modal-title'),
+    funilModalSub: document.getElementById('funil-modal-sub'),
     funilEtapasList: document.getElementById('funil-etapas-list'),
     funilNewTitulo: document.getElementById('funil-new-titulo'),
     funilBtnAdd: document.getElementById('funil-btn-add'),
@@ -265,9 +296,22 @@ export function initArrecadacaoModule(
     leadInteracaoTipo: document.getElementById('lead-interacao-tipo'),
     leadInteracaoTexto: document.getElementById('lead-interacao-texto'),
     leadTarefaForm: document.getElementById('lead-tarefa-form'),
+    leadTarefaNome: document.getElementById('lead-tarefa-nome'),
     leadTarefaData: document.getElementById('lead-tarefa-data'),
-    leadTarefaObs: document.getElementById('lead-tarefa-obs'),
-    leadTarefasList: document.getElementById('lead-tarefas-list'),
+    leadTarefaHora: document.getElementById('lead-tarefa-hora'),
+    leadTarefaTipo: document.getElementById('lead-tarefa-tipo'),
+    leadTarefaResponsavel: document.getElementById('lead-tarefa-responsavel'),
+    leadTarefasTable: document.getElementById('lead-tarefas-table'),
+    leadFunilSteps: document.getElementById('lead-funil-steps'),
+    leadOrigemCanal: document.getElementById('lead-origem-canal'),
+    leadOrigemCampanha: document.getElementById('lead-origem-campanha'),
+    leadOrigemCriativo: document.getElementById('lead-origem-criativo'),
+    leadWhatsappSection: document.getElementById('lead-whatsapp-section'),
+    leadWhatsappStatus: document.getElementById('lead-whatsapp-status'),
+    leadWhatsappMessages: document.getElementById('lead-whatsapp-messages'),
+    leadWhatsappForm: document.getElementById('lead-whatsapp-form'),
+    leadWhatsappInput: document.getElementById('lead-whatsapp-input'),
+    leadWhatsappSync: document.getElementById('lead-whatsapp-sync'),
     migrateArtisticoPanel: document.getElementById('a-migrate-artistico-panel'),
     migrateArtisticoBtn: document.getElementById('a-migrate-artistico-btn'),
   };
@@ -276,7 +320,12 @@ export function initArrecadacaoModule(
   let espacosDisponiveis = [];
   let participantes = [];
   let funilEtapas = [];
+  let funilEscopoAtual = 'comercial';
   let leadDetailTarefas = [];
+  let usuarios = [];
+  let loggedUser = currentUser || null;
+  let marketingData = { canais: [], campanhas: [], criativos: [] };
+  let leadOrigemSaving = false;
   let draftFunilEtapas = [];
   let viewMode = 'lista';
   let overviewVisible = true;
@@ -293,6 +342,23 @@ export function initArrecadacaoModule(
     } else {
       viewMode = localStorage.getItem(cfg.viewModeKey) === 'kanban' ? 'kanban' : 'lista';
     }
+  }
+
+  function funilEscopoLabel(escopo) {
+    return FUNIL_ESCOPO_LABELS[escopo] || escopo;
+  }
+
+  async function loadFunilEtapasForEscopo(escopo) {
+    const data = await fetchFunilEtapas({ escopo });
+    funilEtapas = data.etapas || [];
+    funilEscopoAtual = escopo;
+    return funilEtapas;
+  }
+
+  async function ensureFunilForItem(item) {
+    const escopo = funilEscopoForItem(item);
+    if (escopo === funilEscopoAtual && funilEtapas.length) return funilEtapas;
+    return loadFunilEtapasForEscopo(escopo);
   }
 
   function createLeadTipo() {
@@ -315,6 +381,8 @@ export function initArrecadacaoModule(
   let leadDetailItem = null;
   let leadDetailInteracoes = [];
   let leadSeguidoresHistorico = { historico: [], resumo: {} };
+  let leadWhatsappMessages = [];
+  let leadWhatsappConnection = null;
   let leadFieldEditing = null;
   let leadFieldSaving = false;
   let editId = null;
@@ -1228,7 +1296,7 @@ export function initArrecadacaoModule(
 
   function renderKanbanCard(item) {
     const falta = Math.max(0, item.valorTotal - item.valorPago);
-    const quitado = falta <= 0 && item.valorTotal > 0;
+    const quitado = falta <= 0;
     const ref = item.descricao ? truncateText(item.descricao, 48) : '—';
 
     return `
@@ -1477,7 +1545,7 @@ export function initArrecadacaoModule(
     const isArtistico = item.tipo === 'artistico';
     const isEspaco = item.tipo === 'espaco';
     const falta = Math.max(0, item.valorTotal - item.valorPago);
-    const quitado = falta <= 0 && item.valorTotal > 0;
+    const quitado = falta <= 0;
 
     const fields = ['participante'];
     if (isArtistico) {
@@ -1551,6 +1619,171 @@ export function initArrecadacaoModule(
     els.leadDealPanel.querySelectorAll('[data-lw-field]').forEach((btn) => {
       btn.addEventListener('click', () => startLeadFieldEdit(btn.dataset.lwField, item));
     });
+
+    renderLeadFunilPanel(item);
+    renderLeadOrigemFields(item);
+  }
+
+  function funnelStepsForLead() {
+    return activeFunilEtapas().filter((e) => e.tipo === 'normal');
+  }
+
+  function renderLeadFunilPanel(item) {
+    if (!els.leadFunilSteps || !item) return;
+    const steps = funnelStepsForLead();
+    const escopoLabel = funilEscopoLabel(funilEscopoForItem(item));
+    const titleEl = document.getElementById('lead-funil-title');
+    if (titleEl) titleEl.textContent = `Etapa do funil — ${escopoLabel}`;
+    if (!steps.length) {
+      els.leadFunilSteps.innerHTML =
+        '<p class="cell-empty lw-funil-empty">Configure etapas do funil na arrecadação.</p>';
+      return;
+    }
+
+    const currentIndex = steps.findIndex((e) => e.status === item.status);
+    const total = steps.length;
+
+    els.leadFunilSteps.innerHTML = steps
+      .map((etapa, index) => {
+        const isActive = etapa.status === item.status;
+        const isPast = currentIndex >= 0 && index < currentIndex;
+        const width = 100 - index * (38 / Math.max(total - 1, 1));
+        return `
+        <button
+          type="button"
+          class="lw-funil-step ${isActive ? 'lw-funil-step--active' : ''} ${isPast ? 'lw-funil-step--past' : ''}"
+          data-funil-status="${escapeHtml(etapa.status)}"
+          style="--funil-width: ${width}%; --funil-color: ${escapeHtml(etapa.cor || '#5dcaa5')}"
+          role="listitem"
+          ${isActive ? 'aria-current="step"' : ''}
+        >
+          <span>${escapeHtml(etapa.titulo)}</span>
+        </button>`;
+      })
+      .join('');
+
+    els.leadFunilSteps.querySelectorAll('[data-funil-status]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const status = btn.dataset.funilStatus;
+        if (!status || status === item.status || leadFieldSaving) return;
+        try {
+          const { item: updated } = await updateArrecadacao(item.id, { status });
+          if (updated) await refreshLeadDetailUi(updated);
+          await loadArrecadacao();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+    });
+  }
+
+  function campanhaMatchesOrigem(campanha, origemId) {
+    if (!origemId) return true;
+    const ids = campanha.canalIds?.length
+      ? campanha.canalIds
+      : campanha.canalId
+        ? [campanha.canalId]
+        : [];
+    return ids.includes(origemId);
+  }
+
+  function renderOrigemSelectOptions() {
+    const { canais, campanhas, criativos } = marketingData;
+
+    if (els.leadOrigemCanal) {
+      const current = leadDetailItem?.marketingCanalId;
+      els.leadOrigemCanal.innerHTML =
+        '<option value="">Selecione</option>' +
+        canais
+          .filter((c) => c.ativo)
+          .map(
+            (c) =>
+              `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${escapeHtml(c.nome)}</option>`,
+          )
+          .join('');
+    }
+
+    const canalId = Number(els.leadOrigemCanal?.value) || leadDetailItem?.marketingCanalId || null;
+    if (els.leadOrigemCampanha) {
+      const current = leadDetailItem?.marketingCampanhaId;
+      const list = campanhas.filter((c) => c.ativo && campanhaMatchesOrigem(c, canalId));
+      els.leadOrigemCampanha.innerHTML =
+        '<option value="">Selecione</option>' +
+        list
+          .map(
+            (c) =>
+              `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${escapeHtml(c.nome)}</option>`,
+          )
+          .join('');
+      if (current && !list.some((c) => c.id === current)) {
+        els.leadOrigemCampanha.value = '';
+      }
+    }
+
+    const campanhaId =
+      Number(els.leadOrigemCampanha?.value) || leadDetailItem?.marketingCampanhaId || null;
+    if (els.leadOrigemCriativo) {
+      const current = leadDetailItem?.marketingCriativoId;
+      const list = criativos.filter(
+        (c) =>
+          c.ativo &&
+          (!campanhaId || c.campanhaId === campanhaId) &&
+          (!canalId || (c.canalIds || []).includes(canalId)),
+      );
+      els.leadOrigemCriativo.innerHTML =
+        '<option value="">Selecione</option>' +
+        list
+          .map(
+            (c) =>
+              `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${escapeHtml(c.nome)}</option>`,
+          )
+          .join('');
+      if (current && !list.some((c) => c.id === current)) {
+        els.leadOrigemCriativo.value = '';
+      }
+    }
+  }
+
+  function renderLeadOrigemFields(item) {
+    if (!els.leadOrigemCanal) return;
+    renderOrigemSelectOptions();
+    if (item?.marketingCanalId && els.leadOrigemCanal) {
+      els.leadOrigemCanal.value = String(item.marketingCanalId);
+    }
+    if (item?.marketingCampanhaId && els.leadOrigemCampanha) {
+      els.leadOrigemCampanha.value = String(item.marketingCampanhaId);
+    }
+    if (item?.marketingCriativoId && els.leadOrigemCriativo) {
+      els.leadOrigemCriativo.value = String(item.marketingCriativoId);
+    }
+  }
+
+  async function loadMarketingData() {
+    try {
+      marketingData = await fetchMarketing();
+      marketingData.canais = marketingData.canais || [];
+      marketingData.campanhas = marketingData.campanhas || [];
+      marketingData.criativos = marketingData.criativos || [];
+    } catch (_) {
+      marketingData = { canais: [], campanhas: [], criativos: [] };
+    }
+  }
+
+  async function saveLeadOrigem(patch) {
+    if (!leadDetailId || leadOrigemSaving) return;
+    leadOrigemSaving = true;
+    try {
+      const { item: updated } = await updateArrecadacao(leadDetailId, patch);
+      const idx = items.findIndex((x) => x.id === leadDetailId);
+      if (idx >= 0 && updated) items[idx] = { ...items[idx], ...updated };
+      leadDetailItem = items.find((x) => x.id === leadDetailId) || updated;
+      renderLeadOrigemFields(leadDetailItem);
+    } catch (err) {
+      alert(err.message);
+      renderLeadOrigemFields(leadDetailItem);
+    } finally {
+      leadOrigemSaving = false;
+    }
   }
 
   function buildLeadPayloadFromItem(item, patch = {}) {
@@ -1641,6 +1874,8 @@ export function initArrecadacaoModule(
     renderLeadAvatar(leadDetailItem);
     renderLeadBadges(leadDetailItem);
     renderLeadDealPanel(leadDetailItem);
+    renderLeadFunilPanel(leadDetailItem);
+    renderLeadOrigemFields(leadDetailItem);
     renderLeadDetailActions(leadDetailItem);
   }
 
@@ -1934,38 +2169,191 @@ export function initArrecadacaoModule(
     renderInteracoesList();
   }
 
-  function renderLeadTarefasList() {
-    if (!els.leadTarefasList) return;
-    if (!leadDetailTarefas.length) {
-      els.leadTarefasList.innerHTML =
-        '<li class="cell-empty lead-tarefas-empty">Nenhuma tarefa pendente.</li>';
+  function renderLeadWhatsappStatus(status) {
+    if (!els.leadWhatsappStatus) return;
+    leadWhatsappConnection = status || null;
+    if (!status?.configured) {
+      els.leadWhatsappStatus.textContent =
+        'Evolution API não configurada no servidor. Defina EVOLUTION_API_URL e EVOLUTION_API_KEY.';
       return;
     }
-    els.leadTarefasList.innerHTML = leadDetailTarefas
+    if (!status.connected) {
+      els.leadWhatsappStatus.textContent = `WhatsApp desconectado (instância “${status.instance}”). Conecte a instância na Evolution API.`;
+      return;
+    }
+    els.leadWhatsappStatus.textContent = `WhatsApp conectado · instância “${status.instance}”.`;
+  }
+
+  function renderLeadWhatsappMessages() {
+    if (!els.leadWhatsappMessages) return;
+    if (!leadWhatsappMessages.length) {
+      els.leadWhatsappMessages.innerHTML =
+        '<p class="cell-empty lead-whatsapp-empty">Nenhuma mensagem sincronizada. Use “Sincronizar histórico” ou aguarde novas mensagens.</p>';
+      return;
+    }
+
+    els.leadWhatsappMessages.innerHTML = leadWhatsappMessages
+      .map((m) => {
+        const out = m.direcao === 'out';
+        const media =
+          m.midiaUrl && m.tipo !== 'text'
+            ? `<a class="lw-whatsapp-media" href="${escapeHtml(m.midiaUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(m.tipo === 'image' ? 'Ver imagem' : m.tipo === 'audio' ? 'Ouvir áudio' : m.tipo === 'video' ? 'Ver vídeo' : 'Abrir arquivo')}</a>`
+            : '';
+        const text = m.texto ? `<p class="lw-whatsapp-text">${escapeHtml(m.texto)}</p>` : '';
+        return `
+        <article class="lw-whatsapp-bubble ${out ? 'lw-whatsapp-bubble--out' : 'lw-whatsapp-bubble--in'}">
+          <time class="lw-whatsapp-time">${fmtDate(m.enviadoEm)}</time>
+          ${text}
+          ${media}
+        </article>`;
+      })
+      .join('');
+    els.leadWhatsappMessages.scrollTop = els.leadWhatsappMessages.scrollHeight;
+  }
+
+  async function loadLeadWhatsapp(id, { syncIfEmpty = false } = {}) {
+    if (!els.leadWhatsappSection) return;
+    els.leadWhatsappMessages.innerHTML = '<p class="cell-muted">Carregando conversa…</p>';
+    try {
+      const data = await fetchLeadWhatsapp(id);
+      leadWhatsappMessages = data.mensagens || [];
+      renderLeadWhatsappStatus(data.status);
+      renderLeadWhatsappMessages();
+
+      if (syncIfEmpty && data.status?.connected && !leadWhatsappMessages.length) {
+        await syncLeadWhatsappHistory(id, { silent: true });
+      }
+    } catch (err) {
+      els.leadWhatsappMessages.innerHTML = `<p class="cell-empty">${escapeHtml(err.message)}</p>`;
+      if (els.leadWhatsappStatus) {
+        els.leadWhatsappStatus.textContent = 'Não foi possível carregar o WhatsApp deste lead.';
+      }
+    }
+  }
+
+  async function syncLeadWhatsappHistory(id, { silent = false } = {}) {
+    const btn = els.leadWhatsappSync;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Sincronizando…';
+    }
+    try {
+      const data = await syncLeadWhatsapp(id, { limit: 120 });
+      leadWhatsappMessages = data.mensagens || [];
+      renderLeadWhatsappMessages();
+      if (!silent && els.leadWhatsappStatus) {
+        const imported = data.imported ?? 0;
+        els.leadWhatsappStatus.textContent = `Histórico sincronizado · ${imported} mensagem(ns) importada(s).`;
+      }
+    } catch (err) {
+      if (!silent) alert(err.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Sincronizar histórico';
+      }
+    }
+  }
+
+  async function submitLeadWhatsapp(e) {
+    e.preventDefault();
+    if (!leadDetailId) return;
+    const text = els.leadWhatsappInput?.value.trim() || '';
+    if (!text) return;
+
+    const btn = els.leadWhatsappForm?.querySelector('button[type="submit"]');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Enviando…';
+    }
+    try {
+      const { mensagem } = await sendLeadWhatsapp(leadDetailId, text);
+      if (mensagem) {
+        leadWhatsappMessages = [...leadWhatsappMessages, mensagem].sort(
+          (a, b) => new Date(a.enviadoEm) - new Date(b.enviadoEm),
+        );
+        renderLeadWhatsappMessages();
+      }
+      if (els.leadWhatsappInput) els.leadWhatsappInput.value = '';
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Enviar';
+      }
+    }
+  }
+
+  function renderResponsavelOptions(selectEl, selectedId = null) {
+    if (!selectEl) return;
+    const current = selectedId != null ? String(selectedId) : '';
+    selectEl.innerHTML =
+      '<option value="">Selecione</option>' +
+      usuarios
+        .map(
+          (u) =>
+            `<option value="${u.id}"${String(u.id) === current ? ' selected' : ''}>${escapeHtml(u.name)}</option>`,
+        )
+        .join('');
+  }
+
+  async function ensureUsuariosLoaded() {
+    if (usuarios.length) return;
+    try {
+      const data = await fetchUsers();
+      usuarios = data.users || [];
+    } catch (_) {
+      usuarios = loggedUser ? [loggedUser] : [];
+    }
+    renderResponsavelOptions(els.leadTarefaResponsavel, loggedUser?.id);
+  }
+
+  function resetLeadTarefaForm() {
+    if (els.leadTarefaNome) els.leadTarefaNome.value = '';
+    if (els.leadTarefaData) els.leadTarefaData.value = '';
+    if (els.leadTarefaHora) els.leadTarefaHora.value = '';
+    if (els.leadTarefaTipo) els.leadTarefaTipo.value = '';
+    renderResponsavelOptions(els.leadTarefaResponsavel, loggedUser?.id);
+  }
+
+  function renderLeadTarefasTable() {
+    if (!els.leadTarefasTable) return;
+    if (!leadDetailTarefas.length) {
+      els.leadTarefasTable.innerHTML = `
+        <tr class="lead-tarefas-empty-row">
+          <td colspan="5">Nenhuma tarefa agendada.</td>
+        </tr>`;
+      return;
+    }
+    els.leadTarefasTable.innerHTML = leadDetailTarefas
       .map((t) => {
         const atrasada = isTarefaAtrasada(t.agendadoPara, t.concluida);
+        const tipoLabel = TAREFA_TIPO_LABELS[t.tipoTarefa] || t.tipoTarefa || '—';
         return `
-        <li class="lead-tarefa-item ${atrasada ? 'lead-tarefa-item-atrasada' : ''}">
-          <div class="lead-tarefa-item-head">
-            <strong class="${atrasada ? 'tarefa-data-atrasada' : ''}">${escapeHtml(fmtAgendado(t.agendadoPara))}${atrasada ? ' · Atrasada' : ''}</strong>
-            <span class="lead-tarefa-item-actions">
-              <button class="tbtn" type="button" data-action="editar-lead-tarefa" data-id="${t.id}">Editar</button>
+        <tr class="lead-tarefa-row ${atrasada ? 'lead-tarefa-row-atrasada' : ''}">
+          <td>${escapeHtml(t.observacao || '—')}</td>
+          <td class="${atrasada ? 'tarefa-data-atrasada' : ''}">${escapeHtml(fmtAgendadoComAs(t.agendadoPara))}${atrasada ? ' · Atrasada' : ''}</td>
+          <td>${escapeHtml(tipoLabel)}</td>
+          <td>${escapeHtml(t.responsavelNome || '—')}</td>
+          <td>
+            <span class="lead-tarefa-actions">
+              <button class="icon-btn" type="button" data-action="editar-lead-tarefa" data-id="${t.id}" title="Editar" aria-label="Editar tarefa">✎</button>
               <button class="tbtn" type="button" data-action="concluir-lead-tarefa" data-id="${t.id}">Concluir</button>
             </span>
-          </div>
-          ${t.observacao ? `<p class="cell-muted">${escapeHtml(t.observacao)}</p>` : ''}
-        </li>`;
+          </td>
+        </tr>`;
       })
       .join('');
 
-    els.leadTarefasList.querySelectorAll('[data-action="editar-lead-tarefa"]').forEach((btn) => {
+    els.leadTarefasTable.querySelectorAll('[data-action="editar-lead-tarefa"]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const tarefa = leadDetailTarefas.find((t) => t.id === Number(btn.dataset.id));
-        if (tarefa && openTarefaEditor) openTarefaEditor(tarefa);
+        if (tarefa && openTarefaEditor) openTarefaEditor(tarefa, { usuarios });
       });
     });
 
-    els.leadTarefasList.querySelectorAll('[data-action="concluir-lead-tarefa"]').forEach((btn) => {
+    els.leadTarefasTable.querySelectorAll('[data-action="concluir-lead-tarefa"]').forEach((btn) => {
       btn.addEventListener('click', () => concluirLeadTarefa(Number(btn.dataset.id)));
     });
   }
@@ -1973,7 +2361,7 @@ export function initArrecadacaoModule(
   async function loadLeadDetailTarefas(id) {
     const data = await fetchTarefasLead(id);
     leadDetailTarefas = data.tarefas || [];
-    renderLeadTarefasList();
+    renderLeadTarefasTable();
   }
 
   async function concluirLeadTarefa(id) {
@@ -1994,17 +2382,32 @@ export function initArrecadacaoModule(
     const item = items.find((x) => x.id === leadDetailId);
     if (!item) return;
 
-    const agendadoPara = els.leadTarefaData?.value || '';
-    const observacao = els.leadTarefaObs?.value.trim() || '';
+    const observacao = els.leadTarefaNome?.value.trim() || '';
+    const agendadoPara = combineDateAndTime(els.leadTarefaData?.value, els.leadTarefaHora?.value);
+    const tipoTarefa = els.leadTarefaTipo?.value || '';
+    const responsavelId = Number(els.leadTarefaResponsavel?.value) || null;
+
+    if (!observacao) {
+      alert('Informe o nome da tarefa.');
+      return;
+    }
     if (!agendadoPara) {
       alert('Informe data e hora do agendamento.');
+      return;
+    }
+    if (!tipoTarefa) {
+      alert('Selecione o tipo de tarefa.');
+      return;
+    }
+    if (!responsavelId) {
+      alert('Selecione o responsável pela tarefa.');
       return;
     }
 
     const btn = els.leadTarefaForm?.querySelector('button[type="submit"]');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Agendando…';
+      btn.textContent = 'Salvando…';
     }
 
     try {
@@ -2013,9 +2416,10 @@ export function initArrecadacaoModule(
         arrecadacaoId: leadDetailId,
         agendadoPara,
         observacao,
+        tipoTarefa,
+        responsavelId,
       });
-      if (els.leadTarefaData) els.leadTarefaData.value = '';
-      if (els.leadTarefaObs) els.leadTarefaObs.value = '';
+      resetLeadTarefaForm();
       await loadLeadDetailTarefas(leadDetailId);
       onTarefaChanged?.();
     } catch (err) {
@@ -2023,7 +2427,7 @@ export function initArrecadacaoModule(
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Agendar tarefa';
+        btn.textContent = 'Salvar';
       }
     }
   }
@@ -2041,6 +2445,8 @@ export function initArrecadacaoModule(
     leadDetailInteracoes = [];
     leadSeguidoresHistorico = { historico: [], resumo: {} };
     leadDetailTarefas = [];
+    leadWhatsappMessages = [];
+    leadWhatsappConnection = null;
     cancelLeadFieldEdit();
   }
 
@@ -2052,6 +2458,8 @@ export function initArrecadacaoModule(
     leadDetailItem = item;
     leadDetailInteracoes = [];
     leadDetailTarefas = [];
+    leadWhatsappMessages = [];
+    leadWhatsappConnection = null;
 
     if (els.leadDetailTitle) els.leadDetailTitle.textContent = item.participanteNome;
     if (els.leadDetailSub) {
@@ -2065,24 +2473,40 @@ export function initArrecadacaoModule(
 
     if (els.leadInteracaoTipo) els.leadInteracaoTipo.value = 'nota';
     if (els.leadInteracaoTexto) els.leadInteracaoTexto.value = '';
-    if (els.leadTarefaData) els.leadTarefaData.value = '';
-    if (els.leadTarefaObs) els.leadTarefaObs.value = '';
+    resetLeadTarefaForm();
     els.leadInteracoesList.innerHTML = '<p class="cell-muted">Carregando histórico…</p>';
-    if (els.leadTarefasList) els.leadTarefasList.innerHTML = '<li class="cell-muted">Carregando…</li>';
+    if (els.leadTarefasTable) {
+      els.leadTarefasTable.innerHTML =
+        '<tr class="lead-tarefas-empty-row"><td colspan="5">Carregando…</td></tr>';
+    }
+    if (els.leadWhatsappMessages) {
+      els.leadWhatsappMessages.innerHTML = '<p class="cell-muted">Carregando conversa…</p>';
+    }
+    if (els.leadWhatsappStatus) els.leadWhatsappStatus.textContent = '';
+    if (els.leadWhatsappInput) els.leadWhatsappInput.value = '';
 
     openLeadWorkspaceUi();
 
     try {
-      const loads = [loadLeadDetailInteracoes(id), loadLeadDetailTarefas(id)];
+      await ensureUsuariosLoaded();
+      await loadMarketingData();
+      await ensureFunilForItem(item);
+      const loads = [
+        loadLeadDetailInteracoes(id),
+        loadLeadDetailTarefas(id),
+        loadLeadWhatsapp(id, { syncIfEmpty: true }),
+      ];
       if (item.tipo === 'artistico' && item.participanteId) {
         loads.push(loadSeguidoresHistorico(item.participanteId));
       }
       await Promise.all(loads);
       if (item.tipo === 'artistico') renderLeadDealPanel(item);
+      renderLeadFunilPanel(leadDetailItem || item);
+      renderLeadOrigemFields(leadDetailItem || item);
     } catch (err) {
       els.leadInteracoesList.innerHTML = `<p class="cell-empty">${escapeHtml(err.message)}</p>`;
-      if (els.leadTarefasList) {
-        els.leadTarefasList.innerHTML = `<li class="cell-empty">${escapeHtml(err.message)}</li>`;
+      if (els.leadTarefasTable) {
+        els.leadTarefasTable.innerHTML = `<tr class="lead-tarefas-empty-row"><td colspan="5">${escapeHtml(err.message)}</td></tr>`;
       }
     }
 
@@ -2155,7 +2579,7 @@ export function initArrecadacaoModule(
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Registrar interação';
+        btn.textContent = 'Salvar';
       }
     }
   }
@@ -2449,6 +2873,16 @@ export function initArrecadacaoModule(
   }
 
   function openFunilModal() {
+    const escopo = funilEscopoForLeadScope(leadScope);
+    if (els.funilModalTitle) {
+      els.funilModalTitle.textContent = `Configurar funil — ${funilEscopoLabel(escopo)}`;
+    }
+    if (els.funilModalSub) {
+      els.funilModalSub.textContent =
+        escopo === 'artistico'
+          ? 'Etapas do funil para leads artísticos. Defina uma coluna de Perda e uma de Venda.'
+          : 'Etapas do funil de arrecadação (patrocínios e negociações). Defina uma coluna de Perda e uma de Venda.';
+    }
     draftFunilEtapas = funilEtapas.map((e) => ({
       ...e,
       tipo: e.tipo || 'normal',
@@ -2488,8 +2922,9 @@ export function initArrecadacaoModule(
         ordem,
         ativo: e.ativo,
       }));
-      const data = await saveFunilEtapas(payload);
+      const data = await saveFunilEtapas(payload, { escopo: funilEscopoForLeadScope(leadScope) });
       funilEtapas = data.etapas || payload;
+      funilEscopoAtual = data.escopo || funilEscopoForLeadScope(leadScope);
       closeFunilModal();
       await loadArrecadacao();
     } catch (err) {
@@ -2530,6 +2965,7 @@ export function initArrecadacaoModule(
     espacosDisponiveis = scope === 'comercial' ? data.espacosDisponiveis || [] : [];
     participantes = data.participantes || [];
     funilEtapas = data.funilEtapas || [];
+    funilEscopoAtual = data.funilEscopo || funilEscopoForLeadScope(scope);
     store?.setParticipantes(participantes);
     renderParticipantesDatalist();
     renderStats(summarizeItems(items));
@@ -2652,7 +3088,7 @@ export function initArrecadacaoModule(
 
     els.table.innerHTML = groups
       .map((group) => {
-        const quitado = group.valorFalta <= 0 && group.valorTotal > 0;
+        const quitado = group.valorFalta <= 0;
         const obsParts = [
           ...new Set(group.items.map((i) => String(i.obs || '').trim()).filter(Boolean)),
         ];
@@ -2840,7 +3276,9 @@ export function initArrecadacaoModule(
     });
   });
   document.getElementById('btn-arrecadacao-toggle-overview')?.addEventListener('click', toggleOverviewVisible);
+  els.btnFunilConfig?.addEventListener('click', openFunilModal);
   document.getElementById('btn-funil-config')?.addEventListener('click', openFunilModal);
+  document.getElementById('btn-funil-config-artistico')?.addEventListener('click', openFunilModal);
   els.funilBtnCancel?.addEventListener('click', closeFunilModal);
   els.funilBtnSave?.addEventListener('click', saveFunilConfig);
   els.funilBtnAdd?.addEventListener('click', addFunilEtapa);
@@ -2850,6 +3288,31 @@ export function initArrecadacaoModule(
   els.leadWorkspaceBack?.addEventListener('click', closeLeadWorkspace);
   els.leadInteracaoForm?.addEventListener('submit', submitLeadInteracao);
   els.leadTarefaForm?.addEventListener('submit', submitLeadTarefa);
+  els.leadOrigemCanal?.addEventListener('change', () => {
+    const canalId = Number(els.leadOrigemCanal.value) || null;
+    els.leadOrigemCampanha.value = '';
+    els.leadOrigemCriativo.value = '';
+    renderOrigemSelectOptions();
+    saveLeadOrigem({
+      marketingCanalId: canalId,
+      marketingCampanhaId: null,
+      marketingCriativoId: null,
+    });
+  });
+  els.leadOrigemCampanha?.addEventListener('change', () => {
+    const campanhaId = Number(els.leadOrigemCampanha.value) || null;
+    els.leadOrigemCriativo.value = '';
+    renderOrigemSelectOptions();
+    saveLeadOrigem({ marketingCampanhaId: campanhaId, marketingCriativoId: null });
+  });
+  els.leadOrigemCriativo?.addEventListener('change', () => {
+    const criativoId = Number(els.leadOrigemCriativo.value) || null;
+    saveLeadOrigem({ marketingCriativoId: criativoId });
+  });
+  els.leadWhatsappForm?.addEventListener('submit', submitLeadWhatsapp);
+  els.leadWhatsappSync?.addEventListener('click', () => {
+    if (leadDetailId) syncLeadWhatsappHistory(leadDetailId);
+  });
 
   PAGE_CONFIG.artistico.ids.btnNew &&
     document

@@ -4,6 +4,7 @@ const VIEWS = {
   arrecadacao: { viewId: 'view-arrecadacao', navId: 'nav-arrecadacao' },
   artistico: { viewId: 'view-artistico', navId: 'nav-artistico' },
   tarefas: { viewId: 'view-tarefas', navId: 'nav-tarefas' },
+  marketing: { viewId: 'view-marketing', navId: 'nav-marketing' },
   usuarios: { viewId: 'view-usuarios', navId: 'nav-usuarios', parentId: 'nav-acessos' },
 };
 

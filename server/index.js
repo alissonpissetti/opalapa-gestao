@@ -63,8 +63,33 @@ import {
   updateTarefaContato,
   concluirTarefaContato,
 } from './tarefas.js';
-import { migrateFunil, listFunilEtapas, saveFunilEtapas } from './funil.js';
+import { migrateFunil, listFunilEtapas, saveFunilEtapas, FUNIL_ESCOPOS } from './funil.js';
 import { migrateInteracoes, listInteracoes, createInteracao } from './interacoes.js';
+import {
+  migrateMarketing,
+  listMarketingTree,
+  createMarketingCanal,
+  createMarketingCampanha,
+  createMarketingCriativo,
+  updateMarketingCanal,
+  updateMarketingCampanha,
+  updateMarketingCriativo,
+  deleteMarketingCanal,
+  deleteMarketingCampanha,
+  deleteMarketingCriativo,
+} from './marketing.js';
+import {
+  migrateWhatsapp,
+  listWhatsappMessages,
+  syncWhatsappHistory,
+  sendWhatsappToLead,
+  handleEvolutionWebhook,
+  getWhatsappStatus,
+  connectWhatsapp,
+  disconnectWhatsapp,
+  validateWebhookSecret,
+} from './whatsapp.js';
+import { configureInstanceWebhook, getEvolutionConfig } from './evolution.js';
 import {
   migrateSeguidoresHistorico,
   getSeguidoresHistoricoResumo,
@@ -337,13 +362,14 @@ app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
     const items = await listArrecadacao(pool, req.eventoId, { scope });
     const espacosDisponiveis = await listEspacosDisponiveis(pool, req.eventoId);
     const participantes = await listParticipantes(pool);
-    const funilEtapas = await listFunilEtapas(pool, req.eventoId);
+    const funilEtapas = await listFunilEtapas(pool, req.eventoId, { escopo: scope });
     res.json({
       items,
       espacosDisponiveis,
       resumo: summarizeArrecadacao(items, funilEtapas),
       participantes,
       funilEtapas,
+      funilEscopo: scope,
     });
   } catch (err) {
     console.error('GET /api/arrecadacao', err);
@@ -353,18 +379,25 @@ app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
 
 app.get('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
   try {
-    const etapas = await listFunilEtapas(pool, req.eventoId);
-    res.json({ etapas });
+    const escopo = String(req.query.escopo || 'comercial');
+    const etapas = await listFunilEtapas(pool, req.eventoId, { escopo });
+    res.json({ etapas, escopo });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('GET /api/funil-etapas', err);
     res.status(500).json({ error: 'Falha ao carregar funil' });
   }
 });
 
+app.get('/api/funil-escopos', requireAuth, async (_req, res) => {
+  res.json({ escopos: FUNIL_ESCOPOS });
+});
+
 app.put('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
   try {
-    const etapas = await saveFunilEtapas(pool, req.eventoId, req.body?.etapas);
-    res.json({ etapas });
+    const escopo = String(req.body?.escopo || 'comercial');
+    const etapas = await saveFunilEtapas(pool, req.eventoId, req.body?.etapas, { escopo });
+    res.json({ etapas, escopo });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PUT /api/funil-etapas', err);
@@ -490,6 +523,107 @@ app.post('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/whatsapp/status', requireAuth, async (_req, res) => {
+  try {
+    const status = await getWhatsappStatus();
+    res.json(status);
+  } catch (err) {
+    console.error('GET /api/whatsapp/status', err);
+    res.status(500).json({ error: 'Falha ao consultar WhatsApp' });
+  }
+});
+
+app.post('/api/whatsapp/connect', requireAuth, async (req, res) => {
+  try {
+    const result = await connectWhatsapp({ phone: req.body?.phone || req.body?.number });
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/whatsapp/connect', err);
+    res.status(500).json({ error: 'Falha ao conectar WhatsApp' });
+  }
+});
+
+app.post('/api/whatsapp/disconnect', requireAuth, async (_req, res) => {
+  try {
+    const status = await disconnectWhatsapp();
+    res.json(status);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/whatsapp/disconnect', err);
+    res.status(500).json({ error: 'Falha ao desconectar WhatsApp' });
+  }
+});
+
+app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    const [mensagens, status] = await Promise.all([
+      listWhatsappMessages(pool, id),
+      getWhatsappStatus(),
+    ]);
+    res.json({ mensagens, status });
+  } catch (err) {
+    console.error('GET /api/arrecadacao/:id/whatsapp', err);
+    res.status(500).json({ error: 'Falha ao carregar conversa WhatsApp' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/whatsapp/sync', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    const result = await syncWhatsappHistory(pool, id, {
+      limit: Number(req.body?.limit) || 80,
+    });
+    const mensagens = await listWhatsappMessages(pool, id);
+    res.json({ ...result, mensagens });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/whatsapp/sync', err);
+    res.status(500).json({ error: 'Falha ao sincronizar WhatsApp' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    const { mensagem } = await sendWhatsappToLead(pool, id, req.body?.text ?? req.body?.texto);
+    res.status(201).json({ mensagem });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/whatsapp/send', err);
+    res.status(500).json({ error: 'Falha ao enviar mensagem WhatsApp' });
+  }
+});
+
+app.post('/api/webhooks/evolution', async (req, res) => {
+  try {
+    if (!validateWebhookSecret(req)) {
+      return res.status(401).json({ error: 'Webhook não autorizado' });
+    }
+    const result = await handleEvolutionWebhook(pool, req.body);
+    res.json(result);
+  } catch (err) {
+    console.error('POST /api/webhooks/evolution', err);
+    res.status(500).json({ error: 'Falha ao processar webhook' });
+  }
+});
+
 app.put('/api/arrecadacao/:id', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -612,6 +746,124 @@ app.delete('/api/arrecadacao/:id', requireAuth, async (req, res) => {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('DELETE /api/arrecadacao/:id', err);
     res.status(500).json({ error: 'Falha ao excluir registro' });
+  }
+});
+
+app.get('/api/marketing', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const data = await listMarketingTree(pool, req.eventoId);
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/marketing', err);
+    res.status(500).json({ error: 'Falha ao carregar marketing' });
+  }
+});
+
+app.post('/api/marketing/canais', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const canal = await createMarketingCanal(pool, req.eventoId, req.body);
+    res.status(201).json({ canal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/canais', err);
+    res.status(500).json({ error: 'Falha ao criar origem' });
+  }
+});
+
+app.put('/api/marketing/canais/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const canal = await updateMarketingCanal(pool, id, req.eventoId, req.body);
+    if (!canal) return res.status(404).json({ error: 'Origem não encontrada' });
+    res.json({ canal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/canais/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar origem' });
+  }
+});
+
+app.delete('/api/marketing/canais/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteMarketingCanal(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Origem não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/marketing/canais/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir origem' });
+  }
+});
+
+app.post('/api/marketing/campanhas', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const campanha = await createMarketingCampanha(pool, req.eventoId, req.body);
+    res.status(201).json({ campanha });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/campanhas', err);
+    res.status(500).json({ error: 'Falha ao criar campanha' });
+  }
+});
+
+app.put('/api/marketing/campanhas/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const campanha = await updateMarketingCampanha(pool, id, req.eventoId, req.body);
+    if (!campanha) return res.status(404).json({ error: 'Campanha não encontrada' });
+    res.json({ campanha });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/campanhas/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar campanha' });
+  }
+});
+
+app.delete('/api/marketing/campanhas/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteMarketingCampanha(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Campanha não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/marketing/campanhas/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir campanha' });
+  }
+});
+
+app.post('/api/marketing/criativos', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const criativo = await createMarketingCriativo(pool, req.eventoId, req.body);
+    res.status(201).json({ criativo });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/criativos', err);
+    res.status(500).json({ error: 'Falha ao criar criativo' });
+  }
+});
+
+app.put('/api/marketing/criativos/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const criativo = await updateMarketingCriativo(pool, id, req.eventoId, req.body);
+    if (!criativo) return res.status(404).json({ error: 'Criativo não encontrado' });
+    res.json({ criativo });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/criativos/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar criativo' });
+  }
+});
+
+app.delete('/api/marketing/criativos/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteMarketingCriativo(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Criativo não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/marketing/criativos/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir criativo' });
   }
 });
 
@@ -765,6 +1017,8 @@ async function start() {
   await migrateTarefas(pool);
   await migrateFunil(pool);
   await migrateInteracoes(pool);
+  await migrateMarketing(pool);
+  await migrateWhatsapp(pool);
   await migrateSeguidoresHistorico(pool);
   await migrateTiposComercio(pool);
   await migrateUsers(pool);
@@ -776,6 +1030,15 @@ async function start() {
   syncAllArrecadacaoFromEspacos(pool).catch((err) => {
     console.error('Falha ao sincronizar arrecadação dos espaços:', err);
   });
+
+  const publicUrl = (process.env.APP_PUBLIC_URL || '').replace(/\/$/, '');
+  const { enabled } = getEvolutionConfig();
+  if (enabled && publicUrl) {
+    const webhookUrl = `${publicUrl}/api/webhooks/evolution`;
+    configureInstanceWebhook(webhookUrl, process.env.EVOLUTION_WEBHOOK_SECRET || '')
+      .then(() => console.log(`Webhook Evolution configurado: ${webhookUrl}`))
+      .catch((err) => console.warn('Não foi possível configurar webhook Evolution:', err.message));
+  }
 }
 
 start().catch((err) => {

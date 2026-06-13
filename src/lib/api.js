@@ -229,14 +229,15 @@ export function concluirTarefaContato(id) {
   return apiRequest(`/api/tarefas-contato/${id}/concluir`, { method: 'POST' });
 }
 
-export function fetchFunilEtapas() {
-  return apiRequest('/api/funil-etapas');
+export function fetchFunilEtapas({ escopo = 'comercial' } = {}) {
+  const q = escopo ? `?escopo=${encodeURIComponent(escopo)}` : '';
+  return apiRequest(`/api/funil-etapas${q}`);
 }
 
-export function saveFunilEtapas(etapas) {
+export function saveFunilEtapas(etapas, { escopo = 'comercial' } = {}) {
   return apiRequest('/api/funil-etapas', {
     method: 'PUT',
-    body: JSON.stringify({ etapas }),
+    body: JSON.stringify({ etapas, escopo }),
   });
 }
 
@@ -248,6 +249,85 @@ export function createInteracao(arrecadacaoId, data) {
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/interacoes`, {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export function fetchMarketing() {
+  return apiRequest('/api/marketing');
+}
+
+export function createMarketingCanal(data) {
+  return apiRequest('/api/marketing/canais', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateMarketingCanal(id, data) {
+  return apiRequest(`/api/marketing/canais/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export function deleteMarketingCanal(id) {
+  return apiRequest(`/api/marketing/canais/${id}`, { method: 'DELETE' });
+}
+
+export function createMarketingCampanha(data) {
+  return apiRequest('/api/marketing/campanhas', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateMarketingCampanha(id, data) {
+  return apiRequest(`/api/marketing/campanhas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteMarketingCampanha(id) {
+  return apiRequest(`/api/marketing/campanhas/${id}`, { method: 'DELETE' });
+}
+
+export function createMarketingCriativo(data) {
+  return apiRequest('/api/marketing/criativos', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateMarketingCriativo(id, data) {
+  return apiRequest(`/api/marketing/criativos/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteMarketingCriativo(id) {
+  return apiRequest(`/api/marketing/criativos/${id}`, { method: 'DELETE' });
+}
+
+export function fetchWhatsappStatus() {
+  return apiRequest('/api/whatsapp/status');
+}
+
+export function connectWhatsapp(phone) {
+  return apiRequest('/api/whatsapp/connect', {
+    method: 'POST',
+    body: JSON.stringify(phone ? { phone } : {}),
+  });
+}
+
+export function disconnectWhatsapp() {
+  return apiRequest('/api/whatsapp/disconnect', { method: 'POST' });
+}
+
+export function fetchLeadWhatsapp(arrecadacaoId) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp`);
+}
+
+export function syncLeadWhatsapp(arrecadacaoId, { limit = 80 } = {}) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ limit }),
+  });
+}
+
+export function sendLeadWhatsapp(arrecadacaoId, text) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/send`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
   });
 }
 

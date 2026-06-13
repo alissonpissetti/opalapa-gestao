@@ -6,6 +6,9 @@
     <meta name="description" content="Sistema de gestão do evento Opalapa — espaços, expositores e vendas." />
     <title>Opalapa — Gestão</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎪</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="app-loading" class="app-loading">Carregando…</div>
@@ -54,6 +57,7 @@
           <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao">Arrecadação</a>
           <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico">Artístico</a>
           <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas">Tarefas</a>
+          <a href="#marketing" class="nav-link" data-view="marketing" id="nav-marketing">Marketing</a>
           <div class="nav-dropdown" id="nav-acessos">
             <button type="button" class="nav-dropdown-toggle" id="nav-acessos-toggle" aria-expanded="false" aria-haspopup="true">
               Acessos
@@ -69,6 +73,17 @@
           <select id="evento-select" class="evento-select" title="Evento ativo"></select>
         </div>
         <div class="user-menu">
+          <button
+            class="tbtn wa-header-btn"
+            type="button"
+            id="btn-whatsapp-connect"
+            data-state="unknown"
+            title="WhatsApp"
+            aria-label="WhatsApp"
+          >
+            <span class="wa-dot" aria-hidden="true"></span>
+            <span class="wa-header-label">WhatsApp</span>
+          </button>
           <span id="user-name" class="user-name"></span>
           <button class="tbtn" type="button" id="btn-logout">Sair</button>
         </div>
@@ -292,6 +307,7 @@
           <p class="subtitle">Artistas, contatos e orçamentos — abra o lead para editar dados, registrar interações e agendar follow-ups.</p>
         </div>
         <button class="tbtn primary" type="button" id="btn-artistico-new">Novo lead</button>
+        <button class="tbtn" type="button" id="btn-funil-config-artistico">Configurar funil</button>
       </div>
 
       <div class="artistico-overview" id="artistico-overview">
@@ -348,6 +364,81 @@
           <tbody id="tarefas-table"></tbody>
         </table>
       </div>
+    </main>
+
+    <main id="view-marketing" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Marketing</h1>
+          <p class="subtitle">Gerencie origens, campanhas e criativos para rastrear a origem dos leads.</p>
+        </div>
+      </div>
+      <p class="report-summary" id="marketing-summary"></p>
+      <div class="marketing-tabs" id="marketing-tabs" role="tablist" aria-label="Seções de marketing">
+        <button class="marketing-tab active" type="button" data-marketing-tab="canais" role="tab">Origens</button>
+        <button class="marketing-tab" type="button" data-marketing-tab="campanhas" role="tab">Campanhas</button>
+        <button class="marketing-tab" type="button" data-marketing-tab="criativos" role="tab">Criativos</button>
+      </div>
+
+      <section id="marketing-panel-canais" class="marketing-panel">
+        <div class="marketing-panel-head">
+          <h2>Origens</h2>
+          <button class="tbtn primary" type="button" id="btn-marketing-canal-new">Nova origem</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="marketing-table-canais"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="marketing-panel-campanhas" class="marketing-panel hidden">
+        <div class="marketing-panel-head">
+          <h2>Campanhas</h2>
+          <button class="tbtn primary" type="button" id="btn-marketing-campanha-new">Nova campanha</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Origens</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="marketing-table-campanhas"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="marketing-panel-criativos" class="marketing-panel hidden">
+        <div class="marketing-panel-head">
+          <h2>Criativos (mídias)</h2>
+          <button class="tbtn primary" type="button" id="btn-marketing-criativo-new">Novo criativo</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Campanha</th>
+                <th>Origens</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="marketing-table-criativos"></tbody>
+          </table>
+        </div>
+      </section>
     </main>
 
     <main id="view-usuarios" class="page view hidden">
@@ -644,46 +735,137 @@
         <main class="lw-panel lw-panel-center">
           <div class="lw-center-head">
             <h2>Interações</h2>
-            <p class="lw-hint">Registre ligações, mensagens e combinações. Alterações automáticas também aparecem aqui.</p>
+            <p class="lw-hint">Registre anotações, acompanhe tarefas agendadas e planeje o próximo contato.</p>
           </div>
-          <form class="lw-compose" id="lead-interacao-form">
-            <div class="lw-compose-bar">
-              <label class="lw-compose-label" for="lead-interacao-tipo">Tipo</label>
-              <select id="lead-interacao-tipo" class="lw-compose-select">
-                <option value="nota">Nota</option>
-                <option value="ligacao">Ligação</option>
-                <option value="whatsapp">WhatsApp</option>
-                <option value="email">E-mail</option>
-                <option value="reuniao">Reunião</option>
-              </select>
-              <button class="tbtn primary lw-compose-submit" type="submit">Registrar interação</button>
+
+          <section class="lw-anotacoes" aria-labelledby="lead-anotacoes-title">
+            <form class="lw-anotacoes-form" id="lead-interacao-form">
+              <label class="lw-section-label" id="lead-anotacoes-title" for="lead-interacao-texto">Anotações gerais</label>
+              <textarea
+                id="lead-interacao-texto"
+                class="lw-anotacoes-input"
+                rows="6"
+                placeholder="O que foi conversado, combinado ou observado neste contato?"
+              ></textarea>
+              <div class="lw-anotacoes-footer">
+                <select id="lead-interacao-tipo" class="lw-anotacoes-tipo" aria-label="Tipo de interação">
+                  <option value="nota">Nota</option>
+                  <option value="ligacao">Ligação</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="email">E-mail</option>
+                  <option value="reuniao">Reunião</option>
+                </select>
+                <button class="tbtn primary" type="submit">Salvar</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="lw-tarefas-agendadas" id="lead-tarefas-section" aria-labelledby="lead-tarefas-title">
+            <h3 class="lw-section-label" id="lead-tarefas-title">Tarefas agendadas</h3>
+            <div class="lw-tarefas-table-wrap">
+              <table class="lead-tarefas-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Tarefas agendadas</th>
+                    <th scope="col">Data/Hora</th>
+                    <th scope="col">Tipo de Tarefa</th>
+                    <th scope="col">Responsável pela tarefa</th>
+                    <th scope="col"><span class="sr-only">Ações</span></th>
+                  </tr>
+                </thead>
+                <tbody id="lead-tarefas-table" aria-live="polite"></tbody>
+              </table>
             </div>
-            <textarea
-              id="lead-interacao-texto"
-              class="lw-compose-input"
-              rows="5"
-              placeholder="O que foi conversado, combinado ou observado neste contato?"
-            ></textarea>
-          </form>
+          </section>
+
+          <section class="lw-agendar-tarefa" aria-labelledby="lead-agendar-title">
+            <form class="lw-agendar-tarefa-form" id="lead-tarefa-form">
+              <h3 class="lw-section-label" id="lead-agendar-title">Agendar próxima tarefa</h3>
+              <div class="lw-tarefa-form-grid">
+                <div class="field">
+                  <label for="lead-tarefa-nome">Nome da Tarefa</label>
+                  <input id="lead-tarefa-nome" type="text" placeholder="Ex.: Reunião de alinhamento" required />
+                </div>
+                <div class="field lw-tarefa-datetime-field">
+                  <label for="lead-tarefa-data">Agendar próxima tarefa</label>
+                  <div class="lw-tarefa-datetime">
+                    <input id="lead-tarefa-data" type="date" required />
+                    <input id="lead-tarefa-hora" type="time" required />
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="lead-tarefa-tipo">Tipo de Tarefa</label>
+                  <select id="lead-tarefa-tipo" required>
+                    <option value="">Selecione</option>
+                    <option value="presencial">Presencial</option>
+                    <option value="ligacao">Ligação</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="email">E-mail</option>
+                    <option value="reuniao_online">Reunião online</option>
+                    <option value="outro">Outro</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="lead-tarefa-responsavel">Responsável pela tarefa</label>
+                  <select id="lead-tarefa-responsavel" required>
+                    <option value="">Selecione</option>
+                  </select>
+                </div>
+              </div>
+              <div class="lw-tarefa-form-footer">
+                <button class="tbtn primary" type="submit">Salvar</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="lw-whatsapp" id="lead-whatsapp-section" aria-labelledby="lead-whatsapp-title">
+            <div class="lw-whatsapp-head">
+              <h3 class="lw-section-label" id="lead-whatsapp-title">Conversa WhatsApp</h3>
+              <button class="tbtn" type="button" id="lead-whatsapp-sync">Sincronizar histórico</button>
+            </div>
+            <p class="lw-hint lw-whatsapp-status" id="lead-whatsapp-status" aria-live="polite"></p>
+            <div class="lw-whatsapp-messages" id="lead-whatsapp-messages" aria-live="polite"></div>
+            <form class="lw-whatsapp-form" id="lead-whatsapp-form">
+              <textarea
+                id="lead-whatsapp-input"
+                rows="2"
+                placeholder="Escreva uma mensagem para enviar pelo WhatsApp conectado…"
+              ></textarea>
+              <button class="tbtn primary" type="submit" id="lead-whatsapp-send">Enviar</button>
+            </form>
+          </section>
+
           <div class="lw-timeline" id="lead-interacoes-list" aria-live="polite"></div>
         </main>
 
         <aside class="lw-panel lw-panel-right">
-          <section class="lw-card lw-tarefas-card">
-            <h2 class="lw-card-title">Próximas ações</h2>
-            <p class="lw-hint lw-tarefas-hint">Agende follow-ups para não perder o timing do contato.</p>
-            <form class="lw-tarefa-form" id="lead-tarefa-form">
+          <section class="lw-card lw-funil-card" aria-labelledby="lead-funil-title">
+            <h2 class="lw-section-label" id="lead-funil-title">Etapa do funil de vendas</h2>
+            <div class="lw-funil" id="lead-funil-steps" role="list"></div>
+          </section>
+
+          <section class="lw-card lw-origem-card" aria-labelledby="lead-origem-title">
+            <h2 class="lw-section-label" id="lead-origem-title">Origem do lead</h2>
+            <div class="lw-origem-grid">
               <div class="field">
-                <label for="lead-tarefa-data">Data e hora</label>
-                <input id="lead-tarefa-data" type="datetime-local" required />
+                <label for="lead-origem-canal">Origem</label>
+                <select id="lead-origem-canal">
+                  <option value="">Selecione</option>
+                </select>
               </div>
               <div class="field">
-                <label for="lead-tarefa-obs">O que fazer</label>
-                <input id="lead-tarefa-obs" type="text" placeholder="Ex.: retornar proposta, enviar contrato" />
+                <label for="lead-origem-campanha">Campanha</label>
+                <select id="lead-origem-campanha">
+                  <option value="">Selecione</option>
+                </select>
               </div>
-              <button class="tbtn primary" type="submit">Agendar tarefa</button>
-            </form>
-            <ul class="lead-tarefas-list" id="lead-tarefas-list" aria-live="polite"></ul>
+              <div class="field">
+                <label for="lead-origem-criativo">Mídia</label>
+                <select id="lead-origem-criativo">
+                  <option value="">Selecione</option>
+                </select>
+              </div>
+            </div>
           </section>
         </aside>
       </div>
@@ -694,12 +876,34 @@
         <h2 id="tarefa-modal-title">Editar tarefa</h2>
         <p class="msub" id="tarefa-modal-sub"></p>
         <div class="field">
-          <label for="tarefa-modal-data">Data e hora</label>
-          <input id="tarefa-modal-data" type="datetime-local" required />
+          <label for="tarefa-modal-nome">Nome da Tarefa</label>
+          <input id="tarefa-modal-nome" type="text" placeholder="Ex.: Reunião de alinhamento" required />
         </div>
         <div class="field">
-          <label for="tarefa-modal-obs">O que fazer</label>
-          <input id="tarefa-modal-obs" type="text" placeholder="Ex.: retornar proposta, enviar contrato" />
+          <label for="tarefa-modal-data">Data</label>
+          <input id="tarefa-modal-data" type="date" required />
+        </div>
+        <div class="field">
+          <label for="tarefa-modal-hora">Hora</label>
+          <input id="tarefa-modal-hora" type="time" required />
+        </div>
+        <div class="field">
+          <label for="tarefa-modal-tipo">Tipo de Tarefa</label>
+          <select id="tarefa-modal-tipo" required>
+            <option value="">Selecione</option>
+            <option value="presencial">Presencial</option>
+            <option value="ligacao">Ligação</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">E-mail</option>
+            <option value="reuniao_online">Reunião online</option>
+            <option value="outro">Outro</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="tarefa-modal-responsavel">Responsável pela tarefa</label>
+          <select id="tarefa-modal-responsavel" required>
+            <option value="">Selecione</option>
+          </select>
         </div>
         <div class="btns">
           <button class="btn" type="button" id="tarefa-modal-cancel">Cancelar</button>
@@ -711,7 +915,7 @@
     <div class="modal-bg" id="funil-modal-bg">
       <div class="modal modal-funil" role="dialog" aria-modal="true" aria-labelledby="funil-modal-title">
         <h2 id="funil-modal-title">Configurar funil</h2>
-        <p class="msub">Crie etapas com nomes personalizados, defina uma coluna de Perda e uma de Venda.</p>
+        <p class="msub" id="funil-modal-sub">Crie etapas com nomes personalizados, defina uma coluna de Perda e uma de Venda.</p>
         <div class="funil-etapas-head" aria-hidden="true">
           <span></span>
           <span>Nome da etapa</span>
@@ -760,6 +964,39 @@
       </div>
     </div>
 
+    <div class="modal-bg" id="marketing-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="marketing-modal-title">
+        <h2 id="marketing-modal-title">Marketing</h2>
+        <p class="msub" id="marketing-modal-sub"></p>
+        <div class="field">
+          <label for="marketing-modal-nome">Nome</label>
+          <input id="marketing-modal-nome" type="text" placeholder="Ex.: Instagram" required />
+        </div>
+        <div class="field hidden" id="marketing-modal-canal-wrap">
+          <label for="marketing-modal-canal">Origem (filtro)</label>
+          <select id="marketing-modal-canal">
+            <option value="">Todas</option>
+          </select>
+        </div>
+        <div class="field hidden" id="marketing-modal-campanha-wrap">
+          <label for="marketing-modal-campanha">Campanha</label>
+          <select id="marketing-modal-campanha">
+            <option value="">Selecione</option>
+          </select>
+        </div>
+        <div class="field hidden" id="marketing-modal-origens-wrap">
+          <span class="field-label-block">Origens</span>
+          <div id="marketing-modal-origens" class="marketing-origens-checks" role="group" aria-label="Origens"></div>
+          <p class="field-hint" id="marketing-modal-origens-hint"></p>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="marketing-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="marketing-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="marketing-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="evento-modal-bg">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="evento-modal-title">
         <h2 id="evento-modal-title">Evento</h2>
@@ -784,6 +1021,27 @@
           <button class="btn" type="button" id="evento-btn-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="evento-btn-delete">Excluir</button>
           <button class="btn primary" type="button" id="evento-btn-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="whatsapp-modal-bg">
+      <div class="modal modal-wide wa-connect-modal" role="dialog" aria-modal="true" aria-labelledby="whatsapp-modal-title">
+        <h2 id="whatsapp-modal-title">Conectar WhatsApp</h2>
+        <p class="msub" id="whatsapp-modal-sub"></p>
+        <div id="whatsapp-modal-status"></div>
+        <div class="wa-qr-wrap hidden" id="whatsapp-qr-wrap">
+          <img id="whatsapp-qr-img" class="wa-qr-img" alt="" width="280" height="280" />
+          <p class="field-hint wa-qr-hint">
+            No celular: WhatsApp → Menu → Aparelhos conectados → Conectar um aparelho.
+            O QR expira em cerca de 1 minuto — use “Atualizar QR” se necessário.
+          </p>
+          <p class="wa-pairing-code hidden" id="whatsapp-pairing-code"></p>
+        </div>
+        <div class="btns wa-connect-actions">
+          <button class="btn" type="button" id="whatsapp-btn-refresh">Atualizar QR</button>
+          <button class="btn danger hidden" type="button" id="whatsapp-btn-disconnect">Desconectar</button>
+          <button class="btn primary" type="button" id="whatsapp-btn-close">Fechar</button>
         </div>
       </div>
     </div>
