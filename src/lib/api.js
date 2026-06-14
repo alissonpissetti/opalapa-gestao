@@ -317,15 +317,51 @@ export function fetchLeadWhatsapp(arrecadacaoId) {
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp`);
 }
 
-export function syncLeadWhatsapp(arrecadacaoId, { limit = 80 } = {}) {
+export function syncLeadWhatsapp(arrecadacaoId, { days = 5 } = {}) {
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/sync`, {
     method: 'POST',
-    body: JSON.stringify({ limit }),
+    body: JSON.stringify({ days }),
   });
 }
 
 export function sendLeadWhatsapp(arrecadacaoId, text) {
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/send`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+export function sendLeadWhatsappReaction(arrecadacaoId, mensagemId, emoji) {
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/messages/${mensagemId}/reaction`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  });
+}
+
+export function fetchWhatsappInbox() {
+  return apiRequest('/api/whatsapp/inbox');
+}
+
+export function fetchWhatsappThreadMessages(participanteId) {
+  return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages`);
+}
+
+export function syncWhatsappInboxThread(participanteId, { days = 14 } = {}) {
+  return apiRequest(`/api/whatsapp/inbox/${participanteId}/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ days }),
+  });
+}
+
+export function sendWhatsappInboxReaction(participanteId, mensagemId, emoji) {
+  return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages/${mensagemId}/reaction`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  });
+}
+
+export function sendWhatsappInboxMessage(participanteId, text) {
+  return apiRequest(`/api/whatsapp/inbox/${participanteId}/send`, {
     method: 'POST',
     body: JSON.stringify({ text }),
   });

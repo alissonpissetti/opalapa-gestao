@@ -76,6 +76,16 @@
           <button
             class="tbtn wa-header-btn"
             type="button"
+            id="btn-whatsapp-inbox"
+            title="Conversas dos leads"
+            aria-label="Conversas WhatsApp dos leads"
+          >
+            <span class="wa-dot" aria-hidden="true"></span>
+            <span class="wa-header-label">Conversas</span>
+          </button>
+          <button
+            class="tbtn wa-header-btn"
+            type="button"
             id="btn-whatsapp-connect"
             data-state="unknown"
             title="WhatsApp"
@@ -1043,6 +1053,50 @@
           <button class="btn danger hidden" type="button" id="whatsapp-btn-disconnect">Desconectar</button>
           <button class="btn primary" type="button" id="whatsapp-btn-close">Fechar</button>
         </div>
+      </div>
+    </div>
+
+    <div id="wa-inbox-screen" class="wa-inbox-screen hidden" aria-hidden="true">
+      <div class="wa-inbox-app">
+        <aside class="wa-sidebar">
+          <header class="wa-sidebar-head">
+            <h2>WhatsApp · Leads</h2>
+            <div class="wa-sidebar-actions">
+              <button type="button" id="wa-inbox-refresh" class="tbtn" title="Atualizar lista">↻</button>
+              <button type="button" id="wa-inbox-close" class="tbtn" title="Fechar">✕</button>
+            </div>
+          </header>
+          <div class="wa-sidebar-search">
+            <input type="search" id="wa-inbox-search" placeholder="Buscar lead…" autocomplete="off" />
+          </div>
+          <p class="wa-inbox-status" id="wa-inbox-status" aria-live="polite"></p>
+          <div class="wa-thread-list" id="wa-thread-list" role="list"></div>
+        </aside>
+        <main class="wa-chat-pane" id="wa-chat-pane">
+          <div class="wa-chat-empty" id="wa-chat-empty">
+            <div class="wa-chat-empty-icon" aria-hidden="true">💬</div>
+            <p>Selecione um lead para ver a conversa</p>
+            <span class="wa-chat-empty-hint">Somente leads com WhatsApp cadastrado aparecem aqui.</span>
+          </div>
+          <div class="wa-chat-active hidden" id="wa-chat-active">
+            <header class="wa-chat-head">
+              <button type="button" class="wa-chat-back" id="wa-chat-back" aria-label="Voltar à lista">←</button>
+              <div class="wa-chat-identity">
+                <strong id="wa-chat-name"></strong>
+                <span id="wa-chat-phone" class="wa-chat-phone"></span>
+              </div>
+              <button type="button" class="tbtn" id="wa-chat-sync" title="Sincronizar mensagens, imagens e reações">
+                Sincronizar
+              </button>
+              <button type="button" class="tbtn" id="wa-chat-open-lead">Abrir lead</button>
+            </header>
+            <div class="wa-chat-messages" id="wa-chat-messages" aria-live="polite"></div>
+            <form class="wa-chat-form" id="wa-chat-form">
+              <textarea id="wa-chat-input" rows="1" placeholder="Digite uma mensagem"></textarea>
+              <button type="submit" class="tbtn primary" id="wa-chat-send">Enviar</button>
+            </form>
+          </div>
+        </main>
       </div>
     </div>
 

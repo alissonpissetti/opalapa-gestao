@@ -3,6 +3,14 @@ export function fmtDate(iso) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+export function formatPhoneDisplay(phone) {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return digits;
+}
+
 /** Interpreta datetime sem fuso (horário de parede). */
 function parseNaiveDatetime(value) {
   if (!value) return null;

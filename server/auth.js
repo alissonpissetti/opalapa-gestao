@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 const COOKIE_NAME = 'opalapa_session';
 const SESSION_DAYS = 7;
 
+export { COOKIE_NAME };
+
 export function getSessionSecret() {
   const secret = process.env.SESSION_SECRET;
   if (!secret) {

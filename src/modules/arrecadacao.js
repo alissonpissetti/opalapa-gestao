@@ -24,6 +24,7 @@ import {
   fetchLeadWhatsapp,
   syncLeadWhatsapp,
   sendLeadWhatsapp,
+  sendLeadWhatsappReaction,
 } from '../lib/api.js';
 import {
   fmtMoney,
@@ -37,6 +38,9 @@ import {
   formatValorInput,
   maskValorInput,
 } from '../lib/format.js';
+import { wrapWhatsappBubble } from '../lib/whatsapp-reactions.js';
+import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
+import { renderWhatsappMediaHtml, hydrateWhatsappMedia, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
 import { LABELS, COLORS, FUNIL_STATUS_ORDER } from '../lib/constants.js';
 
 const PAGE_CONFIG = {
@@ -383,6 +387,7 @@ export function initArrecadacaoModule(
   let leadSeguidoresHistorico = { historico: [], resumo: {} };
   let leadWhatsappMessages = [];
   let leadWhatsappConnection = null;
+  let unbindLeadWhatsappReactions = null;
   let leadFieldEditing = null;
   let leadFieldSaving = false;
   let editId = null;
@@ -479,6 +484,10 @@ export function initArrecadacaoModule(
 
   function etapaForStatus(status) {
     return funilEtapas.find((e) => e.status === status) || null;
+  }
+
+  function isVendaEtapaStatus(status) {
+    return etapaForStatus(status)?.tipo === 'venda';
   }
 
   function isPerdaItem(item) {
@@ -1294,27 +1303,50 @@ export function initArrecadacaoModule(
     if (viewMode === 'lista') renderDisponiveisTable();
   }
 
-  function renderKanbanCard(item) {
-    const falta = Math.max(0, item.valorTotal - item.valorPago);
-    const quitado = falta <= 0;
-    const ref = item.descricao ? truncateText(item.descricao, 48) : '—';
+  function renderKanbanGroupCard(group) {
+    const primary = group.items[0];
+    const falta = group.valorFalta;
+    const quitado =
+      falta <= 0 && group.items.every((item) => isVendaEtapaStatus(item.status));
+    const faltaHtml = quitado
+      ? '<span class="arr-valor-quitado">Quitado</span>'
+      : falta > 0
+        ? `<span class="arr-valor-falta">Falta ${fmtMoney(falta)}</span>`
+        : '';
+
+    const refsHtml = group.merged
+      ? `<div class="arr-refs-inline arr-kanban-refs" title="${escapeHtml(group.items.map((i) => i.descricao).filter(Boolean).join('\n'))}">${group.items
+          .map((item, idx) => {
+            const label = shortRef(item.descricao, 22);
+            const sep = idx > 0 ? '<span class="arr-ref-sep" aria-hidden="true">·</span>' : '';
+            return `${sep}<button type="button" class="arr-ref-chip" data-id="${item.id}" title="${escapeHtml(item.descricao || '')}">${escapeHtml(label)}</button>`;
+          })
+          .join('')}</div>`
+      : `<div class="arr-kanban-card-ref" title="${escapeHtml(primary.descricao || '')}">${escapeHtml(shortRef(primary.descricao, 48))}</div>`;
+
+    const actionsHtml = group.merged
+      ? `<div class="arr-kanban-actions-merged">${group.items
+          .map(
+            (item) =>
+              `<div class="arr-kanban-actions-item row-actions-icons">${renderItemActions(item)}</div>`,
+          )
+          .join('')}</div>`
+      : `<div class="arr-kanban-card-actions row-actions-icons">${renderItemActions(primary)}</div>`;
+
+    const groupIds = group.items.map((item) => item.id).join(',');
 
     return `
-      <article class="arr-kanban-card" draggable="true" data-id="${item.id}">
+      <article class="arr-kanban-card${group.merged ? ' arr-kanban-card--grouped' : ''}" draggable="true" data-id="${primary.id}" data-group-ids="${groupIds}">
         <div class="arr-kanban-card-head">
-          <strong title="${escapeHtml(item.participanteNome)}">${escapeHtml(truncateText(item.participanteNome, 28))}</strong>
-          <span class="badge ${tipoBadgeClass(item.tipo)}">${TIPO_LABELS[item.tipo]}</span>
+          <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
+          <span class="badge ${tipoBadgeClass(group.tipo)}">${TIPO_LABELS[group.tipo]}</span>
         </div>
-        <div class="arr-kanban-card-ref" title="${escapeHtml(item.descricao || '')}">${escapeHtml(ref)}</div>
+        ${refsHtml}
         <div class="arr-kanban-card-valores">
-          <span>${fmtMoney(item.valorTotal)}</span>
-          <span class="${quitado ? 'arr-valor-quitado' : 'arr-valor-falta'}">${quitado ? 'Quitado' : `Falta ${fmtMoney(falta)}`}</span>
+          <span>${fmtMoney(group.valorTotal)}</span>
+          ${faltaHtml}
         </div>
-        <div class="arr-kanban-card-actions row-actions-icons">
-          ${actionIconBtn({ action: 'edit', id: item.id, title: 'Abrir lead', icon: ICON_OPEN_LEAD })}
-          ${actionIconBtn({ action: 'pagamento', id: item.id, title: 'Registrar pagamento', icon: ICON_PAYMENT })}
-          ${canRegisterPerdaLead(item) ? actionIconBtn({ action: 'perda-lead', id: item.id, title: 'Perda do lead', icon: ICON_PERDA, danger: true }) : ''}
-        </div>
+        ${actionsHtml}
       </article>`;
   }
 
@@ -1474,7 +1506,7 @@ export function initArrecadacaoModule(
     if (isEspaco && (field === 'participante' || field === 'status' || field === 'descricao')) {
       return false;
     }
-    if ((field === 'instagram' || field === 'whatsapp' || field === 'seguidores') && !isArtistico) {
+    if (field === 'seguidores' && !isArtistico) {
       return false;
     }
     return true;
@@ -1545,14 +1577,13 @@ export function initArrecadacaoModule(
     const isArtistico = item.tipo === 'artistico';
     const isEspaco = item.tipo === 'espaco';
     const falta = Math.max(0, item.valorTotal - item.valorPago);
-    const quitado = falta <= 0;
+    const quitado = falta <= 0 && isVendaEtapaStatus(item.status);
 
     const fields = ['participante'];
     if (isArtistico) {
       fields.push('instagram', 'seguidores', 'whatsapp');
     } else {
-      if (p?.instagram) fields.push('instagram');
-      if (p?.contatoTelefone) fields.push('whatsapp');
+      fields.push('instagram', 'whatsapp');
     }
     if (p?.contatoNome) {
       // pessoa fica como linha estática abaixo
@@ -1798,16 +1829,14 @@ export function initArrecadacaoModule(
       ...patch,
     };
 
-    if (item.tipo === 'artistico') {
-      if (patch.participanteInstagram !== undefined) {
-        payload.participanteInstagram = patch.participanteInstagram;
-      }
-      if (patch.participanteWhatsapp !== undefined) {
-        payload.participanteWhatsapp = patch.participanteWhatsapp;
-      }
-      if (patch.participanteSeguidores !== undefined) {
-        payload.participanteSeguidores = patch.participanteSeguidores;
-      }
+    if (patch.participanteInstagram !== undefined) {
+      payload.participanteInstagram = patch.participanteInstagram;
+    }
+    if (patch.participanteWhatsapp !== undefined) {
+      payload.participanteWhatsapp = patch.participanteWhatsapp;
+    }
+    if (item.tipo === 'artistico' && patch.participanteSeguidores !== undefined) {
+      payload.participanteSeguidores = patch.participanteSeguidores;
     }
 
     if (patch.participanteNome !== undefined) {
@@ -1888,7 +1917,7 @@ export function initArrecadacaoModule(
     row?.classList.add('lw-info-row--saving');
 
     try {
-      if (item.tipo === 'artistico' && item.participanteId && isContactOnlyPatch(patch)) {
+      if (item.participanteId && isContactOnlyPatch(patch)) {
         const pBefore = getParticipanteById(item.participanteId);
         const prevSeguidores =
           patch.participanteSeguidores !== undefined ? (pBefore?.seguidores ?? null) : null;
@@ -1899,6 +1928,7 @@ export function initArrecadacaoModule(
         });
 
         if (
+          item.tipo === 'artistico' &&
           patch.participanteSeguidores !== undefined &&
           prevSeguidores !== patch.participanteSeguidores
         ) {
@@ -1912,6 +1942,9 @@ export function initArrecadacaoModule(
 
         await refreshParticipantesList();
         await refreshLeadDetailUi(item);
+        if (patch.participanteWhatsapp !== undefined) {
+          await loadLeadWhatsapp(item.id);
+        }
         return;
       }
 
@@ -1926,6 +1959,9 @@ export function initArrecadacaoModule(
       await loadArrecadacao();
       leadDetailItem = items.find((x) => x.id === item.id) || leadDetailItem;
       await refreshLeadDetailUi(leadDetailItem);
+      if (patch.participanteWhatsapp !== undefined) {
+        await loadLeadWhatsapp(leadDetailItem.id);
+      }
       if (leadDetailItem.tipo === 'espaco') await onEspacosDataChanged?.();
     } catch (err) {
       alert(err.message);
@@ -2195,20 +2231,45 @@ export function initArrecadacaoModule(
     els.leadWhatsappMessages.innerHTML = leadWhatsappMessages
       .map((m) => {
         const out = m.direcao === 'out';
-        const media =
-          m.midiaUrl && m.tipo !== 'text'
-            ? `<a class="lw-whatsapp-media" href="${escapeHtml(m.midiaUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(m.tipo === 'image' ? 'Ver imagem' : m.tipo === 'audio' ? 'Ouvir áudio' : m.tipo === 'video' ? 'Ver vídeo' : 'Abrir arquivo')}</a>`
-            : '';
-        const text = m.texto ? `<p class="lw-whatsapp-text">${escapeHtml(m.texto)}</p>` : '';
-        return `
+        const media = renderWhatsappMediaHtml(m, { classPrefix: 'lw-whatsapp' });
+        const text = shouldShowWhatsappBubbleText(m)
+          ? `<p class="lw-whatsapp-text">${escapeHtml(m.texto)}</p>`
+          : '';
+        const bubble = `
         <article class="lw-whatsapp-bubble ${out ? 'lw-whatsapp-bubble--out' : 'lw-whatsapp-bubble--in'}">
           <time class="lw-whatsapp-time">${fmtDate(m.enviadoEm)}</time>
           ${text}
           ${media}
         </article>`;
+        return wrapWhatsappBubble(bubble, {
+          out,
+          reacoes: m.reacoes,
+          wrapClass: 'lw-whatsapp-bubble-wrap',
+          reactionsClass: 'lw-whatsapp-reactions',
+          actionsClass: 'lw-whatsapp-msg-actions',
+          msgId: m.id,
+        });
       })
       .join('');
     els.leadWhatsappMessages.scrollTop = els.leadWhatsappMessages.scrollHeight;
+    void hydrateWhatsappMedia(els.leadWhatsappMessages);
+    unbindLeadWhatsappReactions?.();
+    unbindLeadWhatsappReactions = bindWhatsappReactionControls(els.leadWhatsappMessages, {
+      onReact: async (mensagemId, emoji) => {
+        if (!leadDetailId) return;
+        try {
+          const result = await sendLeadWhatsappReaction(leadDetailId, mensagemId, emoji);
+          const idx = leadWhatsappMessages.findIndex((item) => item.id === mensagemId);
+          if (idx >= 0) {
+            leadWhatsappMessages = [...leadWhatsappMessages];
+            leadWhatsappMessages[idx] = { ...leadWhatsappMessages[idx], reacoes: result.reacoes || [] };
+            renderLeadWhatsappMessages();
+          }
+        } catch (err) {
+          alert(err.message);
+        }
+      },
+    });
   }
 
   async function loadLeadWhatsapp(id, { syncIfEmpty = false } = {}) {
@@ -2238,12 +2299,12 @@ export function initArrecadacaoModule(
       btn.textContent = 'Sincronizando…';
     }
     try {
-      const data = await syncLeadWhatsapp(id, { limit: 120 });
+      const data = await syncLeadWhatsapp(id, { days: 5 });
       leadWhatsappMessages = data.mensagens || [];
       renderLeadWhatsappMessages();
       if (!silent && els.leadWhatsappStatus) {
         const imported = data.imported ?? 0;
-        els.leadWhatsappStatus.textContent = `Histórico sincronizado · ${imported} mensagem(ns) importada(s).`;
+        els.leadWhatsappStatus.textContent = `Histórico sincronizado (últimos 5 dias) · ${imported} mensagem(ns) importada(s).`;
       }
     } catch (err) {
       if (!silent) alert(err.message);
@@ -2588,10 +2649,11 @@ export function initArrecadacaoModule(
     root.querySelectorAll('.arr-kanban-card').forEach((card) => {
       card.addEventListener('dragstart', (e) => {
         kanbanCardWasDragged = false;
+        const groupIds = card.dataset.groupIds || card.dataset.id;
         draggingItemId = Number(card.dataset.id);
         card.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', String(draggingItemId));
+        e.dataTransfer.setData('text/plain', groupIds);
       });
       card.addEventListener('drag', () => {
         kanbanCardWasDragged = true;
@@ -2625,13 +2687,24 @@ export function initArrecadacaoModule(
       body.addEventListener('drop', async (e) => {
         e.preventDefault();
         body.classList.remove('drag-over');
-        const id = Number(e.dataTransfer.getData('text/plain') || draggingItemId);
+        const raw = e.dataTransfer.getData('text/plain') || String(draggingItemId || '');
+        const ids = raw
+          .split(',')
+          .map((part) => Number(part.trim()))
+          .filter((id) => Number.isInteger(id) && id > 0);
         const status = body.closest('.arr-kanban-col')?.dataset.status;
-        if (id && status) await moveItemToStatus(id, status);
+        if (ids.length && status) await moveItemsToStatus(ids, status);
       });
     });
 
-    root.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+    root.querySelectorAll('.arr-kanban-card .arr-ref-chip').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openLeadDetailModal(Number(btn.dataset.id));
+      });
+    });
+
+    root.querySelectorAll('[data-action="edit"], [data-action="abrir-lead"]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const item = items.find((x) => x.id === Number(btn.dataset.id));
@@ -2654,18 +2727,27 @@ export function initArrecadacaoModule(
     });
   }
 
-  async function moveItemToStatus(id, status) {
-    const item = items.find((x) => x.id === id);
-    if (!item || item.status === status) return;
+  async function moveItemsToStatus(ids, status) {
+    const uniqueIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+    if (!uniqueIds.length) return;
 
+    const firstItem = items.find((x) => x.id === uniqueIds[0]);
     const etapa = etapaForStatus(status);
     if (etapa?.tipo === 'perda') {
-      openPerdaLeadModal(item);
+      if (firstItem) openPerdaLeadModal(firstItem);
       return;
     }
 
+    const toMove = uniqueIds.filter((id) => {
+      const item = items.find((x) => x.id === id);
+      return item && item.status !== status;
+    });
+    if (!toMove.length) return;
+
     try {
-      await updateArrecadacao(id, { status });
+      for (const id of toMove) {
+        await updateArrecadacao(id, { status });
+      }
       await loadArrecadacao();
     } catch (err) {
       alert(err.message);
@@ -2682,15 +2764,16 @@ export function initArrecadacaoModule(
     const columns = [
       ...etapas.map((etapa) => {
         const colItems = items.filter((item) => item.status === etapa.status);
+        const colGroups = groupItemsForTable(colItems);
         const total = colItems.reduce((s, i) => s + Number(i.valorTotal || 0), 0);
         return `
           <div class="arr-kanban-col" data-status="${escapeHtml(etapa.status)}">
             <header class="arr-kanban-col-head" style="--col-color:${escapeHtml(etapa.cor)}">
               <span class="arr-kanban-col-title">${escapeHtml(etapa.titulo)}</span>
-              <span class="arr-kanban-col-meta">${colItems.length} · ${fmtMoney(total)}</span>
+              <span class="arr-kanban-col-meta">${colGroups.length} · ${fmtMoney(total)}</span>
             </header>
             <div class="arr-kanban-col-body">
-              ${colItems.length ? colItems.map(renderKanbanCard).join('') : '<p class="arr-kanban-empty">Nenhum registro</p>'}
+              ${colGroups.length ? colGroups.map(renderKanbanGroupCard).join('') : '<p class="arr-kanban-empty">Nenhum registro</p>'}
             </div>
           </div>`;
       }),
@@ -2699,10 +2782,10 @@ export function initArrecadacaoModule(
         <div class="arr-kanban-col arr-kanban-col-outros" data-status="">
           <header class="arr-kanban-col-head" style="--col-color:#666">
             <span class="arr-kanban-col-title">Outros status</span>
-            <span class="arr-kanban-col-meta">${outros.length}</span>
+            <span class="arr-kanban-col-meta">${groupItemsForTable(outros).length}</span>
           </header>
           <div class="arr-kanban-col-body arr-kanban-col-body-readonly">
-            ${outros.map(renderKanbanCard).join('')}
+            ${groupItemsForTable(outros).map(renderKanbanGroupCard).join('')}
           </div>
         </div>`
         : '',
@@ -3088,7 +3171,9 @@ export function initArrecadacaoModule(
 
     els.table.innerHTML = groups
       .map((group) => {
-        const quitado = group.valorFalta <= 0;
+        const quitado =
+          group.valorFalta <= 0 &&
+          group.items.every((item) => isVendaEtapaStatus(item.status));
         const obsParts = [
           ...new Set(group.items.map((i) => String(i.obs || '').trim()).filter(Boolean)),
         ];

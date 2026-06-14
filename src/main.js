@@ -13,6 +13,7 @@ import { initTarefaEditor } from './modules/tarefa-editor.js';
 import { initEventosModule, initEventoSelector } from './modules/eventos.js';
 import { initMarketingModule } from './modules/marketing.js';
 import { initWhatsappConnect } from './modules/whatsapp-connect.js';
+import { initWhatsappInbox } from './modules/whatsapp-inbox.js';
 
 const loadingEl = document.getElementById('app-loading');
 const appScreen = document.getElementById('app-screen');
@@ -152,6 +153,11 @@ async function initApp(user) {
   });
 
   initWhatsappConnect();
+  initWhatsappInbox({
+    onOpenLead: async (arrecadacaoId) => {
+      await arrecadacaoModule?.openLeadDetail(arrecadacaoId);
+    },
+  });
 }
 
 const loginScreen = initLoginScreen(async (user) => {

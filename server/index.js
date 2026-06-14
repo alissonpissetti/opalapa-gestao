@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -85,11 +86,20 @@ import {
   sendWhatsappToLead,
   handleEvolutionWebhook,
   getWhatsappStatus,
+  getWhatsappStatusQuick,
   connectWhatsapp,
   disconnectWhatsapp,
   validateWebhookSecret,
+  reactToWhatsappMessage,
 } from './whatsapp.js';
+import {
+  listWhatsappInbox,
+  listMessagesForParticipante,
+  syncInboxParticipante,
+} from './whatsapp-inbox.js';
+import { attachWhatsappWebSocket } from './whatsapp-ws.js';
 import { configureInstanceWebhook, getEvolutionConfig } from './evolution.js';
+import { streamWhatsappMensagemMedia } from './whatsapp-media.js';
 import {
   migrateSeguidoresHistorico,
   getSeguidoresHistoricoResumo,
@@ -555,6 +565,111 @@ app.post('/api/whatsapp/disconnect', requireAuth, async (_req, res) => {
   }
 });
 
+app.get('/api/whatsapp/inbox', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const threads = await listWhatsappInbox(pool, req.eventoId);
+    const status = await getWhatsappStatusQuick(8000);
+    res.json({ threads, status });
+  } catch (err) {
+    console.error('GET /api/whatsapp/inbox', err);
+    res.status(500).json({ error: 'Falha ao carregar conversas' });
+  }
+});
+
+app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const participanteId = Number(req.params.participanteId);
+    if (!Number.isInteger(participanteId) || participanteId < 1) {
+      return res.status(400).json({ error: 'Participante inválido' });
+    }
+
+    const mensagens = await listMessagesForParticipante(pool, req.eventoId, participanteId);
+    res.json({ mensagens });
+  } catch (err) {
+    console.error('GET /api/whatsapp/inbox/:participanteId/messages', err);
+    res.status(500).json({ error: 'Falha ao carregar mensagens' });
+  }
+});
+
+app.post('/api/whatsapp/inbox/:participanteId/sync', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const participanteId = Number(req.params.participanteId);
+    if (!Number.isInteger(participanteId) || participanteId < 1) {
+      return res.status(400).json({ error: 'Participante inválido' });
+    }
+
+    const days = Math.min(Math.max(Number(req.body?.days) || 14, 1), 30);
+    const result = await syncInboxParticipante(pool, req.eventoId, participanteId, { days });
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/whatsapp/inbox/:participanteId/sync', err);
+    res.status(500).json({ error: 'Falha ao sincronizar conversa' });
+  }
+});
+
+app.post('/api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const participanteId = Number(req.params.participanteId);
+    const mensagemId = Number(req.params.mensagemId);
+    if (!Number.isInteger(participanteId) || participanteId < 1) {
+      return res.status(400).json({ error: 'Participante inválido' });
+    }
+    if (!Number.isInteger(mensagemId) || mensagemId < 1) {
+      return res.status(400).json({ error: 'Mensagem inválida' });
+    }
+
+    const result = await reactToWhatsappMessage(pool, mensagemId, req.body?.emoji, {
+      eventoId: req.eventoId,
+      participanteId,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', err);
+    res.status(500).json({ error: 'Falha ao reagir à mensagem' });
+  }
+});
+
+app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const participanteId = Number(req.params.participanteId);
+    if (!Number.isInteger(participanteId) || participanteId < 1) {
+      return res.status(400).json({ error: 'Participante inválido' });
+    }
+    const [rows] = await pool.query(
+      `SELECT id FROM arrecadacao
+       WHERE evento_id = ? AND participante_id = ?
+       ORDER BY id ASC LIMIT 1`,
+      [req.eventoId, participanteId],
+    );
+    const arrecadacaoId = rows[0]?.id ? Number(rows[0].id) : null;
+    if (!arrecadacaoId) {
+      return res.status(404).json({ error: 'Lead não encontrado para este participante' });
+    }
+    const { mensagem } = await sendWhatsappToLead(pool, arrecadacaoId, req.body?.text ?? req.body?.texto);
+    res.status(201).json({ mensagem });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/whatsapp/inbox/:participanteId/send', err);
+    res.status(500).json({ error: 'Falha ao enviar mensagem' });
+  }
+});
+
+app.get('/api/whatsapp/media/:mensagemId', requireAuth, async (req, res) => {
+  try {
+    const mensagemId = Number(req.params.mensagemId);
+    if (!Number.isInteger(mensagemId) || mensagemId < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    await streamWhatsappMensagemMedia(pool, mensagemId, res);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('GET /api/whatsapp/media/:mensagemId', err);
+    res.status(500).json({ error: 'Falha ao carregar mídia' });
+  }
+});
+
 app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -583,7 +698,7 @@ app.post('/api/arrecadacao/:id/whatsapp/sync', requireAuth, async (req, res) => 
     const item = await findArrecadacaoById(pool, id);
     if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
     const result = await syncWhatsappHistory(pool, id, {
-      limit: Number(req.body?.limit) || 80,
+      days: Number(req.body?.days) || 5,
     });
     const mensagens = await listWhatsappMessages(pool, id);
     res.json({ ...result, mensagens });
@@ -591,6 +706,28 @@ app.post('/api/arrecadacao/:id/whatsapp/sync', requireAuth, async (req, res) => 
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/arrecadacao/:id/whatsapp/sync', err);
     res.status(500).json({ error: 'Falha ao sincronizar WhatsApp' });
+  }
+});
+
+app.post('/api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', requireAuth, async (req, res) => {
+  try {
+    const arrecadacaoId = Number(req.params.id);
+    const mensagemId = Number(req.params.mensagemId);
+    if (!Number.isInteger(arrecadacaoId) || arrecadacaoId < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    if (!Number.isInteger(mensagemId) || mensagemId < 1) {
+      return res.status(400).json({ error: 'Mensagem inválida' });
+    }
+    const item = await findArrecadacaoById(pool, arrecadacaoId);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+
+    const result = await reactToWhatsappMessage(pool, mensagemId, req.body?.emoji, { arrecadacaoId });
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', err);
+    res.status(500).json({ error: 'Falha ao reagir à mensagem' });
   }
 });
 
@@ -1023,7 +1160,10 @@ async function start() {
   await migrateTiposComercio(pool);
   await migrateUsers(pool);
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = http.createServer(app);
+  attachWhatsappWebSocket(server);
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Opalapa Gestão rodando na porta ${PORT}`);
   });
 
@@ -1037,7 +1177,10 @@ async function start() {
     const webhookUrl = `${publicUrl}/api/webhooks/evolution`;
     configureInstanceWebhook(webhookUrl, process.env.EVOLUTION_WEBHOOK_SECRET || '')
       .then(() => console.log(`Webhook Evolution configurado: ${webhookUrl}`))
-      .catch((err) => console.warn('Não foi possível configurar webhook Evolution:', err.message));
+      .catch((err) => {
+        const detail = err.body ? JSON.stringify(err.body) : err.message;
+        console.warn('Não foi possível configurar webhook Evolution:', detail);
+      });
   }
 }
 
