@@ -18,7 +18,7 @@ export const LABELS = {
   vend: 'Vendido / Fechado',
 };
 
-export const MAP_VIEWBOX = { width: 1392, height: 712 };
+export const MAP_VIEWBOX = { width: 1024, height: 576 };
 
 export const MOTIVOS_PERDA_LEAD = [
   { value: 'preco', label: 'Preço alto' },

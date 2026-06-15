@@ -1,4 +1,4 @@
-import { fetchGrupos, fetchGrupoSpaces, saveGrupoSpaces, moveEspacoReserva } from './api.js';
+import { fetchGrupos, fetchGrupoSpaces, saveGrupoSpaces, moveEspacoReserva, moveEspacosReserva } from './api.js';
 import { isSaleGroupValorLeader } from './format.js';
 
 const GRUPO_STORAGE_KEY = 'opalapa-grupo-ativo';
@@ -86,6 +86,25 @@ export function createSpacesStore() {
     saveError = null;
     try {
       const data = await moveEspacoReserva(currentGrupo.slug, origemNumero, payload);
+      currentGrupo = data.grupo;
+      applySpacesData(data.spaces);
+      if (data.tipos) tiposComercio = data.tipos;
+      if (data.participantes) participantes = data.participantes;
+    } catch (err) {
+      saveError = err.message;
+      throw err;
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function moveReservas(movimentos, payload) {
+    if (!ready || !currentGrupo) return;
+
+    saving = true;
+    saveError = null;
+    try {
+      const data = await moveEspacosReserva(currentGrupo.slug, { ...payload, movimentos });
       currentGrupo = data.grupo;
       applySpacesData(data.spaces);
       if (data.tipos) tiposComercio = data.tipos;
@@ -205,6 +224,7 @@ export function createSpacesStore() {
       custo: s.custo ?? null,
       valor: s.valor ?? null,
       saleGroup: s.saleGroup || '',
+      points: s.points || '',
       updatedAt: s.updatedAt,
     };
   }
@@ -224,6 +244,7 @@ export function createSpacesStore() {
     switchGrupo,
     persist,
     moveReserva,
+    moveReservas,
     isActiveStatus,
     totalNegociado,
     totalPago,

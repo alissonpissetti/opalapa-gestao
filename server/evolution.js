@@ -153,6 +153,40 @@ export async function sendTextMessage(phone, text) {
   });
 }
 
+export async function sendMediaMessage(phone, { mediatype, media, caption, fileName }) {
+  const { instance } = getEvolutionConfig();
+  const number = toWhatsAppNumber(phone);
+  if (!number) throw Object.assign(new Error('Telefone inválido'), { status: 400 });
+  if (!media) throw Object.assign(new Error('Mídia inválida'), { status: 400 });
+
+  const payload = {
+    number,
+    mediatype: String(mediatype || '').toLowerCase(),
+    media: String(media),
+  };
+  if (caption) payload.caption = String(caption);
+  if (fileName) payload.fileName = String(fileName);
+
+  return evoFetch(`/message/sendMedia/${encodeURIComponent(instance)}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    timeoutMs: 90000,
+  });
+}
+
+export async function sendWhatsAppAudioMessage(phone, audio) {
+  const { instance } = getEvolutionConfig();
+  const number = toWhatsAppNumber(phone);
+  if (!number) throw Object.assign(new Error('Telefone inválido'), { status: 400 });
+  if (!audio) throw Object.assign(new Error('Áudio inválido'), { status: 400 });
+
+  return evoFetch(`/message/sendWhatsAppAudio/${encodeURIComponent(instance)}`, {
+    method: 'POST',
+    body: JSON.stringify({ number, audio: String(audio) }),
+    timeoutMs: 90000,
+  });
+}
+
 export async function sendReactionMessage(key, reaction) {
   const { instance } = getEvolutionConfig();
   if (!key?.id || !key?.remoteJid) {
@@ -502,10 +536,17 @@ async function findChatMessagesIso(
   });
 }
 
-export async function fetchChatMessagesSince(remoteJid, { days = 5, pageSize = 100, maxPages = 15 } = {}) {
+export async function fetchChatMessagesSince(
+  remoteJid,
+  { days = 5, sinceTimestamp, pageSize = 100, maxPages = 15 } = {},
+) {
   const now = Math.floor(Date.now() / 1000);
-  const gte = now - Math.max(1, days) * 24 * 3600;
-  const opts = { pageSize, maxPages };
+  const incremental = sinceTimestamp != null && Number.isFinite(Number(sinceTimestamp));
+  const gte = incremental
+    ? Math.max(0, Math.floor(Number(sinceTimestamp)) - 30)
+    : now - Math.max(1, days) * 24 * 3600;
+  const effectiveMaxPages = incremental ? Math.min(maxPages, 10) : maxPages;
+  const opts = { pageSize, maxPages: effectiveMaxPages };
 
   const withUnixFilter = await paginateChatMessages(
     (page, offset) =>

@@ -1,6 +1,6 @@
 import { COLORS, LABELS, STATUS_ORDER } from '../lib/constants.js';
 import { defaultSpace } from '../lib/store.js';
-import { fetchTiposComercio, fetchFunilEtapas } from '../lib/api.js';
+import { fetchTiposComercio, fetchFunilEtapas, fetchEspacosDisponiveis } from '../lib/api.js';
 import {
   fmtDate,
   fmtMoney,
@@ -17,6 +17,7 @@ import {
   valoresPagamentoExibidos,
 } from '../lib/format.js';
 import { exportCSV } from './export.js';
+import { initMapEditor } from './map-editor.js';
 
 const VIEW_MODE_KEY = 'espacos-view-mode';
 
@@ -25,6 +26,7 @@ export function initSpacesModule(store) {
     spaces,
     persist,
     moveReserva,
+    moveReservas,
     isActiveStatus,
     totalNegociado,
     totalPago,
@@ -84,6 +86,7 @@ export function initSpacesModule(store) {
     mParticipanteId: document.getElementById('m-participante-id'),
     mObs: document.getElementById('m-obs'),
     mMoveField: document.getElementById('m-move-field'),
+    mMoveLabel: document.getElementById('m-move-label'),
     mMoveDestino: document.getElementById('m-move-destino'),
     mMoveHint: document.getElementById('m-move-hint'),
     btnClear: document.getElementById('btn-clear'),
@@ -199,6 +202,7 @@ export function initSpacesModule(store) {
 
   async function selectGrupo(slug) {
     try {
+      mapEditor.onGrupoChanged();
       await switchGrupo(slug);
       clearSelection();
       renderGrupoTabs();
@@ -227,7 +231,20 @@ export function initSpacesModule(store) {
     els.mapImage.alt = `Mapa — ${grupo.nome}`;
     els.mapImage.width = grupo.mapWidth;
     els.mapImage.height = grupo.mapHeight;
+    els.mapWrap.style.aspectRatio = `${grupo.mapWidth} / ${grupo.mapHeight}`;
     els.mapSvg.setAttribute('viewBox', `0 0 ${grupo.mapWidth} ${grupo.mapHeight}`);
+    els.mapSvg.setAttribute('preserveAspectRatio', 'none');
+  }
+
+  function polygonCentroid(pointsStr) {
+    const pts = pointsStr
+      .trim()
+      .split(/\s+/)
+      .map((p) => p.split(',').map(Number));
+    if (!pts.length) return [0, 0];
+    const x = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const y = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    return [x, y];
   }
 
   function renderMapPolygons() {
@@ -238,18 +255,55 @@ export function initSpacesModule(store) {
     }
 
     const numeros = [...spaceNumeros()].sort((a, b) => b - a);
+    const editing = mapEditor.isEditMode();
     els.mapSvg.innerHTML = numeros
-      .filter((n) => spaces[n]?.points)
-      .map(
-        (n) =>
-          `<polygon data-numero="${n}" data-lbl="${escapeHtml(spaceLabel(n))}" points="${spaces[n].points}"></polygon>`,
-      )
+      .filter((n) => spaces[n]?.points || editing)
+      .map((n) => {
+        const points = spaces[n]?.points || '';
+        const hasPoly = Boolean(points);
+        const active = editing && String(mapEditor.getActiveNumero()) === String(n);
+        const polyClass = active ? ' map-poly-editing' : '';
+        const poly = hasPoly
+          ? `<polygon class="map-poly${polyClass}" data-numero="${n}" data-lbl="${escapeHtml(spaceLabel(n))}" points="${points}"></polygon>`
+          : `<polygon class="map-poly map-poly--empty${active ? ' map-poly-editing' : ''}" data-numero="${n}" data-lbl="${escapeHtml(spaceLabel(n))}" points=""></polygon>`;
+        if (!hasPoly) {
+          return poly;
+        }
+        const [cx, cy] = polygonCentroid(points);
+        return `${poly}<text class="map-space-label" x="${cx}" y="${cy}" data-numero="${n}" text-anchor="middle" dominant-baseline="central">${escapeHtml(String(n))}</text>`;
+      })
       .join('');
 
+    mapEditor.onMapRendered();
+  }
+
+  function renderMapPolygonStyles() {
     document.querySelectorAll('#map-svg polygon').forEach((poly) => {
-      poly.addEventListener('click', () => toggleSelect(poly.dataset.numero));
+      const numero = poly.dataset.numero;
+      const data = spaces[numero];
+      const color = statusColor(data?.status || 'disp');
+      const editing = mapEditor.isEditMode();
+      const active = editing && String(mapEditor.getActiveNumero()) === String(numero);
+      poly.classList.toggle('map-poly-editing', active);
+      if (editing) {
+        poly.setAttribute('fill', active ? '#facc15' : color);
+        poly.setAttribute('fill-opacity', active ? '0.35' : '0.22');
+      } else {
+        poly.setAttribute('fill', color);
+        poly.setAttribute('fill-opacity', '0.38');
+      }
     });
   }
+
+  const mapEditor = initMapEditor({
+    store,
+    els,
+    spaceLabel,
+    onRender: () => {
+      renderMapPolygons();
+      renderMapPolygonStyles();
+    },
+  });
 
   async function loadTiposComercio() {
     try {
@@ -322,6 +376,10 @@ export function initSpacesModule(store) {
       poly.classList.toggle('selected', selectedNumeros.has(poly.dataset.numero));
     });
 
+    document.querySelectorAll('#map-svg .map-space-label').forEach((label) => {
+      label.classList.toggle('selected', selectedNumeros.has(label.dataset.numero));
+    });
+
     document.querySelectorAll('#spaces-table tr[data-numero]').forEach((row) => {
       const numero = row.dataset.numero;
       row.classList.toggle('selected-row', selectedNumeros.has(numero));
@@ -336,6 +394,7 @@ export function initSpacesModule(store) {
   }
 
   function toggleSelect(numero, force) {
+    if (mapEditor.isEditMode()) return;
     const key = String(numero);
     const on = force !== undefined ? force : !selectedNumeros.has(key);
     if (on) selectedNumeros.add(key);
@@ -484,47 +543,152 @@ export function initSpacesModule(store) {
     });
   }
 
-  function renderMoveDestinoOptions(origemNumero) {
+  function expandMoveSet(numeros) {
+    const set = new Set(numeros.map(String));
+    for (const n of [...set]) {
+      const saleGroup = spaces[n]?.saleGroup;
+      if (!saleGroup) continue;
+      Object.keys(spaces).forEach((key) => {
+        if (spaces[key]?.saleGroup === saleGroup) set.add(String(key));
+      });
+    }
+    return sortIds(set).filter((n) => isActiveStatus(spaces[n]?.status));
+  }
+
+  function parseDestinoOptionValue(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const sep = raw.indexOf(':');
+    if (sep <= 0) {
+      return {
+        destinoGrupoSlug: store.currentGrupo?.slug || '',
+        destinoNumero: Number(raw),
+      };
+    }
+    return {
+      destinoGrupoSlug: raw.slice(0, sep),
+      destinoNumero: Number(raw.slice(sep + 1)),
+    };
+  }
+
+  function parseDestinoOptionValues(selectEl, expectedCount) {
+    if (!selectEl) return [];
+    const values = selectEl.multiple
+      ? [...selectEl.selectedOptions].map((o) => o.value).filter(Boolean)
+      : selectEl.value
+        ? [selectEl.value]
+        : [];
+    if (!values.length) return [];
+    if (expectedCount > 1 && values.length !== expectedCount) {
+      throw new Error(`Selecione exatamente ${expectedCount} espaços de destino.`);
+    }
+    return values.map((v) => parseDestinoOptionValue(v));
+  }
+
+  async function renderMoveDestinoOptions(origemNumeros) {
     if (!els.mMoveDestino) return;
 
-    const origem = String(origemNumero);
-    const disponiveis = spaceNumeros()
-      .filter((n) => {
-        const s = spaces[n];
-        return String(n) !== origem && s?.status === 'disp' && !s?.participanteId && !s?.saleGroup;
-      })
-      .sort((a, b) => a - b);
+    const origens = sortIds(origemNumeros).map(String);
+    const origemKeys = new Set(
+      origens.map((n) => `${store.currentGrupo?.slug || ''}:${n}`),
+    );
+    let disponiveis = [];
 
-    const options = [
-      '<option value="">Manter neste espaço</option>',
-      ...disponiveis.map(
-        (n) => `<option value="${n}">${escapeHtml(spaceLabel(n))}</option>`,
-      ),
-    ];
+    try {
+      const data = await fetchEspacosDisponiveis();
+      disponiveis = data.espacos || [];
+    } catch {
+      const origemSlug = store.currentGrupo?.slug || '';
+      disponiveis = spaceNumeros()
+        .filter((n) => {
+          const s = spaces[n];
+          return (
+            s?.status === 'disp' &&
+            !s?.participanteId &&
+            !s?.saleGroup &&
+            !origens.includes(String(n))
+          );
+        })
+        .map((n) => ({
+          numero: n,
+          label: spaceLabel(n),
+          grupoSlug: origemSlug,
+          grupoNome: store.currentGrupo?.nome || '',
+        }));
+    }
+
+    const filtered = disponiveis.filter(
+      (e) => !origemKeys.has(`${e.grupoSlug}:${e.numero}`),
+    );
+
+    const byGrupo = new Map();
+    filtered.forEach((espaco) => {
+      const key = espaco.grupoSlug || store.currentGrupo?.slug || '';
+      if (!byGrupo.has(key)) {
+        byGrupo.set(key, { nome: espaco.grupoNome || key, items: [] });
+      }
+      byGrupo.get(key).items.push(espaco);
+    });
+
+    const isMulti = origens.length > 1;
+    els.mMoveDestino.multiple = isMulti;
+    els.mMoveDestino.size = isMulti ? Math.min(10, Math.max(4, origens.length + 1)) : 1;
+
+    const options = isMulti
+      ? []
+      : ['<option value="">Manter neste espaço</option>'];
+    [...byGrupo.values()]
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      .forEach((grupo) => {
+        options.push(`<optgroup label="${escapeHtml(grupo.nome)}">`);
+        grupo.items
+          .sort((a, b) => a.numero - b.numero)
+          .forEach((espaco) => {
+            const value = `${espaco.grupoSlug}:${espaco.numero}`;
+            options.push(
+              `<option value="${escapeHtml(value)}">${escapeHtml(espaco.label)}</option>`,
+            );
+          });
+        options.push('</optgroup>');
+      });
+
     els.mMoveDestino.innerHTML = options.join('');
     els.mMoveDestino.value = '';
   }
 
-  function syncMoveField(list, isBulk) {
+  async function syncMoveField(list) {
     if (!els.mMoveField || !els.mMoveDestino) return;
 
+    const moveSet = expandMoveSet(list);
     const canMove =
-      !isBulk &&
-      list.length === 1 &&
-      isActiveStatus(spaces[list[0]]?.status) &&
-      !spaces[list[0]]?.saleGroup;
+      moveSet.length > 0 && moveSet.every((n) => isActiveStatus(spaces[n]?.status));
 
     els.mMoveField.classList.toggle('hidden', !canMove);
     if (!canMove) {
+      els.mMoveDestino.multiple = false;
+      els.mMoveDestino.size = 1;
       els.mMoveDestino.value = '';
       return;
     }
 
-    renderMoveDestinoOptions(list[0]);
+    const isGroupSale = moveSet.some((n) => spaces[n]?.saleGroup);
+    if (els.mMoveLabel) {
+      els.mMoveLabel.textContent =
+        moveSet.length > 1
+          ? `Mover ${moveSet.length} espaços para outros destinos`
+          : 'Mover reserva para outro espaço';
+    }
+
+    await renderMoveDestinoOptions(moveSet);
     if (els.mMoveHint) {
-      els.mMoveHint.textContent = spaces[list[0]]?.saleGroup
-        ? 'Espaços em venda em grupo não podem ser movidos individualmente.'
-        : 'Transfere participante, status e valores para o espaço escolhido e libera o atual. Pagamentos registrados na arrecadação são mantidos.';
+      if (moveSet.length > 1) {
+        els.mMoveHint.textContent = isGroupSale
+          ? `Selecione ${moveSet.length} destinos (Ctrl+clique). A venda em grupo será mantida. Cada origem (${idsLabel(moveSet)}) vai para o destino correspondente por ordem numérica.`
+          : `Selecione ${moveSet.length} destinos (Ctrl+clique). Cada origem (${idsLabel(moveSet)}) é pareada ao destino de mesma posição na ordem numérica.`;
+      } else {
+        els.mMoveHint.textContent =
+          'Transfere participante, status e valores para o espaço escolhido em qualquer agrupamento e libera o atual. Pagamentos na arrecadação são mantidos.';
+      }
     }
   }
 
@@ -561,7 +725,7 @@ export function initSpacesModule(store) {
     else renderTable();
   }
 
-  function openSpaces(numeros) {
+  async function openSpaces(numeros) {
     const list = sortIds(numeros).map(String);
     if (!list.length) return;
 
@@ -601,11 +765,15 @@ export function initSpacesModule(store) {
       fillModalForm(spaces[numero], false);
     }
 
-    syncMoveField(list, isBulk);
+    await syncMoveField(list);
     els.modalBg.classList.add('open');
   }
 
   function openSpace(numero) {
+    if (mapEditor.isEditMode()) {
+      mapEditor.selectSpace(numero);
+      return;
+    }
     clearSelection();
     openSpaces([numero]);
   }
@@ -616,10 +784,9 @@ export function initSpacesModule(store) {
     editNumeros = [];
   }
 
-  function buildMovePayload(form, destinoNumero, now) {
+  function buildMovePayload(form, now) {
     const participanteInput = readParticipanteInput();
     return {
-      destinoNumero: Number(destinoNumero),
       status: form.status,
       tipo: form.tipo,
       client: '',
@@ -636,14 +803,32 @@ export function initSpacesModule(store) {
     const isBulk = editNumeros.length > 1;
     const form = readModalForm(isBulk);
     const now = new Date().toISOString();
-    const destinoNumero = !isBulk ? els.mMoveDestino?.value : '';
-    const isMove = Boolean(destinoNumero);
+    const moveSet = expandMoveSet(editNumeros);
+    let destinos = [];
+    try {
+      destinos = parseDestinoOptionValues(els.mMoveDestino, moveSet.length);
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+    const isMove = destinos.length > 0;
 
     els.btnSave.disabled = true;
     updateSyncStatus();
     try {
       if (isMove) {
-        await moveReserva(editNumeros[0], buildMovePayload(form, destinoNumero, now));
+        const sortedDestinos = [...destinos].sort((a, b) => {
+          if (a.destinoGrupoSlug !== b.destinoGrupoSlug) {
+            return a.destinoGrupoSlug.localeCompare(b.destinoGrupoSlug);
+          }
+          return a.destinoNumero - b.destinoNumero;
+        });
+        const movimentos = moveSet.map((origemNumero, index) => ({
+          origemNumero: Number(origemNumero),
+          destinoGrupoSlug: sortedDestinos[index].destinoGrupoSlug,
+          destinoNumero: sortedDestinos[index].destinoNumero,
+        }));
+        await moveReservas(movimentos, buildMovePayload(form, now));
       } else {
         const saleGroup = isBulk ? `grupo-${store.currentGrupo.slug}-${Date.now()}` : '';
         const updates = buildSaveUpdates(isBulk, form, saleGroup, now);
@@ -870,13 +1055,10 @@ export function initSpacesModule(store) {
     const numeros = spaceNumeros();
 
     renderMapPolygons();
+    renderMapPolygonStyles();
 
-    document.querySelectorAll('#map-svg polygon').forEach((poly) => {
-      const numero = poly.dataset.numero;
-      const data = spaces[numero];
-      const color = statusColor(data.status);
-      poly.setAttribute('fill', color);
-      poly.setAttribute('fill-opacity', '0.55');
+    numeros.forEach((n) => {
+      const data = spaces[n];
       counts[data.status] = (counts[data.status] || 0) + 1;
     });
 
@@ -1079,8 +1261,24 @@ export function initSpacesModule(store) {
     els.btnExport.addEventListener('click', () => exportCSV(store));
     els.btnPrint.addEventListener('click', () => window.print());
 
+    mapEditor.bindEvents();
+
+    els.mapSvg.addEventListener('click', (e) => {
+      const el = e.target.closest('polygon[data-numero], .map-space-label[data-numero]');
+      if (!el) return;
+      const numero = el.dataset.numero;
+      if (mapEditor.isEditMode()) {
+        if (mapEditor.selectSpace(numero)) {
+          e.stopPropagation();
+        }
+        return;
+      }
+      toggleSelect(numero);
+    });
+
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (mapEditor.isEditMode()) return;
       if (els.custoModalBg?.classList.contains('open')) closeBulkCustoModal();
       else if (els.modalBg.classList.contains('open')) closeModal();
     });

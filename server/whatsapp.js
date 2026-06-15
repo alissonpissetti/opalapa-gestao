@@ -11,6 +11,8 @@ import {
   getEvolutionConfig,
   getConnectionState,
   sendTextMessage,
+  sendMediaMessage,
+  sendWhatsAppAudioMessage,
   ensureInstance,
   connectInstance,
   logoutInstance,
@@ -28,10 +30,12 @@ import { getParticipanteIdForArrecadacao } from './whatsapp-participants.js';
 import {
   isWhatsappMediaTipo,
   midiaUrlForMensagemRow,
+  midiaPreviewUrlForMensagemRow,
   backfillWhatsappMediaForLead,
   persistMediaFromRecord,
   processPendingWhatsappMediaBatch,
   attachMediaTokenToMensagem,
+  storeMediaBuffer,
 } from './whatsapp-media.js';
 
 async function emitWhatsappMessage(pool, arrecadacaoId, mensagem) {
@@ -83,6 +87,9 @@ function rowToMensagem(row, reacoes = []) {
     texto: row.texto || '',
     midiaUrl: resolveMidiaUrl(row),
     midiaMimetype: row.midia_mimetype || null,
+    midiaPreviewUrl: midiaPreviewUrlForMensagemRow(row),
+    midiaFileSize: row.midia_file_size ? Number(row.midia_file_size) : null,
+    midiaPageCount: row.midia_page_count ? Number(row.midia_page_count) : null,
     enviadoEm: row.enviado_em ? new Date(row.enviado_em).toISOString() : null,
     criadoEm: row.criado_em ? new Date(row.criado_em).toISOString() : null,
     reacoes,
@@ -92,7 +99,8 @@ function rowToMensagem(row, reacoes = []) {
 async function loadMensagemById(pool, mensagemId) {
   const [rows] = await pool.query(
     `SELECT id, arrecadacao_id, evolution_message_id, remote_jid, direcao, tipo, texto,
-            midia_url, midia_mimetype, midia_storage_path, enviado_em, criado_em
+            midia_url, midia_mimetype, midia_storage_path, midia_preview_path,
+            midia_file_size, midia_page_count, enviado_em, criado_em
      FROM whatsapp_mensagens
      WHERE id = ?
      LIMIT 1`,
@@ -141,7 +149,7 @@ export function startWhatsappMediaWorker(pool) {
     try {
       const { enabled } = getEvolutionConfig();
       if (!enabled) return;
-      const count = await runWhatsappMediaBackfill(pool, { limit: 6 });
+      const count = await runWhatsappMediaBackfill(pool, { limit: 12 });
       if (count > 0) {
         console.info(`WhatsApp mídia automática: ${count} arquivo(s) baixado(s)`);
       }
@@ -477,6 +485,33 @@ export async function migrateWhatsapp(pool) {
   } catch (err) {
     if (err.code !== 'ER_DUP_FIELDNAME') throw err;
   }
+
+  try {
+    await pool.query(
+      `ALTER TABLE whatsapp_mensagens
+       ADD COLUMN midia_preview_path VARCHAR(512) NULL AFTER midia_storage_path`,
+    );
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+  }
+
+  try {
+    await pool.query(
+      `ALTER TABLE whatsapp_mensagens
+       ADD COLUMN midia_file_size INT UNSIGNED NULL AFTER midia_preview_path`,
+    );
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+  }
+
+  try {
+    await pool.query(
+      `ALTER TABLE whatsapp_mensagens
+       ADD COLUMN midia_page_count SMALLINT UNSIGNED NULL AFTER midia_file_size`,
+    );
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+  }
 }
 
 async function loadReactionsByMensagemIds(pool, mensagemIds) {
@@ -650,7 +685,8 @@ export async function insertWhatsappMessage(pool, arrecadacaoId, data) {
 
   const [rows] = await pool.query(
     `SELECT id, arrecadacao_id, evolution_message_id, remote_jid, direcao, tipo, texto,
-            midia_url, midia_mimetype, midia_storage_path, enviado_em, criado_em
+            midia_url, midia_mimetype, midia_storage_path, midia_preview_path,
+            midia_file_size, midia_page_count, enviado_em, criado_em
      FROM whatsapp_mensagens
      WHERE arrecadacao_id = ? AND evolution_message_id = ?
      LIMIT 1`,
@@ -992,7 +1028,8 @@ export async function persistEvolutionMessage(pool, rawMessage, { arrecadacaoIds
     if (!row) {
       const [existing] = await pool.query(
         `SELECT id, arrecadacao_id, evolution_message_id, remote_jid, direcao, tipo, texto,
-                midia_url, midia_mimetype, midia_storage_path, enviado_em, criado_em
+                midia_url, midia_mimetype, midia_storage_path, midia_preview_path,
+                midia_file_size, midia_page_count, enviado_em, criado_em
          FROM whatsapp_mensagens
          WHERE arrecadacao_id = ? AND evolution_message_id = ?
          LIMIT 1`,
@@ -1084,10 +1121,39 @@ export async function handleEvolutionWebhook(pool, payload) {
   };
 }
 
+export async function getLatestWhatsappMessageTimestamp(pool, arrecadacaoId) {
+  const [rows] = await pool.query(
+    `SELECT enviado_em
+     FROM whatsapp_mensagens
+     WHERE arrecadacao_id = ?
+       AND tipo <> 'reaction'
+       AND NOT (tipo = 'unknown' AND texto = '[Mensagem não suportada]')
+     ORDER BY enviado_em DESC, id DESC
+     LIMIT 1`,
+    [arrecadacaoId],
+  );
+  if (!rows[0]?.enviado_em) return null;
+  return Math.floor(new Date(rows[0].enviado_em).getTime() / 1000);
+}
+
+export async function getLatestWhatsappMessageTimestampForParticipante(pool, eventoId, participanteId) {
+  const [rows] = await pool.query(
+    `SELECT MAX(wm.enviado_em) AS enviado_em
+     FROM whatsapp_mensagens wm
+     JOIN arrecadacao a ON a.id = wm.arrecadacao_id
+     WHERE a.evento_id = ? AND a.participante_id = ?
+       AND wm.tipo <> 'reaction'
+       AND NOT (wm.tipo = 'unknown' AND wm.texto = '[Mensagem não suportada]')`,
+    [eventoId, participanteId],
+  );
+  if (!rows[0]?.enviado_em) return null;
+  return Math.floor(new Date(rows[0].enviado_em).getTime() / 1000);
+}
+
 export async function syncWhatsappHistory(
   pool,
   arrecadacaoId,
-  { days = 5, mediaBackfillLimit, maxPages = 15, pageSize = 100, arrecadacaoIds } = {},
+  { days = 5, sinceTimestamp, mediaBackfillLimit, maxPages = 15, pageSize = 100, arrecadacaoIds, eventoId, participanteId } = {},
 ) {
   const phone = await getLeadPhone(pool, arrecadacaoId);
   if (!phone) {
@@ -1099,10 +1165,27 @@ export async function syncWhatsappHistory(
     throw Object.assign(new Error('WhatsApp inválido no cadastro do lead'), { status: 400 });
   }
 
+  let resolvedSince = sinceTimestamp;
+  if (resolvedSince == null) {
+    if (eventoId && participanteId) {
+      resolvedSince = await getLatestWhatsappMessageTimestampForParticipante(
+        pool,
+        eventoId,
+        participanteId,
+      );
+    } else {
+      resolvedSince = await getLatestWhatsappMessageTimestamp(pool, arrecadacaoId);
+    }
+  }
+  const incremental = resolvedSince != null;
+  const fetchOpts = incremental
+    ? { sinceTimestamp: resolvedSince, pageSize, maxPages: Math.min(maxPages, 10) }
+    : { days, pageSize, maxPages };
+
   const seen = new Set();
   const records = [];
   for (const remoteJid of remoteJids) {
-    const batch = await fetchChatMessagesSince(remoteJid, { days, maxPages, pageSize });
+    const batch = await fetchChatMessagesSince(remoteJid, fetchOpts);
     for (const record of batch) {
       const id = record?.key?.id || record?.id;
       if (!id || seen.has(id)) continue;
@@ -1138,10 +1221,14 @@ export async function syncWhatsappHistory(
   );
 
   const reactionReconcile = await reconcileReactionRecords(pool, arrecadacaoId, records);
-  const reactionBackfill = await backfillReactionsForLead(pool, arrecadacaoId, { days, maxReactions: 200 });
+  const reactionDays = incremental ? 1 : days;
+  const reactionBackfill = await backfillReactionsForLead(pool, arrecadacaoId, {
+    days: reactionDays,
+    maxReactions: incremental ? 80 : 200,
+  });
 
   const mediaMirrored = await backfillWhatsappMediaForLead(pool, arrecadacaoId, recordsByEvolutionId, {
-    limit: mediaBackfillLimit,
+    limit: incremental ? Math.min(mediaBackfillLimit || 30, 30) : mediaBackfillLimit,
   });
 
   return {
@@ -1154,6 +1241,8 @@ export async function syncWhatsappHistory(
     remoteJid: remoteJids[0],
     remoteJids,
     days,
+    incremental,
+    sinceTimestamp: resolvedSince,
   };
 }
 
@@ -1162,10 +1251,12 @@ export async function listWhatsappMessages(pool, arrecadacaoId, { limit = 200 } 
   const [rows] = await pool.query(
     `SELECT recent.id, recent.arrecadacao_id, recent.evolution_message_id, recent.remote_jid,
             recent.direcao, recent.tipo, recent.texto, recent.midia_url, recent.midia_mimetype,
-            recent.midia_storage_path, recent.enviado_em, recent.criado_em
+            recent.midia_storage_path, recent.midia_preview_path, recent.midia_file_size,
+            recent.midia_page_count, recent.enviado_em, recent.criado_em
      FROM (
        SELECT id, arrecadacao_id, evolution_message_id, remote_jid, direcao, tipo, texto,
-              midia_url, midia_mimetype, midia_storage_path, enviado_em, criado_em
+              midia_url, midia_mimetype, midia_storage_path, midia_preview_path,
+              midia_file_size, midia_page_count, enviado_em, criado_em
        FROM whatsapp_mensagens
        WHERE arrecadacao_id = ?
          AND tipo <> 'reaction'
@@ -1244,6 +1335,137 @@ export async function reactToWhatsappMessage(
   });
 
   return { mensagemId: row.id, evolutionMessageId: row.evolution_message_id, reacoes };
+}
+
+export function parseOutboundWhatsappMediaBody(body) {
+  const mediaType = String(body?.mediaType || body?.mediatype || '').toLowerCase();
+  if (!['image', 'audio'].includes(mediaType)) return null;
+
+  let raw = body?.media || body?.base64 || '';
+  let mimetype = String(body?.mimetype || '').trim();
+
+  if (typeof raw === 'string' && raw.startsWith('data:')) {
+    const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      mimetype = mimetype || match[1];
+      raw = match[2];
+    }
+  }
+
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw Object.assign(new Error('Arquivo de mídia inválido'), { status: 400 });
+  }
+
+  const buffer = Buffer.from(raw, 'base64');
+  if (!buffer.length) {
+    throw Object.assign(new Error('Arquivo de mídia vazio'), { status: 400 });
+  }
+
+  const maxBytes = 16 * 1024 * 1024;
+  if (buffer.length > maxBytes) {
+    throw Object.assign(new Error('Arquivo muito grande (máx. 16 MB)'), { status: 400 });
+  }
+
+  const caption = String(body?.caption || body?.text || '').trim();
+  const fileName = String(body?.fileName || '').trim();
+
+  if (mediaType === 'image') {
+    mimetype = mimetype || 'image/jpeg';
+    if (!mimetype.startsWith('image/')) {
+      throw Object.assign(new Error('Formato de imagem não suportado'), { status: 400 });
+    }
+  } else {
+    mimetype = mimetype || 'audio/ogg';
+    if (!mimetype.startsWith('audio/')) {
+      throw Object.assign(new Error('Formato de áudio não suportado'), { status: 400 });
+    }
+  }
+
+  return {
+    mediaType,
+    buffer,
+    mimetype,
+    fileName:
+      fileName ||
+      (mediaType === 'audio'
+        ? mimetype.includes('ogg')
+          ? 'audio.ogg'
+          : 'audio.webm'
+        : 'imagem.jpg'),
+    caption,
+  };
+}
+
+export async function sendWhatsappMediaToLead(pool, arrecadacaoId, payload) {
+  const { mediaType, buffer, mimetype, fileName, caption } = payload;
+  const phone = await getLeadPhone(pool, arrecadacaoId);
+  if (!phone) {
+    throw Object.assign(new Error('Lead sem WhatsApp cadastrado'), { status: 400 });
+  }
+
+  const dataUri = `data:${mimetype};base64,${buffer.toString('base64')}`;
+  let response;
+  let tipo;
+  let texto;
+  let midiaMimetype = mimetype;
+
+  if (mediaType === 'audio') {
+    response = await sendWhatsAppAudioMessage(phone, dataUri);
+    tipo = 'audio';
+    texto = '[Áudio]';
+  } else {
+    response = await sendMediaMessage(phone, {
+      mediatype: 'image',
+      media: dataUri,
+      caption,
+      fileName,
+    });
+    tipo = 'image';
+    texto = caption || '';
+    midiaMimetype = mimetype || 'image/jpeg';
+  }
+
+  const remoteJid = remoteJidFromPhone(phone);
+  const key = response?.key || response?.message?.key || {};
+  const evolutionMessageId = String(key.id || `local-${Date.now()}`);
+  const enviadoEm = messageTimestampToDate(
+    response?.messageTimestamp || response?.message?.messageTimestamp || Date.now() / 1000,
+  );
+
+  const saved = await insertWhatsappMessage(pool, arrecadacaoId, {
+    evolutionMessageId,
+    remoteJid: key.remoteJid || remoteJid,
+    direcao: 'out',
+    tipo,
+    texto,
+    midiaUrl: null,
+    midiaMimetype,
+    enviadoEm,
+  });
+
+  if (!saved?.id) {
+    throw Object.assign(new Error('Falha ao salvar mensagem enviada'), { status: 500 });
+  }
+
+  await storeMediaBuffer(pool, {
+    mensagemId: saved.id,
+    arrecadacaoId,
+    evolutionMessageId,
+    tipo,
+    mimetype: midiaMimetype,
+    fileName,
+    buffer,
+  });
+
+  const mensagem = await loadMensagemById(pool, saved.id);
+  await emitWhatsappMessage(pool, arrecadacaoId, mensagem);
+  return { mensagem, evolution: response };
+}
+
+export async function sendWhatsappOutbound(pool, arrecadacaoId, body) {
+  const media = parseOutboundWhatsappMediaBody(body);
+  if (media) return sendWhatsappMediaToLead(pool, arrecadacaoId, media);
+  return sendWhatsappToLead(pool, arrecadacaoId, body?.text ?? body?.texto);
 }
 
 export async function sendWhatsappToLead(pool, arrecadacaoId, text) {

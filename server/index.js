@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createPool } from './db.js';
-import { migrateEspacos, fetchSpacesByGrupo, upsertSpaces, moveEspacoReserva } from './espacos.js';
+import { migrateEspacos, fetchSpacesByGrupo, upsertSpaces, moveEspacoReserva, moveEspacosReservas } from './espacos.js';
 import { fetchGrupos } from './grupos.js';
 import { migrateTiposComercio, fetchTiposComercio, ensureTiposComercio } from './tipos.js';
 import {
@@ -83,7 +83,7 @@ import {
   migrateWhatsapp,
   listWhatsappMessages,
   syncWhatsappHistory,
-  sendWhatsappToLead,
+  sendWhatsappOutbound,
   handleEvolutionWebhook,
   getWhatsappStatus,
   getWhatsappStatusQuick,
@@ -98,6 +98,7 @@ import {
   listWhatsappInbox,
   listMessagesForParticipante,
   syncInboxParticipante,
+  prepareWhatsappConversation,
 } from './whatsapp-inbox.js';
 import { attachWhatsappWebSocket } from './whatsapp-ws.js';
 import { configureInstanceWebhook, getEvolutionConfig } from './evolution.js';
@@ -137,6 +138,7 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
+const jsonWhatsappMedia = express.json({ limit: '16mb' });
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -364,6 +366,16 @@ app.delete('/api/participantes/:id', requireAuth, requireEvento, async (req, res
   } catch (err) {
     console.error('DELETE /api/participantes/:id', err);
     res.status(500).json({ error: 'Falha ao excluir participante' });
+  }
+});
+
+app.get('/api/espacos-disponiveis', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const espacos = await listEspacosDisponiveis(pool, req.eventoId);
+    res.json({ espacos });
+  } catch (err) {
+    console.error('GET /api/espacos-disponiveis', err);
+    res.status(500).json({ error: 'Falha ao carregar espaços disponíveis' });
   }
 });
 
@@ -602,8 +614,9 @@ app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEven
       return res.status(400).json({ error: 'Participante inválido' });
     }
 
+    const prepare = req.query.prepare !== '0' && req.query.prepare !== 'false';
     const mensagens = attachMediaTokensToMensagens(
-      await listMessagesForParticipante(pool, req.eventoId, participanteId),
+      await listMessagesForParticipante(pool, req.eventoId, participanteId, { prepare }),
     );
     res.json({ mensagens });
   } catch (err) {
@@ -652,7 +665,7 @@ app.post('/api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', re
   }
 });
 
-app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento, jsonWhatsappMedia, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     if (!Number.isInteger(participanteId) || participanteId < 1) {
@@ -668,7 +681,7 @@ app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento,
     if (!arrecadacaoId) {
       return res.status(404).json({ error: 'Lead não encontrado para este participante' });
     }
-    const { mensagem } = await sendWhatsappToLead(pool, arrecadacaoId, req.body?.text ?? req.body?.texto);
+    const { mensagem } = await sendWhatsappOutbound(pool, arrecadacaoId, req.body);
     res.status(201).json({ mensagem: attachMediaTokenToMensagem(mensagem) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -680,7 +693,9 @@ app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento,
 app.get('/api/whatsapp/media/:mensagemId', authorizeWhatsappMedia, async (req, res) => {
   try {
     const mensagemId = Number(req.params.mensagemId);
-    await streamWhatsappMensagemMedia(pool, mensagemId, res);
+    await streamWhatsappMensagemMedia(pool, mensagemId, res, {
+      preview: req.query.preview === '1',
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('GET /api/whatsapp/media/:mensagemId', err);
@@ -696,12 +711,12 @@ app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
     }
     const item = await findArrecadacaoById(pool, id);
     if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
-    const [mensagens, status] = await Promise.all([
-      listWhatsappMessages(pool, id),
+    const [status, prepared] = await Promise.all([
       getWhatsappStatus(),
+      prepareWhatsappConversation(pool, { arrecadacaoId: id, days: 7 }),
     ]);
-    void runWhatsappMediaBackfill(pool, { arrecadacaoId: id, limit: 5 });
-    res.json({ mensagens: attachMediaTokensToMensagens(mensagens), status });
+    const mensagens = attachMediaTokensToMensagens(await listWhatsappMessages(pool, id));
+    res.json({ mensagens, status, prepared });
   } catch (err) {
     console.error('GET /api/arrecadacao/:id/whatsapp', err);
     res.status(500).json({ error: 'Falha ao carregar conversa WhatsApp' });
@@ -750,7 +765,7 @@ app.post('/api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', requireA
   }
 });
 
-app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, jsonWhatsappMedia, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -758,7 +773,7 @@ app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, async (req, res) => 
     }
     const item = await findArrecadacaoById(pool, id);
     if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
-    const { mensagem } = await sendWhatsappToLead(pool, id, req.body?.text ?? req.body?.texto);
+    const { mensagem } = await sendWhatsappOutbound(pool, id, req.body);
     res.status(201).json({ mensagem: attachMediaTokenToMensagem(mensagem) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -1100,6 +1115,26 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('DELETE /api/users/:id', err);
     res.status(500).json({ error: 'Falha ao excluir usuário' });
+  }
+});
+
+app.post('/api/grupos/:slug/espacos/mover-grupo', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const movimentos = req.body?.movimentos;
+    if (!Array.isArray(movimentos) || movimentos.length === 0) {
+      return res.status(400).json({ error: 'Campo movimentos é obrigatório' });
+    }
+
+    await moveEspacosReservas(pool, req.params.slug, req.body, req.eventoId);
+    await ensureTiposComercio(pool, [req.body?.tipo]);
+    const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
+    const tipos = await fetchTiposComercio(pool);
+    const participantes = await listParticipantes(pool);
+    res.json({ ...result, tipos, participantes });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/grupos/:slug/espacos/mover-grupo', err);
+    res.status(500).json({ error: 'Falha ao mover reservas de espaço' });
   }
 });
 

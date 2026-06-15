@@ -9,6 +9,8 @@ import { fmtDate, formatPhoneDisplay, escapeHtml } from '../lib/format.js';
 import { wrapWhatsappBubble, renderWhatsappReactions } from '../lib/whatsapp-reactions.js';
 import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
 import { renderWhatsappMediaHtml, hydrateWhatsappMedia, retryPendingWhatsappMedia, patchWhatsappMessageMedia, stableMediaRef, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
+import { renderWhatsappBubbleTextHtml, bubbleModifierClasses } from '../lib/whatsapp-bubble-text.js';
+import { initWhatsappCompose } from '../lib/whatsapp-compose.js';
 import { onEventoChange } from '../lib/evento.js';
 
 function wsUrl() {
@@ -133,6 +135,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   let filter = '';
   let inboxStatus = null;
   let unbindReactions = null;
+  let unbindCompose = null;
 
   function isChatNearBottom(threshold = 96) {
     if (!chatMessages) return true;
@@ -160,11 +163,10 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   function renderMessageBubble(m) {
     const out = m.direcao === 'out';
     const media = renderWhatsappMediaHtml(m, { classPrefix: 'wa' });
-    const text = shouldShowWhatsappBubbleText(m)
-      ? `<p class="wa-bubble-text">${escapeHtml(m.texto)}</p>`
-      : '';
+    const text = shouldShowWhatsappBubbleText(m) ? renderWhatsappBubbleTextHtml(m, { classPrefix: 'wa' }) : '';
+    const mods = bubbleModifierClasses(m, { classPrefix: 'wa' });
     const bubble = `
-      <article class="wa-bubble ${out ? 'wa-bubble--out' : 'wa-bubble--in'}" data-msg-id="${m.id}">
+      <article class="wa-bubble ${out ? 'wa-bubble--out' : 'wa-bubble--in'}${mods ? ` ${mods}` : ''}" data-msg-id="${m.id}">
         <time class="wa-bubble-time">${fmtDate(m.enviadoEm)}</time>
         ${media}
         ${text}
@@ -200,7 +202,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     if (!chatMessages) return;
     if (!messages.length) {
       chatMessages.innerHTML =
-        '<p class="wa-chat-placeholder">Nenhuma mensagem ainda. Envie a primeira ou sincronize no lead.</p>';
+        '<p class="wa-chat-placeholder">Nenhuma mensagem ainda. Envie a primeira mensagem.</p>';
       return;
     }
 
@@ -328,8 +330,8 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     }
   }
 
-  async function loadThreadMessages(participanteId, { silent = false, forceBottom = false } = {}) {
-    const data = await fetchWhatsappThreadMessages(participanteId);
+  async function loadThreadMessages(participanteId, { silent = false, forceBottom = false, prepare = true } = {}) {
+    const data = await fetchWhatsappThreadMessages(participanteId, { prepare });
     mergeMessages(data.mensagens || [], { silent, forceBottom });
     if (!silent && activeThread?.participanteId === participanteId) {
       activeThread = threads.find((t) => t.participanteId === participanteId) || activeThread;
@@ -394,7 +396,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     }
     showChatPane(true);
     renderThreads();
-    chatMessages.innerHTML = '<p class="wa-chat-placeholder">Carregando…</p>';
+    chatMessages.innerHTML = '<p class="wa-chat-placeholder">Carregando conversa…</p>';
     try {
       messages = [];
       await loadThreadMessages(participanteId, { forceBottom: true });
@@ -582,7 +584,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
       if (!isOpen()) return;
       loadInbox();
       if (activeThread && !wsConnected) {
-        loadThreadMessages(activeThread.participanteId, { silent: true }).catch(() => {});
+        loadThreadMessages(activeThread.participanteId, { silent: true, prepare: false }).catch(() => {});
       }
     }, POLL_INTERVAL_MS);
   }
@@ -611,32 +613,39 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     document.body.classList.remove('wa-inbox-open');
     unbindReactions?.();
     unbindReactions = null;
+    unbindCompose?.();
+    unbindCompose = null;
     disconnectWs();
     stopPolling();
   }
 
-  async function submitMessage(e) {
-    e.preventDefault();
-    if (!activeThread) return;
-    const text = chatInput?.value.trim() || '';
-    if (!text) return;
-
-    const btn = chatForm?.querySelector('button[type="submit"]');
-    if (btn) btn.disabled = true;
-    try {
-      const { mensagem } = await sendWhatsappInboxMessage(activeThread.participanteId, text);
-      if (mensagem) {
-        appendMessage(mensagem);
-        upsertThreadFromMessage(activeThread.participanteId, mensagem);
-      }
-      if (chatInput) chatInput.value = '';
-      await loadInbox();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      if (btn) btn.disabled = false;
+  async function deliverOutboundMessage(payload) {
+    if (!activeThread) return null;
+    const { mensagem } = await sendWhatsappInboxMessage(activeThread.participanteId, payload);
+    if (mensagem) {
+      appendMessage(mensagem);
+      upsertThreadFromMessage(activeThread.participanteId, mensagem);
     }
+    await loadInbox();
+    return mensagem;
   }
+
+  unbindCompose?.();
+  unbindCompose = initWhatsappCompose({
+    formEl: chatForm,
+    inputEl: chatInput,
+    fileInputId: 'wa-chat-file',
+    attachBtnId: 'wa-chat-attach',
+    micBtnId: 'wa-chat-mic',
+    sendBtnId: 'wa-chat-send',
+    recordingPanelId: 'wa-chat-recording',
+    onSendText: async (text) => {
+      await deliverOutboundMessage({ text });
+    },
+    onSendMedia: async (payload) => {
+      await deliverOutboundMessage(payload);
+    },
+  });
 
   btnOpen.addEventListener('click', openInbox);
   btnClose?.addEventListener('click', closeInbox);
@@ -645,12 +654,6 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     filter = searchEl.value;
     renderThreads();
     updateStatus();
-  });
-  chatForm?.addEventListener('submit', submitMessage);
-  chatInput?.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
-    e.preventDefault();
-    chatForm?.requestSubmit();
   });
   btnChatBack?.addEventListener('click', () => {
     activeThread = null;

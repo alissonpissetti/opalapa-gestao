@@ -327,6 +327,7 @@ export async function listEspacosDisponiveis(pool, eventoId) {
      FROM espacos e
      JOIN grupos_espacos g ON g.id = e.grupo_id
      WHERE g.evento_id = ? AND e.participante_id IS NULL AND e.status = 'disp'
+       AND (e.sale_group IS NULL OR e.sale_group = '')
      ORDER BY g.nome, e.numero`,
     [eventoId],
   );

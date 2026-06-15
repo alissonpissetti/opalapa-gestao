@@ -1,4 +1,5 @@
 import { escapeHtml } from './format.js';
+import { hydrateLinkPreviews } from './whatsapp-bubble-text.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const mediaBlobCache = new Map();
@@ -42,9 +43,340 @@ function rememberObjectUrl(key, objectUrl) {
   mediaBlobCache.set(key, objectUrl);
 }
 
+function formatAudioTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const total = Math.floor(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function seedFromId(id) {
+  let hash = 0;
+  for (const char of String(id || '0')) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash || 1;
+}
+
+function randomBarHeight(seed, index) {
+  const value = Math.sin(seed * 0.013 + index * 0.71) * 10000;
+  return 18 + (Math.abs(value) % 72);
+}
+
+function buildAudioWaveformHtml(midiaId, classPrefix) {
+  const seed = seedFromId(midiaId);
+  const maxHeight = 24;
+  return Array.from({ length: 38 }, (_, index) => {
+    const height = randomBarHeight(seed, index);
+    const px = Math.max(3, Math.round((height / 100) * maxHeight));
+    return `<span class="${classPrefix}-bubble-audio-bar" style="height:${px}px"></span>`;
+  }).join('');
+}
+
+const AUDIO_PLAY_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
+const AUDIO_PAUSE_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+
+function renderAudioPlayerHtml(m, { classPrefix, url, attrs, shell }) {
+  const wave = buildAudioWaveformHtml(m.id, classPrefix);
+  return `<div class="${classPrefix}-bubble-audio-shell"${shell}>
+    <div class="${classPrefix}-bubble-audio-player">
+      <button type="button" class="${classPrefix}-bubble-audio-play" aria-label="Reproduzir" disabled>
+        <span class="${classPrefix}-bubble-audio-icon ${classPrefix}-bubble-audio-icon--play">${AUDIO_PLAY_ICON}</span>
+        <span class="${classPrefix}-bubble-audio-icon ${classPrefix}-bubble-audio-icon--pause is-hidden">${AUDIO_PAUSE_ICON}</span>
+      </button>
+      <div class="${classPrefix}-bubble-audio-body">
+        <div class="${classPrefix}-bubble-audio-wave" role="slider" aria-label="Progresso do áudio" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+          ${wave}
+        </div>
+        <span class="${classPrefix}-bubble-audio-time">0:00</span>
+      </div>
+      <audio class="${classPrefix}-bubble-audio"${attrs} preload="auto"></audio>
+    </div>
+  </div>`;
+}
+
+let activeAudioElement = null;
+
+function setAudioIconState(playIcon, pauseIcon, paused) {
+  playIcon?.classList.toggle('is-hidden', !paused);
+  pauseIcon?.classList.toggle('is-hidden', paused);
+}
+
+function enableAudioShell(shell, audio) {
+  if (!shell || !audio) return;
+  shell.classList.add('is-ready');
+  shell.classList.remove('is-error');
+  const playBtn = shell.querySelector('[class*="bubble-audio-play"]');
+  if (playBtn) playBtn.disabled = false;
+  syncAudioUi(audio);
+}
+
+function syncAudioUi(audio) {
+  const shell = audio?.closest?.('[class*="bubble-audio-shell"]');
+  if (!shell) return;
+
+  const playBtn = shell.querySelector('[class*="bubble-audio-play"]');
+  const playIcon = shell.querySelector('[class*="bubble-audio-icon--play"]');
+  const pauseIcon = shell.querySelector('[class*="bubble-audio-icon--pause"]');
+  const timeEl = shell.querySelector('[class*="bubble-audio-time"]');
+  const bars = shell.querySelectorAll('[class*="bubble-audio-bar"]');
+  const wave = shell.querySelector('[class*="bubble-audio-wave"]');
+
+  const duration = audio.duration;
+  const current = audio.currentTime;
+  const hasDuration = Number.isFinite(duration) && duration > 0;
+  const progress = hasDuration ? current / duration : 0;
+
+  shell.classList.toggle('is-playing', !audio.paused && !audio.ended);
+  setAudioIconState(playIcon, pauseIcon, audio.paused);
+  if (playBtn) playBtn.setAttribute('aria-label', audio.paused ? 'Reproduzir' : 'Pausar');
+
+  bars.forEach((bar, index) => {
+    bar.classList.toggle('is-played', (index + 1) / bars.length <= progress);
+  });
+
+  if (timeEl) {
+    if (!hasDuration) {
+      timeEl.textContent = '0:00';
+    } else if (!audio.paused) {
+      timeEl.textContent = formatAudioTime(Math.max(0, duration - current));
+    } else {
+      timeEl.textContent = formatAudioTime(duration);
+    }
+  }
+
+  if (wave) {
+    wave.setAttribute('aria-valuenow', String(Math.round(progress * 100)));
+  }
+}
+
+function seekAudioFromWave(audio, wave, clientX) {
+  if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+  const rect = wave.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  audio.currentTime = ratio * audio.duration;
+  syncAudioUi(audio);
+}
+
+function bindAudioShell(shell) {
+  if (!shell || shell.dataset.audioBound) return;
+  const audio = shell.querySelector('audio');
+  const playBtn = shell.querySelector('[class*="bubble-audio-play"]');
+  const wave = shell.querySelector('[class*="bubble-audio-wave"]');
+  if (!audio || !playBtn) return;
+
+  shell.dataset.audioBound = '1';
+
+  playBtn.addEventListener('click', () => {
+    if (!shell.classList.contains('is-ready')) return;
+    if (audio.paused) {
+      if (activeAudioElement && activeAudioElement !== audio) {
+        activeAudioElement.pause();
+        syncAudioUi(activeAudioElement);
+      }
+      void audio.play().catch(() => {
+        shell.classList.add('is-error');
+        alert('Não foi possível reproduzir o áudio.');
+      });
+      activeAudioElement = audio;
+    } else {
+      audio.pause();
+    }
+    syncAudioUi(audio);
+  });
+
+  wave?.addEventListener('click', (event) => {
+    if (!shell.classList.contains('is-ready')) return;
+    seekAudioFromWave(audio, wave, event.clientX);
+  });
+
+  wave?.addEventListener('keydown', (event) => {
+    if (!shell.classList.contains('is-ready')) return;
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const step = audio.duration * 0.05;
+    if (event.key === 'ArrowRight') {
+      audio.currentTime = Math.min(audio.duration, audio.currentTime + step);
+      syncAudioUi(audio);
+      event.preventDefault();
+    } else if (event.key === 'ArrowLeft') {
+      audio.currentTime = Math.max(0, audio.currentTime - step);
+      syncAudioUi(audio);
+      event.preventDefault();
+    }
+  });
+
+  audio.addEventListener('loadedmetadata', () => syncAudioUi(audio));
+  audio.addEventListener('durationchange', () => syncAudioUi(audio));
+  audio.addEventListener('timeupdate', () => syncAudioUi(audio));
+  audio.addEventListener('ended', () => {
+    if (activeAudioElement === audio) activeAudioElement = null;
+    syncAudioUi(audio);
+  });
+  audio.addEventListener('pause', () => syncAudioUi(audio));
+  audio.addEventListener('play', () => syncAudioUi(audio));
+  audio.addEventListener('error', () => {
+    shell.classList.add('is-error');
+    if (playBtn) playBtn.disabled = true;
+  });
+
+  if (shell.classList.contains('is-ready')) {
+    enableAudioShell(shell, audio);
+  } else if (audio.readyState >= 1) {
+    enableAudioShell(shell, audio);
+  }
+}
+
+export function hydrateAudioPlayers(container) {
+  if (!container) return;
+  container
+    .querySelectorAll('.wa-bubble-audio-shell:not([data-audio-bound]), .lw-whatsapp-bubble-audio-shell:not([data-audio-bound])')
+    .forEach((shell) => bindAudioShell(shell));
+}
+
+function documentDisplayName(m) {
+  const texto = String(m?.texto || '').trim();
+  if (texto && texto !== '[Documento]') return texto;
+  const url = m?.midiaUrl || '';
+  if (url) {
+    try {
+      const segment = url.split('/').pop()?.split('?')[0] || '';
+      if (segment) return decodeURIComponent(segment);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (m?.midiaMimetype) {
+    const ext = m.midiaMimetype.split('/').pop();
+    if (ext) return `arquivo.${ext}`;
+  }
+  return 'Documento';
+}
+
+function documentExtension(name, mime) {
+  const fromName = name.includes('.') ? name.split('.').pop()?.toLowerCase() : '';
+  if (fromName && fromName.length <= 8 && /^[a-z0-9]+$/.test(fromName)) return fromName;
+  const mimeMap = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/zip': 'zip',
+    'text/plain': 'txt',
+  };
+  return mimeMap[mime] || 'arquivo';
+}
+
+function documentKind(ext) {
+  const e = ext.toLowerCase();
+  if (e === 'pdf') return 'pdf';
+  if (['doc', 'docx', 'odt', 'rtf', 'txt'].includes(e)) return 'word';
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(e)) return 'sheet';
+  if (['ppt', 'pptx', 'odp'].includes(e)) return 'slide';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(e)) return 'archive';
+  return 'generic';
+}
+
+function documentMetaLabel(ext) {
+  const labels = {
+    pdf: 'PDF',
+    doc: 'DOC',
+    docx: 'DOCX',
+    xls: 'XLS',
+    xlsx: 'XLSX',
+    ppt: 'PPT',
+    pptx: 'PPTX',
+    zip: 'ZIP',
+    txt: 'TXT',
+    csv: 'CSV',
+  };
+  return labels[ext.toLowerCase()] || ext.toUpperCase() || 'Arquivo';
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes < 1) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  const value = unit === 0 ? size : unit === 1 ? Math.round(size) : size.toFixed(1);
+  return `${value} ${units[unit]}`;
+}
+
+function documentMetaLine(m, ext) {
+  const parts = [];
+  if (m.midiaPageCount) {
+    parts.push(m.midiaPageCount === 1 ? '1 página' : `${m.midiaPageCount} páginas`);
+  }
+  parts.push(documentMetaLabel(ext));
+  const size = formatFileSize(m.midiaFileSize);
+  if (size) parts.push(size);
+  return parts.join(' · ') || documentMetaLabel(ext);
+}
+
+function renderDocumentCard(m, { classPrefix, url, attrs, shell }) {
+  const fileName = documentDisplayName(m);
+  const ext = documentExtension(fileName, m.midiaMimetype);
+  const kind = documentKind(ext);
+  const badge = ext.length <= 5 ? ext.toUpperCase() : 'FILE';
+  const nameHtml = escapeHtml(fileName);
+  const metaLabel = url ? documentMetaLine(m, ext) : `${documentMetaLabel(ext)} · indisponível`;
+  const isPdf = kind === 'pdf';
+  const previewUrl = m.midiaPreviewUrl
+    ? escapeHtml(resolveMediaFetchUrl(m.midiaPreviewUrl))
+    : '';
+  const cardClass = `${classPrefix}-bubble-doc ${classPrefix}-bubble-doc--${kind}${
+    isPdf && url ? ` ${classPrefix}-bubble-doc--has-preview` : ''
+  }`;
+
+  const footer = `
+    <span class="${classPrefix}-bubble-doc-footer">
+      <span class="${classPrefix}-bubble-doc-icon" aria-hidden="true">${escapeHtml(badge)}</span>
+      <span class="${classPrefix}-bubble-doc-info">
+        <span class="${classPrefix}-bubble-doc-name" title="${nameHtml}">${nameHtml}</span>
+        <span class="${classPrefix}-bubble-doc-meta" data-doc-meta>${escapeHtml(metaLabel)}</span>
+      </span>
+    </span>`;
+
+  let previewBlock = '';
+  if (isPdf && url) {
+    if (previewUrl) {
+      previewBlock = `<span class="${classPrefix}-bubble-doc-preview">
+        <img class="${classPrefix}-bubble-doc-preview-img" src="${previewUrl}" alt="" decoding="async" loading="lazy" />
+      </span>`;
+    } else {
+      previewBlock = `<span class="${classPrefix}-bubble-doc-preview">
+        <canvas class="${classPrefix}-bubble-doc-preview-canvas"${attrs} aria-hidden="true"></canvas>
+      </span>`;
+    }
+  }
+
+  const body = `${previewBlock}${footer}`;
+
+  if (!url) {
+    return `<span class="${cardClass} is-pending"${shell}>${body}</span>`;
+  }
+
+  return `<a class="${cardClass}" href="${url}" target="_blank" rel="noopener noreferrer"${attrs}>${body}</a>`;
+}
+
 export function shouldShowWhatsappBubbleText(m) {
   if (!m?.texto) return false;
   if (m.tipo === 'audio' || m.tipo === 'sticker') return false;
+  if (m.tipo === 'document') {
+    const t = String(m.texto).trim();
+    const fileName = documentDisplayName(m);
+    if (!t || t === '[Documento]' || t === fileName) return false;
+    return true;
+  }
   const t = String(m.texto).trim();
   if (['[Figurinha]', '[Áudio]', '[Vídeo]', '[Documento]', '[Mensagem não suportada]'].includes(t)) {
     return false;
@@ -70,10 +402,7 @@ export function renderWhatsappMediaHtml(m, { classPrefix = 'wa' } = {}) {
   }
 
   if (tipo === 'audio' && url) {
-    return `<div class="${classPrefix}-bubble-audio-shell"${shell}>
-      <span class="${classPrefix}-bubble-audio-label">Áudio</span>
-      <audio class="${classPrefix}-bubble-audio"${attrs} controls preload="auto"></audio>
-    </div>`;
+    return renderAudioPlayerHtml(m, { classPrefix, url, attrs, shell });
   }
 
   if (tipo === 'video' && url) {
@@ -82,18 +411,20 @@ export function renderWhatsappMediaHtml(m, { classPrefix = 'wa' } = {}) {
     </div>`;
   }
 
+  if (tipo === 'document') {
+    return renderDocumentCard(m, { classPrefix, url, attrs, shell });
+  }
+
   if (!url) {
     return `<span class="${classPrefix}-bubble-media-pending">Mídia indisponível</span>`;
   }
 
   const label =
-    tipo === 'document'
-      ? 'Abrir arquivo'
-      : tipo === 'audio'
-        ? 'Ouvir áudio'
-        : tipo === 'video'
-          ? 'Ver vídeo'
-          : 'Abrir arquivo';
+    tipo === 'audio'
+      ? 'Ouvir áudio'
+      : tipo === 'video'
+        ? 'Ver vídeo'
+        : 'Abrir arquivo';
 
   return `<a class="${classPrefix}-bubble-media" href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
 }
@@ -102,15 +433,15 @@ function mediaErrorMessage(status, tipo) {
   if (status === 401) return 'Faça login novamente para ver a mídia';
   if (tipo === 'audio') {
     return status === 404
-      ? 'Áudio não baixado — use Sincronizar no chat'
+      ? 'Áudio ainda não disponível — aguarde ou reabra a conversa'
       : 'Não foi possível carregar o áudio';
   }
   if (tipo === 'video') {
     return status === 404
-      ? 'Vídeo não baixado — use Sincronizar no chat'
+      ? 'Vídeo ainda não disponível — aguarde ou reabra a conversa'
       : 'Não foi possível carregar o vídeo';
   }
-  if (status === 404) return 'Imagem não baixada — use Sincronizar no chat';
+  if (status === 404) return 'Mídia ainda não disponível — aguarde ou reabra a conversa';
   return 'Não foi possível carregar a mídia';
 }
 
@@ -137,18 +468,27 @@ function showWhatsappMediaPending(node, message, tipoOverride = '') {
 }
 
 async function fetchMediaBlob(url) {
-  const res = await fetch(resolveMediaFetchUrl(url), { credentials: 'include' });
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(resolveMediaFetchUrl(url), {
+      credentials: 'include',
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    const blob = await res.blob();
+    const headerType = res.headers.get('content-type');
+    if (headerType && (!blob.type || blob.type === 'application/octet-stream')) {
+      return new Blob([await blob.arrayBuffer()], { type: headerType.trim() });
+    }
+    return blob;
+  } finally {
+    clearTimeout(timeout);
   }
-  const blob = await res.blob();
-  const headerType = res.headers.get('content-type');
-  if (headerType && (!blob.type || blob.type === 'application/octet-stream')) {
-    return new Blob([await blob.arrayBuffer()], { type: headerType.trim() });
-  }
-  return blob;
 }
 
 function blobForNode(node, blob) {
@@ -159,9 +499,12 @@ function blobForNode(node, blob) {
 
 function markMediaReady(mediaNode) {
   mediaNode.dataset.hydrated = '1';
-  mediaNode
-    .closest('[class*="bubble-audio-shell"], [class*="bubble-video-shell"]')
-    ?.classList.add('is-ready');
+  const shell = mediaNode.closest('[class*="bubble-audio-shell"], [class*="bubble-video-shell"]');
+  shell?.classList.add('is-ready');
+  if (mediaNode.tagName === 'AUDIO') {
+    if (shell && !shell.dataset.audioBound) bindAudioShell(shell);
+    enableAudioShell(shell, mediaNode);
+  }
 }
 
 function tryDirectMediaSrc(mediaNode, directUrl) {
@@ -275,6 +618,7 @@ export function patchWhatsappMessageMedia(container, mensagem, { classPrefix = '
     `.${classPrefix}-bubble-media-pending`,
     `.${classPrefix}-bubble-media-pending-block`,
     `.${classPrefix}-bubble-media`,
+    `.${classPrefix}-bubble-doc`,
   ].join(', ');
 
   const oldMedia = bubble.querySelector(selector);
@@ -290,6 +634,7 @@ export function patchWhatsappMessageMedia(container, mensagem, { classPrefix = '
   }
 
   void hydrateWhatsappMedia(bubble);
+  hydrateAudioPlayers(bubble);
   return true;
 }
 
@@ -309,11 +654,77 @@ export async function hydrateWhatsappMedia(container) {
   );
 
   await Promise.all([...nodes].map((node) => applyMediaToNode(node)));
+  await hydrateDocumentPreviews(container);
+  hydrateAudioPlayers(container);
+  await hydrateLinkPreviews(container);
+}
+
+let pdfjsModule = null;
+
+async function getPdfJs() {
+  if (!pdfjsModule) {
+    pdfjsModule = await import('pdfjs-dist/build/pdf.mjs');
+    pdfjsModule.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString();
+  }
+  return pdfjsModule;
+}
+
+async function renderPdfPreviewCanvas(canvas) {
+  if (!canvas || canvas.dataset.rendered) return;
+  const url = canvas.dataset.midiaUrl;
+  if (!url) return;
+
+  try {
+    const pdfjs = await getPdfJs();
+    const blob = await fetchMediaBlob(url);
+    const data = await blob.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data }).promise;
+    const page = await pdf.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const maxWidth = 280;
+    const maxHeight = 200;
+    const scale = Math.min(maxWidth / baseViewport.width, maxHeight / baseViewport.height, 2);
+    const viewport = page.getViewport({ scale });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    canvas.dataset.rendered = '1';
+    canvas.closest('[class*="-bubble-doc"]')?.classList.add('is-preview-ready');
+
+    const metaEl = canvas.closest('[class*="-bubble-doc"]')?.querySelector('[data-doc-meta]');
+    if (metaEl) {
+      const parts = [];
+      if (pdf.numPages) {
+        parts.push(pdf.numPages === 1 ? '1 página' : `${pdf.numPages} páginas`);
+      }
+      const current = metaEl.textContent.trim();
+      const typePart = current.split('·').map((part) => part.trim()).find((part) => /^[A-Z0-9]{2,5}$/.test(part));
+      if (typePart) parts.push(typePart);
+      if (blob.size) {
+        const size = formatFileSize(blob.size);
+        if (size) parts.push(size);
+      }
+      if (parts.length) metaEl.textContent = parts.join(' · ');
+    }
+  } catch {
+    canvas.closest('[class*="-bubble-doc-preview"]')?.classList.add('is-preview-failed');
+  }
+}
+
+export async function hydrateDocumentPreviews(container) {
+  if (!container) return;
+  const canvases = container.querySelectorAll(
+    '.wa-bubble-doc-preview-canvas:not([data-rendered]), .lw-whatsapp-bubble-doc-preview-canvas:not([data-rendered])',
+  );
+  await Promise.all([...canvases].map((canvas) => renderPdfPreviewCanvas(canvas)));
 }
 
 const mediaRetryTimers = new WeakMap();
 
-export function retryPendingWhatsappMedia(container, { delays = [500, 1500, 4000, 10000, 20000] } = {}) {
+export function retryPendingWhatsappMedia(container, { delays = [800, 2000, 5000, 12000, 25000, 45000] } = {}) {
   if (!container) return;
 
   const prev = mediaRetryTimers.get(container);

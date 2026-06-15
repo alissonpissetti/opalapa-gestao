@@ -80,6 +80,17 @@ export function saveGrupoSpaces(slug, updates) {
   });
 }
 
+export function fetchEspacosDisponiveis() {
+  return apiRequest('/api/espacos-disponiveis');
+}
+
+export function moveEspacosReserva(slug, data) {
+  return apiRequest(`/api/grupos/${encodeURIComponent(slug)}/espacos/mover-grupo`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export function moveEspacoReserva(slug, origemNumero, data) {
   return apiRequest(
     `/api/grupos/${encodeURIComponent(slug)}/espacos/${encodeURIComponent(origemNumero)}/mover`,
@@ -316,20 +327,23 @@ export function disconnectWhatsapp() {
 }
 
 export function fetchLeadWhatsapp(arrecadacaoId) {
-  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp`);
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp`, { timeoutMs: 90000 });
 }
 
 export function syncLeadWhatsapp(arrecadacaoId, { days = 5 } = {}) {
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/sync`, {
     method: 'POST',
     body: JSON.stringify({ days }),
+    timeoutMs: 180000,
   });
 }
 
-export function sendLeadWhatsapp(arrecadacaoId, text) {
+export function sendLeadWhatsapp(arrecadacaoId, payload) {
+  const body = typeof payload === 'string' ? { text: payload } : payload;
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp/send`, {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
+    timeoutMs: 120000,
   });
 }
 
@@ -344,8 +358,11 @@ export function fetchWhatsappInbox() {
   return apiRequest('/api/whatsapp/inbox');
 }
 
-export function fetchWhatsappThreadMessages(participanteId) {
-  return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages`);
+export function fetchWhatsappThreadMessages(participanteId, { prepare = true } = {}) {
+  const qs = prepare ? '' : '?prepare=0';
+  return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages${qs}`, {
+    timeoutMs: prepare ? 90000 : 30000,
+  });
 }
 
 export function syncWhatsappInboxThread(participanteId, { days = 5 } = {}) {
@@ -363,10 +380,12 @@ export function sendWhatsappInboxReaction(participanteId, mensagemId, emoji) {
   });
 }
 
-export function sendWhatsappInboxMessage(participanteId, text) {
+export function sendWhatsappInboxMessage(participanteId, payload) {
+  const body = typeof payload === 'string' ? { text: payload } : payload;
   return apiRequest(`/api/whatsapp/inbox/${participanteId}/send`, {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
+    timeoutMs: 120000,
   });
 }
 

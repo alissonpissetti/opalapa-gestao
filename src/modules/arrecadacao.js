@@ -41,6 +41,8 @@ import {
 import { wrapWhatsappBubble } from '../lib/whatsapp-reactions.js';
 import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
 import { renderWhatsappMediaHtml, hydrateWhatsappMedia, retryPendingWhatsappMedia, patchWhatsappMessageMedia, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
+import { renderWhatsappBubbleTextHtml, bubbleModifierClasses } from '../lib/whatsapp-bubble-text.js';
+import { initWhatsappCompose } from '../lib/whatsapp-compose.js';
 import { LABELS, COLORS, FUNIL_STATUS_ORDER } from '../lib/constants.js';
 
 const PAGE_CONFIG = {
@@ -2224,7 +2226,7 @@ export function initArrecadacaoModule(
     if (!els.leadWhatsappMessages) return;
     if (!leadWhatsappMessages.length) {
       els.leadWhatsappMessages.innerHTML =
-        '<p class="cell-empty lead-whatsapp-empty">Nenhuma mensagem sincronizada. Use “Sincronizar histórico” ou aguarde novas mensagens.</p>';
+        '<p class="cell-empty lead-whatsapp-empty">Nenhuma mensagem nesta conversa ainda.</p>';
       return;
     }
 
@@ -2233,10 +2235,11 @@ export function initArrecadacaoModule(
         const out = m.direcao === 'out';
         const media = renderWhatsappMediaHtml(m, { classPrefix: 'lw-whatsapp' });
         const text = shouldShowWhatsappBubbleText(m)
-          ? `<p class="lw-whatsapp-text">${escapeHtml(m.texto)}</p>`
+          ? renderWhatsappBubbleTextHtml(m, { classPrefix: 'lw-whatsapp' })
           : '';
+        const mods = bubbleModifierClasses(m, { classPrefix: 'lw-whatsapp' });
         const bubble = `
-        <article class="lw-whatsapp-bubble ${out ? 'lw-whatsapp-bubble--out' : 'lw-whatsapp-bubble--in'}">
+        <article class="lw-whatsapp-bubble ${out ? 'lw-whatsapp-bubble--out' : 'lw-whatsapp-bubble--in'}${mods ? ` ${mods}` : ''}">
           <time class="lw-whatsapp-time">${fmtDate(m.enviadoEm)}</time>
           ${media}
           ${text}
@@ -2273,7 +2276,7 @@ export function initArrecadacaoModule(
     });
   }
 
-  async function loadLeadWhatsapp(id, { syncIfEmpty = false } = {}) {
+  async function loadLeadWhatsapp(id) {
     if (!els.leadWhatsappSection) return;
     els.leadWhatsappMessages.innerHTML = '<p class="cell-muted">Carregando conversa…</p>';
     try {
@@ -2281,10 +2284,6 @@ export function initArrecadacaoModule(
       leadWhatsappMessages = data.mensagens || [];
       renderLeadWhatsappStatus(data.status);
       renderLeadWhatsappMessages();
-
-      if (syncIfEmpty && data.status?.connected && !leadWhatsappMessages.length) {
-        await syncLeadWhatsappHistory(id, { silent: true });
-      }
     } catch (err) {
       els.leadWhatsappMessages.innerHTML = `<p class="cell-empty">${escapeHtml(err.message)}</p>`;
       if (els.leadWhatsappStatus) {
@@ -2317,35 +2316,33 @@ export function initArrecadacaoModule(
     }
   }
 
-  async function submitLeadWhatsapp(e) {
-    e.preventDefault();
-    if (!leadDetailId) return;
-    const text = els.leadWhatsappInput?.value.trim() || '';
-    if (!text) return;
-
-    const btn = els.leadWhatsappForm?.querySelector('button[type="submit"]');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Enviando…';
+  async function deliverLeadWhatsapp(payload) {
+    if (!leadDetailId) return null;
+    const { mensagem } = await sendLeadWhatsapp(leadDetailId, payload);
+    if (mensagem) {
+      leadWhatsappMessages = [...leadWhatsappMessages, mensagem].sort(
+        (a, b) => new Date(a.enviadoEm) - new Date(b.enviadoEm),
+      );
+      renderLeadWhatsappMessages();
     }
-    try {
-      const { mensagem } = await sendLeadWhatsapp(leadDetailId, text);
-      if (mensagem) {
-        leadWhatsappMessages = [...leadWhatsappMessages, mensagem].sort(
-          (a, b) => new Date(a.enviadoEm) - new Date(b.enviadoEm),
-        );
-        renderLeadWhatsappMessages();
-      }
-      if (els.leadWhatsappInput) els.leadWhatsappInput.value = '';
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Enviar';
-      }
-    }
+    return mensagem;
   }
+
+  initWhatsappCompose({
+    formEl: els.leadWhatsappForm,
+    inputEl: els.leadWhatsappInput,
+    fileInputId: 'lead-whatsapp-file',
+    attachBtnId: 'lead-whatsapp-attach',
+    micBtnId: 'lead-whatsapp-mic',
+    sendBtnId: 'lead-whatsapp-send',
+    recordingPanelId: 'lead-whatsapp-recording',
+    onSendText: async (text) => {
+      await deliverLeadWhatsapp({ text });
+    },
+    onSendMedia: async (payload) => {
+      await deliverLeadWhatsapp(payload);
+    },
+  });
 
   function renderResponsavelOptions(selectEl, selectedId = null) {
     if (!selectEl) return;
@@ -2556,7 +2553,7 @@ export function initArrecadacaoModule(
       const loads = [
         loadLeadDetailInteracoes(id),
         loadLeadDetailTarefas(id),
-        loadLeadWhatsapp(id, { syncIfEmpty: true }),
+        loadLeadWhatsapp(id),
       ];
       if (item.tipo === 'artistico' && item.participanteId) {
         loads.push(loadSeguidoresHistorico(item.participanteId));
@@ -3395,7 +3392,6 @@ export function initArrecadacaoModule(
     const criativoId = Number(els.leadOrigemCriativo.value) || null;
     saveLeadOrigem({ marketingCriativoId: criativoId });
   });
-  els.leadWhatsappForm?.addEventListener('submit', submitLeadWhatsapp);
   els.leadWhatsappSync?.addEventListener('click', () => {
     if (leadDetailId) syncLeadWhatsappHistory(leadDetailId);
   });

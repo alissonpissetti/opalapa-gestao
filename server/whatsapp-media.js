@@ -31,12 +31,39 @@ export function whatsappMediaApiUrl(mensagemId, token) {
   return `${base}?t=${encodeURIComponent(token)}`;
 }
 
+export function whatsappMediaPreviewApiUrl(mensagemId, token) {
+  const base = `/api/whatsapp/media/${mensagemId}?preview=1`;
+  if (!token) return base;
+  return `${base}&t=${encodeURIComponent(token)}`;
+}
+
+export function midiaPreviewUrlForMensagemRow(row) {
+  if (!row?.midia_preview_path) return null;
+  return whatsappMediaPreviewApiUrl(row.id);
+}
+
 export function attachMediaTokenToMensagem(mensagem) {
-  if (!mensagem?.id || !mensagem?.midiaUrl) return mensagem;
-  if (!String(mensagem.midiaUrl).startsWith('/api/whatsapp/media/')) return mensagem;
-  if (String(mensagem.midiaUrl).includes('?t=')) return mensagem;
+  if (!mensagem?.id) return mensagem;
   const token = signWhatsappMediaToken(mensagem.id);
-  return { ...mensagem, midiaUrl: whatsappMediaApiUrl(mensagem.id, token) };
+  const out = { ...mensagem };
+
+  if (
+    mensagem.midiaUrl &&
+    String(mensagem.midiaUrl).startsWith('/api/whatsapp/media/') &&
+    !String(mensagem.midiaUrl).includes('?t=')
+  ) {
+    out.midiaUrl = whatsappMediaApiUrl(mensagem.id, token);
+  }
+
+  if (
+    mensagem.midiaPreviewUrl &&
+    String(mensagem.midiaPreviewUrl).startsWith('/api/whatsapp/media/') &&
+    !String(mensagem.midiaPreviewUrl).includes('?t=')
+  ) {
+    out.midiaPreviewUrl = whatsappMediaPreviewApiUrl(mensagem.id, token);
+  }
+
+  return out;
 }
 
 export function attachMediaTokensToMensagens(mensagens) {
@@ -273,7 +300,7 @@ function extractMediaBase64FromRecord(record, tipo) {
 
 export async function storeMediaBuffer(
   pool,
-  { mensagemId, arrecadacaoId, evolutionMessageId, tipo, mimetype, fileName, buffer },
+  { mensagemId, arrecadacaoId, evolutionMessageId, tipo, mimetype, fileName, buffer, rawRecord },
 ) {
   const body = cloneMediaBuffer(buffer);
   if (!body.length) return null;
@@ -307,6 +334,15 @@ export async function storeMediaBuffer(
     );
     void uploadToNextcloud(ncPath, body, finalMimetype).catch((err) => {
       console.warn(`nextcloud mirror ${mensagemId}:`, err.message);
+    });
+  }
+
+  if (tipo === 'document' && rawRecord) {
+    await saveDocumentPreviewFromRecord(pool, {
+      mensagemId,
+      arrecadacaoId,
+      evolutionMessageId,
+      rawRecord,
     });
   }
 
@@ -377,6 +413,76 @@ function extFromMime(mimetype, tipo) {
 function extensionFromFileName(fileName) {
   const match = String(fileName || '').match(/(\.[a-z0-9]{1,8})$/i);
   return match ? match[1].toLowerCase() : '';
+}
+
+function thumbnailBufferFromValue(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value) && value.length) return value;
+  if (value instanceof Uint8Array && value.length) return Buffer.from(value);
+  if (typeof value === 'string' && value.length) {
+    try {
+      const buffer = Buffer.from(value, 'base64');
+      return buffer.length ? buffer : null;
+    } catch {
+      return null;
+    }
+  }
+  if (value?.type === 'Buffer' && Array.isArray(value.data)) {
+    const buffer = Buffer.from(value.data);
+    return buffer.length ? buffer : null;
+  }
+  return null;
+}
+
+function documentNodeFromRecord(rawRecord) {
+  return rawRecord?.message?.documentMessage || null;
+}
+
+function extractDocumentThumbnail(rawRecord) {
+  return thumbnailBufferFromValue(documentNodeFromRecord(rawRecord)?.jpegThumbnail);
+}
+
+function extractDocumentMeta(rawRecord) {
+  const node = documentNodeFromRecord(rawRecord);
+  if (!node) return { fileSize: null, pageCount: null };
+  const fileSize = Number(node.fileLength);
+  const pageCount = Number(node.pageCount);
+  return {
+    fileSize: Number.isFinite(fileSize) && fileSize > 0 ? fileSize : null,
+    pageCount: Number.isFinite(pageCount) && pageCount > 0 ? pageCount : null,
+  };
+}
+
+async function saveDocumentPreviewFromRecord(pool, { mensagemId, arrecadacaoId, evolutionMessageId, rawRecord }) {
+  if (!rawRecord) return null;
+
+  const thumb = extractDocumentThumbnail(rawRecord);
+  const meta = extractDocumentMeta(rawRecord);
+  const updates = [];
+  const params = [];
+  let previewKey = null;
+
+  if (thumb?.length) {
+    previewKey = buildLocalMediaKey(arrecadacaoId, evolutionMessageId, '-preview.jpg');
+    await saveLocalMedia(previewKey, thumb);
+    updates.push('midia_preview_path = ?');
+    params.push(previewKey);
+  }
+
+  if (meta.fileSize) {
+    updates.push('midia_file_size = ?');
+    params.push(meta.fileSize);
+  }
+  if (meta.pageCount) {
+    updates.push('midia_page_count = ?');
+    params.push(meta.pageCount);
+  }
+
+  if (!updates.length) return null;
+
+  params.push(mensagemId);
+  await pool.query(`UPDATE whatsapp_mensagens SET ${updates.join(', ')} WHERE id = ?`, params);
+  return previewKey;
 }
 
 function extractBase64Payload(response) {
@@ -466,6 +572,34 @@ export async function mirrorWhatsappMedia(
           tipo: fullRow[0]?.tipo,
         });
         if (stored) {
+          if (tipo === 'document') {
+            const [previewRow] = await pool.query(
+              `SELECT midia_preview_path FROM whatsapp_mensagens WHERE id = ? LIMIT 1`,
+              [mensagemId],
+            );
+            if (!previewRow[0]?.midia_preview_path) {
+              let previewRecord = rawRecord || null;
+              if (!previewRecord) {
+                const [row] = await pool.query(
+                  `SELECT id, arrecadacao_id, evolution_message_id, remote_jid, direcao, tipo
+                   FROM whatsapp_mensagens WHERE id = ? LIMIT 1`,
+                  [mensagemId],
+                );
+                if (row[0]) {
+                  const candidates = await resolveEvolutionMediaRecords(pool, row[0]);
+                  previewRecord = candidates[0] || null;
+                }
+              }
+              if (previewRecord) {
+                await saveDocumentPreviewFromRecord(pool, {
+                  mensagemId,
+                  arrecadacaoId,
+                  evolutionMessageId,
+                  rawRecord: previewRecord,
+                });
+              }
+            }
+          }
           return { storagePath, alreadyStored: true };
         }
         console.warn(`mirrorWhatsappMedia ${mensagemId}: arquivo local inválido, rebaixando`);
@@ -485,6 +619,7 @@ export async function mirrorWhatsappMedia(
   }
 
   let media = null;
+  let sourceRecord = rawRecord || null;
   if (rawRecord) {
     media = await fetchMediaBuffer(rawRecord, tipo);
   }
@@ -498,7 +633,10 @@ export async function mirrorWhatsappMedia(
       const candidates = await resolveEvolutionMediaRecords(pool, row[0]);
       for (const candidate of candidates) {
         media = await fetchMediaBuffer(candidate, tipo);
-        if (media?.buffer?.length) break;
+        if (media?.buffer?.length) {
+          sourceRecord = candidate;
+          break;
+        }
       }
     }
   }
@@ -522,13 +660,14 @@ export async function mirrorWhatsappMedia(
     mimetype: finalMimetype,
     fileName: media.fileName,
     buffer: media.buffer,
+    rawRecord: sourceRecord,
   });
 }
 
 export async function getWhatsappMensagemMedia(pool, mensagemId) {
   const [rows] = await pool.query(
     `SELECT id, arrecadacao_id, evolution_message_id, remote_jid, direcao, tipo,
-            midia_storage_path, midia_mimetype, midia_url, midia_mirror_erro
+            midia_storage_path, midia_preview_path, midia_mimetype, midia_url, midia_mirror_erro
      FROM whatsapp_mensagens
      WHERE id = ?
      LIMIT 1`,
@@ -560,16 +699,29 @@ async function tryEvolutionMediaStream(pool, row, res) {
       mimetype,
       fileName: media.fileName,
       buffer: media.buffer,
+      rawRecord,
     });
     return true;
   }
   return false;
 }
 
-export async function streamWhatsappMensagemMedia(pool, mensagemId, res) {
+export async function streamWhatsappMensagemMedia(pool, mensagemId, res, { preview = false } = {}) {
   const row = await getWhatsappMensagemMedia(pool, mensagemId);
   if (!row) {
     throw Object.assign(new Error('Mídia não encontrada'), { status: 404 });
+  }
+
+  if (preview) {
+    if (!row.midia_preview_path) {
+      throw Object.assign(new Error('Prévia não disponível'), { status: 404 });
+    }
+    const buffer = await readLocalMedia(row.midia_preview_path);
+    if (!buffer?.length) {
+      throw Object.assign(new Error('Prévia não disponível'), { status: 404 });
+    }
+    sendMediaBuffer(res, buffer, 'image/jpeg');
+    return;
   }
 
   if (row.midia_storage_path) {

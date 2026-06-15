@@ -175,17 +175,44 @@
       </div>
 
       <div class="map-wrap" id="map-wrap">
-        <img id="map-image" src="/map.png" alt="Mapa de espaços Opalapa" width="1392" height="712" />
-        <svg
-          id="map-svg"
-          viewBox="0 0 1392 712"
-          preserveAspectRatio="none"
-          xmlns="http://www.w3.org/2000/svg"
-        ></svg>
+        <div class="map-viewport" id="map-viewport">
+          <div class="map-stage" id="map-stage">
+            <img id="map-image" src="/map-feira-comercial-1.jpg" alt="Mapa de espaços Opalapa" width="1024" height="576" />
+            <svg
+              id="map-svg"
+              viewBox="0 0 1024 576"
+              preserveAspectRatio="none"
+              xmlns="http://www.w3.org/2000/svg"
+            ></svg>
+          </div>
+        </div>
+        <div class="map-zoom-controls hidden" id="map-zoom-controls" aria-label="Zoom do mapa">
+          <button type="button" class="map-zoom-btn" id="btn-map-zoom-out" title="Diminuir zoom">−</button>
+          <span class="map-zoom-label" id="map-zoom-label">100%</span>
+          <button type="button" class="map-zoom-btn" id="btn-map-zoom-in" title="Aumentar zoom">+</button>
+          <button type="button" class="map-zoom-btn map-zoom-reset" id="btn-map-zoom-reset" title="Redefinir zoom">Ajustar</button>
+        </div>
       </div>
       <div id="map-empty" class="map-empty hidden"></div>
 
+      <div class="map-edit-bar hidden" id="map-edit-bar">
+        <div class="map-edit-top">
+          <div class="map-edit-title-row">
+            <strong class="map-edit-title">Edição do mapa</strong>
+            <div class="map-edit-actions">
+              <button type="button" class="tbtn tbtn-sm" id="btn-map-edit-draw">Desenhar</button>
+              <button type="button" class="tbtn tbtn-sm" id="btn-map-edit-clear">Apagar</button>
+              <button type="button" class="tbtn tbtn-sm primary" id="btn-map-edit-save">Salvar</button>
+              <button type="button" class="tbtn tbtn-sm" id="btn-map-edit-cancel">Cancelar</button>
+            </div>
+          </div>
+          <p class="map-edit-hint" id="map-edit-hint">Selecione um espaço e ajuste o polígono no mapa.</p>
+        </div>
+        <div class="map-edit-spaces" id="map-edit-spaces" role="tablist" aria-label="Espaços do mapa"></div>
+      </div>
+
       <div class="toolbar">
+        <button class="tbtn" type="button" id="btn-map-edit-toggle">Editar mapa</button>
         <span id="sync-status" class="sync-status ok">Dados salvos no banco de dados</span>
         <button class="tbtn" type="button" id="btn-print">Imprimir</button>
         <button class="tbtn" type="button" id="btn-export">Exportar CSV</button>
@@ -539,12 +566,12 @@
           </div>
         </div>
         <div class="field hidden" id="m-move-field">
-          <label for="m-move-destino">Mover reserva para outro espaço</label>
+          <label for="m-move-destino" id="m-move-label">Mover reserva para outro espaço</label>
           <select id="m-move-destino">
             <option value="">Manter neste espaço</option>
           </select>
           <p class="field-hint" id="m-move-hint">
-            Transfere participante, status e valores para o espaço escolhido e libera o atual.
+            Transfere participante, status e valores para o espaço escolhido em qualquer agrupamento e libera o atual.
           </p>
         </div>
         <div class="field" id="m-participante-field">
@@ -831,18 +858,35 @@
           <section class="lw-whatsapp" id="lead-whatsapp-section" aria-labelledby="lead-whatsapp-title">
             <div class="lw-whatsapp-head">
               <h3 class="lw-section-label" id="lead-whatsapp-title">Conversa WhatsApp</h3>
-              <button class="tbtn" type="button" id="lead-whatsapp-sync">Sincronizar histórico</button>
+              <button class="tbtn hidden" type="button" id="lead-whatsapp-sync" hidden>Sincronizar histórico</button>
             </div>
             <p class="lw-hint lw-whatsapp-status" id="lead-whatsapp-status" aria-live="polite"></p>
             <div class="lw-whatsapp-messages" id="lead-whatsapp-messages" aria-live="polite"></div>
-            <form class="lw-whatsapp-form" id="lead-whatsapp-form">
+            <form class="lw-whatsapp-form wa-compose" id="lead-whatsapp-form">
+              <input type="file" id="lead-whatsapp-file" accept="image/*" hidden />
+              <button type="button" class="wa-compose-attach" id="lead-whatsapp-attach" title="Enviar imagem" aria-label="Enviar imagem">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 1 1-8 0V5.5a2.5 2.5 0 0 1 5 0v10a1 1 0 1 1-2 0V6H9.5v9.5a3.5 3.5 0 0 0 7 0V5.5a4 4 0 0 0-8 0v12a5.5 5.5 0 0 0 11 0V6z"/></svg>
+              </button>
               <textarea
                 id="lead-whatsapp-input"
                 rows="2"
                 placeholder="Escreva uma mensagem para enviar pelo WhatsApp conectado…"
               ></textarea>
-              <button class="tbtn primary" type="submit" id="lead-whatsapp-send">Enviar</button>
+              <button type="button" class="wa-compose-mic" id="lead-whatsapp-mic" title="Gravar áudio" aria-label="Gravar áudio">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+              </button>
+              <button type="submit" class="tbtn primary wa-compose-send" id="lead-whatsapp-send" hidden>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                <span class="wa-compose-send-label">Enviar</span>
+              </button>
             </form>
+            <div class="wa-compose-recording" id="lead-whatsapp-recording" hidden>
+              <span class="wa-compose-recording-dot" aria-hidden="true"></span>
+              <span class="wa-compose-recording-time">0:00</span>
+              <span class="wa-compose-recording-label">Gravando áudio…</span>
+              <button type="button" class="tbtn wa-compose-recording-cancel">Cancelar</button>
+              <button type="button" class="tbtn primary wa-compose-recording-send">Enviar</button>
+            </div>
           </section>
 
           <div class="lw-timeline" id="lead-interacoes-list" aria-live="polite"></div>
@@ -1086,16 +1130,33 @@
                 <strong id="wa-chat-name"></strong>
                 <span id="wa-chat-phone" class="wa-chat-phone"></span>
               </div>
-              <button type="button" class="tbtn" id="wa-chat-sync" title="Sincronizar mensagens, imagens e reações">
-                Sincronizar
+              <button type="button" class="tbtn hidden" id="wa-chat-sync" hidden title="Atualizar conversa">
+                Atualizar
               </button>
               <button type="button" class="tbtn" id="wa-chat-open-lead">Abrir lead</button>
             </header>
             <div class="wa-chat-messages" id="wa-chat-messages" aria-live="polite"></div>
-            <form class="wa-chat-form" id="wa-chat-form">
+            <form class="wa-chat-form wa-compose" id="wa-chat-form">
+              <input type="file" id="wa-chat-file" accept="image/*" hidden />
+              <button type="button" class="wa-compose-attach" id="wa-chat-attach" title="Enviar imagem" aria-label="Enviar imagem">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 1 1-8 0V5.5a2.5 2.5 0 0 1 5 0v10a1 1 0 1 1-2 0V6H9.5v9.5a3.5 3.5 0 0 0 7 0V5.5a4 4 0 0 0-8 0v12a5.5 5.5 0 0 0 11 0V6z"/></svg>
+              </button>
               <textarea id="wa-chat-input" rows="1" placeholder="Digite uma mensagem"></textarea>
-              <button type="submit" class="tbtn primary" id="wa-chat-send">Enviar</button>
+              <button type="button" class="wa-compose-mic" id="wa-chat-mic" title="Gravar áudio" aria-label="Gravar áudio">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+              </button>
+              <button type="submit" class="tbtn primary wa-compose-send" id="wa-chat-send" hidden>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                <span class="wa-compose-send-label">Enviar</span>
+              </button>
             </form>
+            <div class="wa-compose-recording" id="wa-chat-recording" hidden>
+              <span class="wa-compose-recording-dot" aria-hidden="true"></span>
+              <span class="wa-compose-recording-time">0:00</span>
+              <span class="wa-compose-recording-label">Gravando áudio…</span>
+              <button type="button" class="tbtn wa-compose-recording-cancel">Cancelar</button>
+              <button type="button" class="tbtn primary wa-compose-recording-send">Enviar</button>
+            </div>
           </div>
         </main>
       </div>
