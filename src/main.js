@@ -28,10 +28,17 @@ let eventoSelector = null;
 let navigation = null;
 let store = null;
 
+function syncAppHeaderHeight() {
+  const header = document.querySelector('.app-header');
+  if (!header) return;
+  document.documentElement.style.setProperty('--app-header-height', `${header.offsetHeight}px`);
+}
+
 function showApp(user) {
   userNameEl.textContent = user.name;
   appScreen.classList.remove('hidden');
   loginScreen.hide();
+  requestAnimationFrame(syncAppHeaderHeight);
 }
 
 function showLoginOnly() {
@@ -201,3 +208,5 @@ async function boot() {
 }
 
 boot();
+
+window.addEventListener('resize', syncAppHeaderHeight);

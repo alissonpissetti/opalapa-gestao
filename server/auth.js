@@ -54,6 +54,93 @@ export function verifyToken(token) {
   }
 }
 
+export function signWhatsappMediaToken(mensagemId) {
+  return jwt.sign(
+    { mid: Number(mensagemId), typ: 'whatsapp-media' },
+    getSessionSecret(),
+    { expiresIn: '24h' },
+  );
+}
+
+export function signWhatsappAvatarToken(participanteId, eventoId) {
+  return jwt.sign(
+    { pid: Number(participanteId), eid: Number(eventoId), typ: 'whatsapp-avatar' },
+    getSessionSecret(),
+    { expiresIn: '24h' },
+  );
+}
+
+export function verifyWhatsappAvatarToken(token, participanteId, eventoId) {
+  try {
+    const payload = jwt.verify(token, getSessionSecret());
+    return (
+      payload?.typ === 'whatsapp-avatar' &&
+      Number(payload.pid) === Number(participanteId) &&
+      Number(payload.eid) === Number(eventoId)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function verifyWhatsappMediaToken(token, mensagemId) {
+  try {
+    const payload = jwt.verify(token, getSessionSecret());
+    return (
+      payload?.typ === 'whatsapp-media' && Number(payload.mid) === Number(mensagemId)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function authorizeWhatsappMedia(req, res, next) {
+  const mensagemId = Number(req.params.mensagemId);
+  if (!Number.isInteger(mensagemId) || mensagemId < 1) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const mediaToken = typeof req.query.t === 'string' ? req.query.t : '';
+  if (mediaToken && verifyWhatsappMediaToken(mediaToken, mensagemId)) {
+    return next();
+  }
+
+  return requireAuth(req, res, next);
+}
+
+export function authorizeWhatsappAvatar(req, res, next) {
+  const participanteId = Number(req.params.participanteId);
+  if (!Number.isInteger(participanteId) || participanteId < 1) {
+    return res.status(400).json({ error: 'Participante inválido' });
+  }
+
+  const avatarToken = typeof req.query.t === 'string' ? req.query.t : '';
+  if (avatarToken) {
+    try {
+      const payload = jwt.verify(avatarToken, getSessionSecret());
+      if (
+        payload?.typ === 'whatsapp-avatar' &&
+        Number(payload.pid) === participanteId &&
+        Number(payload.eid) > 0
+      ) {
+        req.eventoId = Number(payload.eid);
+        return next();
+      }
+    } catch {
+      /* fall through to session auth */
+    }
+  }
+
+  requireAuth(req, res, () => {
+    const eventoId = Number(req.headers['x-evento-id']);
+    if (!Number.isInteger(eventoId) || eventoId < 1) {
+      return res.status(400).json({ error: 'Evento não selecionado' });
+    }
+    req.eventoId = eventoId;
+    next();
+  });
+}
+
 export function publicUser(user) {
   return {
     id: user.id,

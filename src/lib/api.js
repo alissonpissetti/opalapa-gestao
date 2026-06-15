@@ -22,12 +22,14 @@ export class ApiError extends Error {
 
 export async function apiRequest(path, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeoutMs = Number(options.timeoutMs) || 30000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let res;
   try {
+    const { timeoutMs: _ignored, ...fetchOptions } = options;
     res = await fetch(`${API_BASE}${path}`, {
-      ...options,
+      ...fetchOptions,
       credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...eventoHeaders(), ...options.headers },
       signal: controller.signal,
@@ -346,10 +348,11 @@ export function fetchWhatsappThreadMessages(participanteId) {
   return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages`);
 }
 
-export function syncWhatsappInboxThread(participanteId, { days = 14 } = {}) {
+export function syncWhatsappInboxThread(participanteId, { days = 5 } = {}) {
   return apiRequest(`/api/whatsapp/inbox/${participanteId}/sync`, {
     method: 'POST',
     body: JSON.stringify({ days }),
+    timeoutMs: 180000,
   });
 }
 

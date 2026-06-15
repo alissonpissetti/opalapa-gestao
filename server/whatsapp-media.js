@@ -16,13 +16,32 @@ import {
 const MEDIA_TIPOS = new Set(['image', 'audio', 'video', 'document', 'sticker']);
 const BACKFILL_MAX_PER_SYNC = 8;
 const BACKFILL_DELAY_MS = 400;
+const MEDIA_WORKER_BATCH = 6;
+const MEDIA_WORKER_INTERVAL_MS = 12000;
 
 export function isWhatsappMediaTipo(tipo) {
   return MEDIA_TIPOS.has(String(tipo || ''));
 }
 
-export function whatsappMediaApiUrl(mensagemId) {
-  return `/api/whatsapp/media/${mensagemId}`;
+import { signWhatsappMediaToken } from './auth.js';
+
+export function whatsappMediaApiUrl(mensagemId, token) {
+  const base = `/api/whatsapp/media/${mensagemId}`;
+  if (!token) return base;
+  return `${base}?t=${encodeURIComponent(token)}`;
+}
+
+export function attachMediaTokenToMensagem(mensagem) {
+  if (!mensagem?.id || !mensagem?.midiaUrl) return mensagem;
+  if (!String(mensagem.midiaUrl).startsWith('/api/whatsapp/media/')) return mensagem;
+  if (String(mensagem.midiaUrl).includes('?t=')) return mensagem;
+  const token = signWhatsappMediaToken(mensagem.id);
+  return { ...mensagem, midiaUrl: whatsappMediaApiUrl(mensagem.id, token) };
+}
+
+export function attachMediaTokensToMensagens(mensagens) {
+  if (!Array.isArray(mensagens)) return mensagens;
+  return mensagens.map((m) => attachMediaTokenToMensagem(m));
 }
 
 export function midiaUrlForMensagemRow(row) {
@@ -39,6 +58,42 @@ function sleep(ms) {
 function cloneMediaBuffer(buffer) {
   if (!buffer?.length) return Buffer.alloc(0);
   return Buffer.from(buffer);
+}
+
+function isWhatsappCdnUrl(url) {
+  try {
+    const host = new URL(String(url)).hostname.toLowerCase();
+    return host.includes('whatsapp.net') || host.includes('whatsapp.com');
+  } catch {
+    return false;
+  }
+}
+
+function isValidMediaBuffer(buffer, mimetype, tipo) {
+  if (!buffer?.length || buffer.length < 4) return false;
+
+  const mime = String(mimetype || '').toLowerCase();
+  const t = String(tipo || '').toLowerCase();
+  const head4 = buffer.slice(0, 4).toString('ascii');
+  const head3 = buffer.slice(0, 3).toString('ascii');
+
+  if (head4 === 'OggS') return true;
+  if (head3 === 'ID3') return true;
+  if (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return true;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return true;
+  if (head3 === 'GIF') return true;
+  if (head4 === 'RIFF' && buffer.length >= 12 && buffer.slice(8, 12).toString('ascii') === 'WEBP') return true;
+  if (buffer.length >= 8 && buffer.slice(4, 8).toString('ascii') === 'ftyp') return true;
+  if (head4 === '%PDF') return true;
+
+  if (t === 'audio' || mime.includes('audio')) return false;
+  if (t === 'image' || t === 'sticker' || mime.includes('image')) return false;
+  if (t === 'video' || mime.includes('video')) {
+    return buffer.length >= 8 && buffer.slice(4, 8).toString('ascii') === 'ftyp';
+  }
+
+  return buffer.length >= 64;
 }
 
 function buildNextcloudRelPath(nextcloud, arrecadacaoId, evolutionMessageId, tipo, mimetype, fileName) {
@@ -86,15 +141,19 @@ async function tryDirectMediaUrl(rawRecord, tipo) {
   const node = mediaNodeFromRecord(rawRecord, tipo);
   const url = node?.url;
   if (!url || !String(url).startsWith('http')) return null;
+  // URLs do CDN do WhatsApp retornam bytes criptografados — só a Evolution descriptografa.
+  if (isWhatsappCdnUrl(url) || node?.mediaKey) return null;
 
   try {
     const remote = await fetch(url, { redirect: 'follow' });
     if (!remote.ok) return null;
     const buffer = Buffer.from(await remote.arrayBuffer());
     if (!buffer.length) return null;
+    const mimetype = node.mimetype || remote.headers.get('content-type') || null;
+    if (!isValidMediaBuffer(buffer, mimetype, tipo)) return null;
     return {
       buffer,
-      mimetype: node.mimetype || remote.headers.get('content-type') || null,
+      mimetype,
       fileName: node.fileName || node.title || null,
     };
   } catch {
@@ -220,6 +279,11 @@ export async function storeMediaBuffer(
   if (!body.length) return null;
 
   const finalMimetype = mimetype || 'application/octet-stream';
+  if (!isValidMediaBuffer(body, finalMimetype, tipo)) {
+    throw Object.assign(new Error('Arquivo de mídia inválido (possivelmente criptografado)'), {
+      status: 422,
+    });
+  }
   const ext = extensionFromFileName(fileName) || extFromMime(finalMimetype, tipo);
   const localKey = buildLocalMediaKey(arrecadacaoId, evolutionMessageId, ext);
 
@@ -296,7 +360,7 @@ function extFromMime(mimetype, tipo) {
   if (mime.includes('png')) return '.png';
   if (mime.includes('webp')) return '.webp';
   if (mime.includes('gif')) return '.gif';
-  if (mime.includes('mp4')) return '.mp4';
+  if (mime.includes('mp4') || mime.includes('m4a')) return '.m4a';
   if (mime.includes('ogg')) return '.ogg';
   if (mime.includes('mpeg') || mime.includes('mp3')) return '.mp3';
   if (mime.includes('pdf')) return '.pdf';
@@ -336,17 +400,18 @@ function extractBase64Payload(response) {
 
 async function fetchMediaBuffer(rawRecord, tipo) {
   const embedded = extractMediaBase64FromRecord(rawRecord, tipo);
-  if (embedded?.buffer?.length) return embedded;
-
-  const direct = await tryDirectMediaUrl(rawRecord, tipo);
-  if (direct?.buffer?.length) return direct;
+  if (embedded?.buffer?.length) {
+    if (isValidMediaBuffer(embedded.buffer, embedded.mimetype, tipo)) return embedded;
+  }
 
   try {
     const response = await getBase64FromMediaMessage(rawRecord, {
       convertToMp4: tipo === 'video',
     });
     const payload = extractBase64Payload(response);
-    if (payload?.buffer?.length) return payload;
+    if (payload?.buffer?.length && isValidMediaBuffer(payload.buffer, payload.mimetype, tipo)) {
+      return payload;
+    }
   } catch (err) {
     const message = String(err.message || '');
     if (message.includes('Failed to fetch stream') || message.includes('410')) {
@@ -355,7 +420,17 @@ async function fetchMediaBuffer(rawRecord, tipo) {
     return { error: message };
   }
 
+  const direct = await tryDirectMediaUrl(rawRecord, tipo);
+  if (direct?.buffer?.length) return direct;
+
   return { error: 'Mídia indisponível na Evolution API' };
+}
+
+async function readValidatedStoredMedia(row) {
+  const buffer = await readStoredMedia(row);
+  if (!buffer?.length) return null;
+  if (isValidMediaBuffer(buffer, row.midia_mimetype, row.tipo)) return buffer;
+  return null;
 }
 
 async function markMirrorError(pool, mensagemId, errorMessage) {
@@ -381,7 +456,19 @@ export async function mirrorWhatsappMedia(
     const storagePath = existing[0].midia_storage_path;
     if (isLocalMediaPath(storagePath)) {
       if (await localMediaExists(storagePath)) {
-        return { storagePath, alreadyStored: true };
+        const [fullRow] = await pool.query(
+          `SELECT midia_mimetype, tipo FROM whatsapp_mensagens WHERE id = ? LIMIT 1`,
+          [mensagemId],
+        );
+        const stored = await readValidatedStoredMedia({
+          midia_storage_path: storagePath,
+          midia_mimetype: fullRow[0]?.midia_mimetype,
+          tipo: fullRow[0]?.tipo,
+        });
+        if (stored) {
+          return { storagePath, alreadyStored: true };
+        }
+        console.warn(`mirrorWhatsappMedia ${mensagemId}: arquivo local inválido, rebaixando`);
       }
       await pool.query(`UPDATE whatsapp_mensagens SET midia_storage_path = NULL WHERE id = ?`, [
         mensagemId,
@@ -487,12 +574,19 @@ export async function streamWhatsappMensagemMedia(pool, mensagemId, res) {
 
   if (row.midia_storage_path) {
     try {
-      const buffer = await readStoredMedia(row);
+      const buffer = await readValidatedStoredMedia(row);
       if (buffer?.length) {
         res.setHeader('Content-Type', row.midia_mimetype || 'application/octet-stream');
         res.setHeader('Cache-Control', 'private, max-age=86400');
         res.send(buffer);
         return;
+      }
+      if (await readStoredMedia(row)) {
+        console.warn(`streamWhatsappMensagemMedia ${mensagemId}: mídia local corrompida, rebaixando`);
+        await pool.query(`UPDATE whatsapp_mensagens SET midia_storage_path = NULL WHERE id = ?`, [
+          mensagemId,
+        ]);
+        row.midia_storage_path = null;
       }
     } catch (err) {
       console.warn(`readStoredMedia ${mensagemId}:`, err.message);
@@ -588,9 +682,10 @@ export async function backfillWhatsappMediaForParticipante(
   pool,
   eventoId,
   participanteId,
-  { limit = 50 } = {},
+  { limit = 50, order = 'desc' } = {},
 ) {
-  const max = Math.min(Math.max(limit, 1), 80);
+  const max = Math.min(Math.max(limit, 1), 200);
+  const sort = order === 'asc' ? 'ASC' : 'DESC';
   const [rows] = await pool.query(
     `SELECT wm.id, wm.arrecadacao_id, wm.evolution_message_id, wm.remote_jid, wm.direcao, wm.tipo,
             wm.midia_mimetype
@@ -598,8 +693,8 @@ export async function backfillWhatsappMediaForParticipante(
      JOIN arrecadacao a ON a.id = wm.arrecadacao_id
      WHERE a.evento_id = ? AND a.participante_id = ?
        AND wm.tipo IN ('image', 'audio', 'video', 'document', 'sticker')
-       AND (wm.midia_storage_path IS NULL OR wm.midia_storage_path LIKE 'file:%')
-     ORDER BY wm.enviado_em DESC
+       AND (wm.midia_storage_path IS NULL OR wm.midia_mirror_erro IS NOT NULL)
+     ORDER BY wm.enviado_em ${sort}
      LIMIT ?`,
     [eventoId, participanteId, max],
   );
@@ -640,4 +735,84 @@ export async function backfillWhatsappMediaForParticipante(
   }
 
   return { mirrored, failed, total: rows.length };
+}
+
+export async function processPendingWhatsappMediaBatch(
+  pool,
+  { limit = MEDIA_WORKER_BATCH, eventoId, participanteId, arrecadacaoId } = {},
+) {
+  const max = Math.min(Math.max(limit, 1), 20);
+  const params = [];
+  let sql = `
+    SELECT wm.id, wm.arrecadacao_id, wm.evolution_message_id, wm.remote_jid, wm.direcao,
+           wm.tipo, wm.midia_mimetype, wm.midia_storage_path
+    FROM whatsapp_mensagens wm
+    JOIN arrecadacao a ON a.id = wm.arrecadacao_id
+    WHERE wm.tipo IN ('image', 'audio', 'video', 'document', 'sticker')
+      AND wm.enviado_em >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+      AND (
+        wm.midia_storage_path IS NULL
+        OR wm.midia_storage_path LIKE 'file:%'
+        OR wm.midia_mirror_erro IS NOT NULL
+      )`;
+
+  if (eventoId) {
+    sql += ' AND a.evento_id = ?';
+    params.push(eventoId);
+  }
+  if (participanteId) {
+    sql += ' AND a.participante_id = ?';
+    params.push(participanteId);
+  }
+  if (arrecadacaoId) {
+    sql += ' AND wm.arrecadacao_id = ?';
+    params.push(arrecadacaoId);
+  }
+
+  sql += ' ORDER BY wm.enviado_em DESC LIMIT ?';
+  params.push(max);
+
+  const [rows] = await pool.query(sql, params);
+  const mirrored = [];
+
+  for (const row of rows) {
+    if (row.midia_storage_path && isLocalMediaPath(row.midia_storage_path)) {
+      if (await localMediaExists(row.midia_storage_path)) {
+        const valid = await readValidatedStoredMedia(row);
+        if (valid) continue;
+        await pool.query(`UPDATE whatsapp_mensagens SET midia_storage_path = NULL WHERE id = ?`, [
+          row.id,
+        ]);
+        row.midia_storage_path = null;
+      }
+    } else if (row.midia_storage_path) {
+      continue;
+    }
+
+    try {
+      const candidates = await resolveEvolutionMediaRecords(pool, row);
+      let result = null;
+      for (const rawRecord of candidates) {
+        result = await mirrorWhatsappMedia(pool, {
+          mensagemId: row.id,
+          arrecadacaoId: row.arrecadacao_id,
+          evolutionMessageId: row.evolution_message_id,
+          tipo: row.tipo,
+          mimetype: row.midia_mimetype,
+          rawRecord,
+          forceRetry: true,
+        });
+        if (result?.storagePath) break;
+        if (result?.failed) break;
+      }
+      if (result?.storagePath && !result.alreadyStored) {
+        mirrored.push({ id: row.id, arrecadacaoId: row.arrecadacao_id });
+      }
+    } catch (err) {
+      console.warn(`processPendingWhatsappMedia ${row.id}:`, err.message);
+    }
+    await sleep(BACKFILL_DELAY_MS);
+  }
+
+  return mirrored;
 }

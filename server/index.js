@@ -91,6 +91,8 @@ import {
   disconnectWhatsapp,
   validateWebhookSecret,
   reactToWhatsappMessage,
+  startWhatsappMediaWorker,
+  runWhatsappMediaBackfill,
 } from './whatsapp.js';
 import {
   listWhatsappInbox,
@@ -99,7 +101,8 @@ import {
 } from './whatsapp-inbox.js';
 import { attachWhatsappWebSocket } from './whatsapp-ws.js';
 import { configureInstanceWebhook, getEvolutionConfig } from './evolution.js';
-import { streamWhatsappMensagemMedia } from './whatsapp-media.js';
+import { streamWhatsappMensagemMedia, attachMediaTokensToMensagens, attachMediaTokenToMensagem } from './whatsapp-media.js';
+import { attachAvatarUrlsToThreads, streamWhatsappAvatar } from './whatsapp-avatars.js';
 import {
   migrateSeguidoresHistorico,
   getSeguidoresHistoricoResumo,
@@ -112,6 +115,8 @@ import {
   setSessionCookie,
   clearSessionCookie,
   requireAuth,
+  authorizeWhatsappMedia,
+  authorizeWhatsappAvatar,
   publicUser,
 } from './auth.js';
 
@@ -567,12 +572,26 @@ app.post('/api/whatsapp/disconnect', requireAuth, async (_req, res) => {
 
 app.get('/api/whatsapp/inbox', requireAuth, requireEvento, async (req, res) => {
   try {
-    const threads = await listWhatsappInbox(pool, req.eventoId);
+    const threads = attachAvatarUrlsToThreads(
+      await listWhatsappInbox(pool, req.eventoId),
+      req.eventoId,
+    );
     const status = await getWhatsappStatusQuick(8000);
     res.json({ threads, status });
   } catch (err) {
     console.error('GET /api/whatsapp/inbox', err);
     res.status(500).json({ error: 'Falha ao carregar conversas' });
+  }
+});
+
+app.get('/api/whatsapp/avatar/:participanteId', authorizeWhatsappAvatar, async (req, res) => {
+  try {
+    const participanteId = Number(req.params.participanteId);
+    await streamWhatsappAvatar(pool, req.eventoId, participanteId, res);
+  } catch (err) {
+    if (err.status === 404) return res.status(404).end();
+    console.error('GET /api/whatsapp/avatar/:participanteId', err);
+    res.status(err.status || 500).json({ error: err.message || 'Falha ao carregar avatar' });
   }
 });
 
@@ -583,7 +602,9 @@ app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEven
       return res.status(400).json({ error: 'Participante inválido' });
     }
 
-    const mensagens = await listMessagesForParticipante(pool, req.eventoId, participanteId);
+    const mensagens = attachMediaTokensToMensagens(
+      await listMessagesForParticipante(pool, req.eventoId, participanteId),
+    );
     res.json({ mensagens });
   } catch (err) {
     console.error('GET /api/whatsapp/inbox/:participanteId/messages', err);
@@ -598,9 +619,9 @@ app.post('/api/whatsapp/inbox/:participanteId/sync', requireAuth, requireEvento,
       return res.status(400).json({ error: 'Participante inválido' });
     }
 
-    const days = Math.min(Math.max(Number(req.body?.days) || 14, 1), 30);
+    const days = Math.min(Math.max(Number(req.body?.days) || 5, 1), 30);
     const result = await syncInboxParticipante(pool, req.eventoId, participanteId, { days });
-    res.json(result);
+    res.json({ ...result, mensagens: attachMediaTokensToMensagens(result.mensagens) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/whatsapp/inbox/:participanteId/sync', err);
@@ -648,7 +669,7 @@ app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento,
       return res.status(404).json({ error: 'Lead não encontrado para este participante' });
     }
     const { mensagem } = await sendWhatsappToLead(pool, arrecadacaoId, req.body?.text ?? req.body?.texto);
-    res.status(201).json({ mensagem });
+    res.status(201).json({ mensagem: attachMediaTokenToMensagem(mensagem) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/whatsapp/inbox/:participanteId/send', err);
@@ -656,12 +677,9 @@ app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento,
   }
 });
 
-app.get('/api/whatsapp/media/:mensagemId', requireAuth, async (req, res) => {
+app.get('/api/whatsapp/media/:mensagemId', authorizeWhatsappMedia, async (req, res) => {
   try {
     const mensagemId = Number(req.params.mensagemId);
-    if (!Number.isInteger(mensagemId) || mensagemId < 1) {
-      return res.status(400).json({ error: 'ID inválido' });
-    }
     await streamWhatsappMensagemMedia(pool, mensagemId, res);
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -682,7 +700,8 @@ app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
       listWhatsappMessages(pool, id),
       getWhatsappStatus(),
     ]);
-    res.json({ mensagens, status });
+    void runWhatsappMediaBackfill(pool, { arrecadacaoId: id, limit: 5 });
+    res.json({ mensagens: attachMediaTokensToMensagens(mensagens), status });
   } catch (err) {
     console.error('GET /api/arrecadacao/:id/whatsapp', err);
     res.status(500).json({ error: 'Falha ao carregar conversa WhatsApp' });
@@ -700,7 +719,7 @@ app.post('/api/arrecadacao/:id/whatsapp/sync', requireAuth, async (req, res) => 
     const result = await syncWhatsappHistory(pool, id, {
       days: Number(req.body?.days) || 5,
     });
-    const mensagens = await listWhatsappMessages(pool, id);
+    const mensagens = attachMediaTokensToMensagens(await listWhatsappMessages(pool, id));
     res.json({ ...result, mensagens });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -740,7 +759,7 @@ app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, async (req, res) => 
     const item = await findArrecadacaoById(pool, id);
     if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
     const { mensagem } = await sendWhatsappToLead(pool, id, req.body?.text ?? req.body?.texto);
-    res.status(201).json({ mensagem });
+    res.status(201).json({ mensagem: attachMediaTokenToMensagem(mensagem) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/arrecadacao/:id/whatsapp/send', err);
@@ -1163,8 +1182,20 @@ async function start() {
   const server = http.createServer(app);
   attachWhatsappWebSocket(server);
 
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `\nPorta ${PORT} já está em uso. Rode "npm run dev" (libera as portas automaticamente) ou:\n` +
+          `  lsof -i :${PORT} -t | xargs kill -9\n`,
+      );
+      process.exit(1);
+    }
+    throw err;
+  });
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Opalapa Gestão rodando na porta ${PORT}`);
+    startWhatsappMediaWorker(pool);
   });
 
   syncAllArrecadacaoFromEspacos(pool).catch((err) => {

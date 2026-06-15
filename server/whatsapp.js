@@ -29,13 +29,19 @@ import {
   isWhatsappMediaTipo,
   midiaUrlForMensagemRow,
   backfillWhatsappMediaForLead,
-  schedulePersistMediaFromRecord,
+  persistMediaFromRecord,
+  processPendingWhatsappMediaBatch,
+  attachMediaTokenToMensagem,
 } from './whatsapp-media.js';
 
 async function emitWhatsappMessage(pool, arrecadacaoId, mensagem) {
   if (!mensagem) return;
   const participanteId = await getParticipanteIdForArrecadacao(pool, arrecadacaoId);
-  broadcastWhatsappEvent('message', { arrecadacaoId, participanteId, mensagem });
+  broadcastWhatsappEvent('message', {
+    arrecadacaoId,
+    participanteId,
+    mensagem: attachMediaTokenToMensagem(mensagem),
+  });
 }
 
 async function emitWhatsappReaction(pool, arrecadacaoId, payload) {
@@ -55,7 +61,11 @@ function rowToReacao(row) {
 async function emitWhatsappMessageMedia(pool, arrecadacaoId, mensagem) {
   if (!mensagem) return;
   const participanteId = await getParticipanteIdForArrecadacao(pool, arrecadacaoId);
-  broadcastWhatsappEvent('message_media', { arrecadacaoId, participanteId, mensagem });
+  broadcastWhatsappEvent('message_media', {
+    arrecadacaoId,
+    participanteId,
+    mensagem: attachMediaTokenToMensagem(mensagem),
+  });
 }
 
 function resolveMidiaUrl(row) {
@@ -93,12 +103,57 @@ async function loadMensagemById(pool, mensagemId) {
   return mensagem;
 }
 
-function scheduleMirrorWhatsappMedia(pool, params) {
-  schedulePersistMediaFromRecord(pool, params, async () => {
+async function ensureMessageMedia(pool, params) {
+  try {
+    const result = await persistMediaFromRecord(pool, params);
+    if (!result?.storagePath) return null;
     const mensagem = await loadMensagemById(pool, params.mensagemId);
-    if (!mensagem) return;
-    await emitWhatsappMessageMedia(pool, params.arrecadacaoId, mensagem);
-  });
+    if (mensagem) {
+      await emitWhatsappMessageMedia(pool, params.arrecadacaoId, mensagem);
+    }
+    return result;
+  } catch (err) {
+    console.warn(`ensureMessageMedia ${params.mensagemId}:`, err.message);
+    return null;
+  }
+}
+
+function scheduleMirrorWhatsappMedia(pool, params) {
+  void ensureMessageMedia(pool, params);
+}
+
+export async function runWhatsappMediaBackfill(pool, options = {}) {
+  const mirrored = await processPendingWhatsappMediaBatch(pool, options);
+  for (const row of mirrored) {
+    const mensagem = await loadMensagemById(pool, row.id);
+    if (mensagem) {
+      await emitWhatsappMessageMedia(pool, row.arrecadacaoId, mensagem);
+    }
+  }
+  return mirrored.length;
+}
+
+export function startWhatsappMediaWorker(pool) {
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const { enabled } = getEvolutionConfig();
+      if (!enabled) return;
+      const count = await runWhatsappMediaBackfill(pool, { limit: 6 });
+      if (count > 0) {
+        console.info(`WhatsApp mídia automática: ${count} arquivo(s) baixado(s)`);
+      }
+    } catch (err) {
+      console.warn('WhatsApp media worker:', err.message);
+    } finally {
+      running = false;
+    }
+  };
+
+  setInterval(tick, 12000);
+  setTimeout(tick, 4000);
 }
 
 export function normalizeEmoji(value) {
@@ -873,14 +928,14 @@ export async function persistEmbeddedReactionsFromRecord(pool, rawRecord, { arre
   return { saved };
 }
 
-export async function persistEvolutionMessage(pool, rawMessage, { arrecadacaoIds } = {}) {
+export async function persistEvolutionMessage(pool, rawMessage, { arrecadacaoIds, awaitMedia = false } = {}) {
   const record = normalizeEvolutionRecord(rawMessage);
   if (!record) return { saved: 0 };
 
   if (isReactionRecord(record)) {
     const reaction = extractReactionFromRecord(record);
     if (reaction) {
-      const phone = phoneFromRemoteJid(String(record.key?.remoteJid || ''));
+      const phone = phoneFromRemoteJid(resolveChatRemoteJid(record) || String(record.key?.remoteJid || ''));
       const leadIds =
         arrecadacaoIds?.length > 0
           ? arrecadacaoIds
@@ -894,10 +949,14 @@ export async function persistEvolutionMessage(pool, rawMessage, { arrecadacaoIds
   }
 
   const key = record.key || {};
-  const remoteJid = String(key.remoteJid || '');
-  if (!remoteJid || isGroupJid(remoteJid)) return { saved: 0 };
+  const rawRemoteJid = String(key.remoteJid || '');
+  const chatJid = resolveChatRemoteJid(record);
+  if (isGroupJid(rawRemoteJid) || (chatJid && isGroupJid(chatJid))) return { saved: 0 };
 
-  const phone = phoneFromRemoteJid(remoteJid);
+  const remoteJid = chatJid || rawRemoteJid;
+  if (!remoteJid) return { saved: 0 };
+
+  const phone = phoneFromRemoteJid(chatJid || rawRemoteJid);
   const leadIds = await pickPrimaryLeadIds(
     pool,
     arrecadacaoIds?.length > 0 ? arrecadacaoIds : await findArrecadacaoIdsByPhone(pool, phone),
@@ -945,20 +1004,33 @@ export async function persistEvolutionMessage(pool, rawMessage, { arrecadacaoIds
     }
 
     if (row) {
+      let mensagemToEmit = row;
       if (isWhatsappMediaTipo(content.tipo)) {
         const [mediaRow] = await pool.query(
           `SELECT midia_storage_path FROM whatsapp_mensagens WHERE id = ? LIMIT 1`,
           [row.id],
         );
-        if (!mediaRow[0]?.midia_storage_path) {
-          scheduleMirrorWhatsappMedia(pool, {
+        const storagePath = mediaRow[0]?.midia_storage_path;
+        const needsMirror =
+          !storagePath ||
+          String(storagePath).startsWith('file:');
+
+        if (needsMirror) {
+          const mirrorParams = {
             mensagemId: row.id,
             arrecadacaoId,
             evolutionMessageId,
             tipo: content.tipo,
             mimetype: content.midiaMimetype,
             rawRecord: record,
-          });
+          };
+          if (awaitMedia) {
+            await ensureMessageMedia(pool, mirrorParams);
+            const refreshed = await loadMensagemById(pool, row.id);
+            if (refreshed) mensagemToEmit = refreshed;
+          } else {
+            scheduleMirrorWhatsappMedia(pool, mirrorParams);
+          }
         }
       }
       if (inserted) {
@@ -966,7 +1038,14 @@ export async function persistEvolutionMessage(pool, rawMessage, { arrecadacaoIds
         const emitKey = `${participanteId || arrecadacaoId}:${evolutionMessageId}`;
         if (!emitted.has(emitKey)) {
           emitted.add(emitKey);
-          await emitWhatsappMessage(pool, arrecadacaoId, row);
+          await emitWhatsappMessage(pool, arrecadacaoId, mensagemToEmit);
+        }
+      } else if (awaitMedia && isWhatsappMediaTipo(content.tipo)) {
+        const participanteId = await getParticipanteIdForArrecadacao(pool, arrecadacaoId);
+        const emitKey = `${participanteId || arrecadacaoId}:${evolutionMessageId}:media`;
+        if (!emitted.has(emitKey)) {
+          emitted.add(emitKey);
+          await emitWhatsappMessageMedia(pool, arrecadacaoId, mensagemToEmit);
         }
       }
     }
@@ -991,9 +1070,11 @@ export async function handleEvolutionWebhook(pool, payload) {
   for (const msg of messages) {
     const record = normalizeEvolutionRecord(msg);
     if (!record || isReactionRecord(record)) continue;
-    const result = await persistEvolutionMessage(pool, msg);
+    const result = await persistEvolutionMessage(pool, msg, { awaitMedia: true });
     saved += result.saved || 0;
   }
+
+  void runWhatsappMediaBackfill(pool, { limit: 4 });
 
   return {
     ok: true,
@@ -1003,7 +1084,11 @@ export async function handleEvolutionWebhook(pool, payload) {
   };
 }
 
-export async function syncWhatsappHistory(pool, arrecadacaoId, { days = 5, mediaBackfillLimit } = {}) {
+export async function syncWhatsappHistory(
+  pool,
+  arrecadacaoId,
+  { days = 5, mediaBackfillLimit, maxPages = 15, pageSize = 100, arrecadacaoIds } = {},
+) {
   const phone = await getLeadPhone(pool, arrecadacaoId);
   if (!phone) {
     throw Object.assign(new Error('Lead sem WhatsApp cadastrado'), { status: 400 });
@@ -1017,7 +1102,7 @@ export async function syncWhatsappHistory(pool, arrecadacaoId, { days = 5, media
   const seen = new Set();
   const records = [];
   for (const remoteJid of remoteJids) {
-    const batch = await fetchChatMessagesSince(remoteJid, { days });
+    const batch = await fetchChatMessagesSince(remoteJid, { days, maxPages, pageSize });
     for (const record of batch) {
       const id = record?.key?.id || record?.id;
       if (!id || seen.has(id)) continue;
@@ -1033,12 +1118,14 @@ export async function syncWhatsappHistory(pool, arrecadacaoId, { days = 5, media
   }
 
   let imported = 0;
+  const persistIds =
+    Array.isArray(arrecadacaoIds) && arrecadacaoIds.length ? arrecadacaoIds : [arrecadacaoId];
 
   for (const record of records) {
     const normalized = normalizeEvolutionRecord(record);
     if (normalized && isReactionRecord(normalized)) continue;
     const result = await persistEvolutionMessage(pool, record, {
-      arrecadacaoIds: [arrecadacaoId],
+      arrecadacaoIds: persistIds,
     });
     imported += result.saved || 0;
   }

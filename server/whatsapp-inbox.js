@@ -1,6 +1,14 @@
 import { attachReactionsToMensagens, syncWhatsappHistory, backfillReactionsForParticipante } from './whatsapp.js';
 import { midiaUrlForMensagemRow, backfillWhatsappMediaForParticipante } from './whatsapp-media.js';
 
+function queueParticipanteMediaBackfill(pool, eventoId, participanteId) {
+  void import('./whatsapp.js')
+    .then(({ runWhatsappMediaBackfill }) =>
+      runWhatsappMediaBackfill(pool, { eventoId, participanteId, limit: 5 }),
+    )
+    .catch(() => {});
+}
+
 function rowToMensagem(row) {
   return {
     id: row.id,
@@ -97,7 +105,7 @@ export async function listWhatsappInbox(pool, eventoId) {
   });
 }
 
-export async function listMessagesForParticipante(pool, eventoId, participanteId, { limit = 400 } = {}) {
+export async function listMessagesForParticipante(pool, eventoId, participanteId, { limit = 500 } = {}) {
   const max = Math.min(Math.max(limit, 1), 500);
   const [rows] = await pool.query(
     `SELECT recent.id, recent.arrecadacao_id, recent.evolution_message_id, recent.remote_jid,
@@ -125,6 +133,7 @@ export async function listMessagesForParticipante(pool, eventoId, participanteId
     [eventoId, participanteId, eventoId, participanteId, max],
   );
   const mensagens = rows.map(rowToMensagem);
+  queueParticipanteMediaBackfill(pool, eventoId, participanteId);
   return attachReactionsToMensagens(pool, mensagens);
 }
 
@@ -139,11 +148,36 @@ export async function getPrimaryArrecadacaoId(pool, eventoId, participanteId) {
   return rows[0]?.id ? Number(rows[0].id) : null;
 }
 
-export async function syncInboxParticipante(pool, eventoId, participanteId, { days = 14 } = {}) {
+async function getArrecadacaoIdsForParticipante(pool, eventoId, participanteId) {
+  const [rows] = await pool.query(
+    `SELECT id FROM arrecadacao
+     WHERE evento_id = ? AND participante_id = ?
+     ORDER BY id ASC`,
+    [eventoId, participanteId],
+  );
+  return rows.map((row) => Number(row.id));
+}
+
+async function countPendingMediaForParticipante(pool, eventoId, participanteId) {
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS c
+     FROM whatsapp_mensagens wm
+     JOIN arrecadacao a ON a.id = wm.arrecadacao_id
+     WHERE a.evento_id = ? AND a.participante_id = ?
+       AND wm.tipo IN ('image', 'audio', 'video', 'document', 'sticker')
+       AND wm.midia_storage_path IS NULL`,
+    [eventoId, participanteId],
+  );
+  return Number(rows[0]?.c || 0);
+}
+
+export async function syncInboxParticipante(pool, eventoId, participanteId, { days = 5 } = {}) {
   const arrecadacaoId = await getPrimaryArrecadacaoId(pool, eventoId, participanteId);
   if (!arrecadacaoId) {
     throw Object.assign(new Error('Lead não encontrado para este contato'), { status: 404 });
   }
+
+  const arrecadacaoIds = await getArrecadacaoIdsForParticipante(pool, eventoId, participanteId);
 
   await pool.query(
     `UPDATE whatsapp_mensagens wm
@@ -155,29 +189,52 @@ export async function syncInboxParticipante(pool, eventoId, participanteId, { da
     [eventoId, participanteId],
   );
 
-  const [historyResult, reactionsResult, mediaResult] = await Promise.allSettled([
-    syncWhatsappHistory(pool, arrecadacaoId, { days, mediaBackfillLimit: 50 }),
-    backfillReactionsForParticipante(pool, eventoId, participanteId, {
-      days,
-      maxReactions: 300,
-      maxPages: 50,
-    }),
-    backfillWhatsappMediaForParticipante(pool, eventoId, participanteId, { limit: 80 }),
-  ]);
+  const errors = [];
+  let history = null;
+  let reactions = null;
+  let media = null;
 
+  try {
+    history = await syncWhatsappHistory(pool, arrecadacaoId, {
+      days,
+      mediaBackfillLimit: 50,
+      maxPages: 15,
+      pageSize: 100,
+      arrecadacaoIds,
+    });
+  } catch (err) {
+    errors.push(err.message || 'Falha ao sincronizar histórico');
+  }
+
+  try {
+    reactions = await backfillReactionsForParticipante(pool, eventoId, participanteId, {
+      days,
+      maxReactions: 200,
+      maxPages: 30,
+    });
+  } catch (err) {
+    errors.push(err.message || 'Falha ao sincronizar reações');
+  }
+
+  try {
+    media = await backfillWhatsappMediaForParticipante(pool, eventoId, participanteId, {
+      limit: 80,
+      order: 'desc',
+    });
+  } catch (err) {
+    errors.push(err.message || 'Falha ao baixar mídias');
+  }
+
+  const pendingMedia = await countPendingMediaForParticipante(pool, eventoId, participanteId);
   const mensagens = await listMessagesForParticipante(pool, eventoId, participanteId);
 
   return {
-    ok: true,
+    ok: errors.length === 0,
     days,
-    history: historyResult.status === 'fulfilled' ? historyResult.value : null,
-    reactions: reactionsResult.status === 'fulfilled' ? reactionsResult.value : null,
-    media: mediaResult.status === 'fulfilled' ? mediaResult.value : null,
+    history,
+    reactions,
+    media: media ? { ...media, pending: pendingMedia } : { mirrored: 0, failed: 0, total: 0, pending: pendingMedia },
     mensagens,
-    errors: [
-      historyResult.status === 'rejected' ? historyResult.reason?.message : null,
-      reactionsResult.status === 'rejected' ? reactionsResult.reason?.message : null,
-      mediaResult.status === 'rejected' ? mediaResult.reason?.message : null,
-    ].filter(Boolean),
+    errors,
   };
 }

@@ -346,15 +346,22 @@ export async function resolveRemoteJidsForPhone(phone) {
     const chats = await findChats({ offset: 500 });
     const list = Array.isArray(chats) ? chats : [];
     for (const chat of list) {
-      const candidates = new Set(
-        [chat.remoteJid, chat.lastMessage?.key?.remoteJid, chat.lastMessage?.key?.participantAlt].filter(
-          Boolean,
-        ),
-      );
-      for (const jid of candidates) {
-        if (isGroupJid(jid)) continue;
+      const key = chat.lastMessage?.key || {};
+      const allJids = [chat.remoteJid, chat.id, key.remoteJid, key.remoteJidAlt, key.participantAlt]
+        .filter(Boolean)
+        .map(String);
+
+      const phoneJids = allJids.filter((jid) => !isGroupJid(jid) && !String(jid).includes('@lid'));
+      const matchesPhone = phoneJids.some((jid) => {
         const digits = phoneFromRemoteJid(jid);
-        if (digits && phonesEquivalent(phone, digits)) jids.add(jid);
+        return digits && phonesEquivalent(phone, digits);
+      });
+
+      if (!matchesPhone) continue;
+
+      for (const jid of allJids) {
+        if (!jid || isGroupJid(jid)) continue;
+        jids.add(jid);
       }
     }
   } catch (err) {
@@ -430,21 +437,29 @@ export async function fetchGlobalReactionMessagesSince({
   return all;
 }
 
-export async function fetchChatMessagesSince(remoteJid, { days = 5, pageSize = 100, maxPages = 15 } = {}) {
-  const now = Math.floor(Date.now() / 1000);
-  const gte = now - Math.max(1, days) * 24 * 3600;
+function messageTimestampSeconds(record) {
+  const ts = Number(
+    record?.messageTimestamp ?? record?.message?.messageTimestamp ?? record?.key?.messageTimestamp ?? 0,
+  );
+  if (!Number.isFinite(ts) || ts <= 0) return 0;
+  return ts < 1e12 ? ts : Math.floor(ts / 1000);
+}
+
+function filterRecordsByDays(records, gte, lte) {
+  return records.filter((record) => {
+    const sec = messageTimestampSeconds(record);
+    return sec >= gte && sec <= lte;
+  });
+}
+
+async function paginateChatMessages(fetchPage, { pageSize = 100, maxPages = 15 } = {}) {
   const all = [];
   const seen = new Set();
   let page = 1;
   let totalPages = 1;
 
   while (page <= totalPages && page <= maxPages) {
-    const response = await findChatMessages(remoteJid, {
-      page,
-      offset: pageSize,
-      messageTimestampGte: gte,
-      messageTimestampLte: now,
-    });
+    const response = await fetchPage(page, pageSize);
     const records = collectFindMessagesRecords(response);
     const meta = response?.messages && typeof response.messages === 'object' ? response.messages : response;
     totalPages = Math.max(1, Number(meta?.pages) || 1);
@@ -463,6 +478,64 @@ export async function fetchChatMessagesSince(remoteJid, { days = 5, pageSize = 1
   }
 
   return all;
+}
+
+async function findChatMessagesIso(
+  remoteJid,
+  { page = 1, offset = 100, messageTimestampGte, messageTimestampLte } = {},
+) {
+  const { instance } = getEvolutionConfig();
+  const where = { key: { remoteJid } };
+  if (messageTimestampGte != null || messageTimestampLte != null) {
+    where.messageTimestamp = {};
+    if (messageTimestampGte != null) {
+      where.messageTimestamp.gte = new Date(Number(messageTimestampGte) * 1000).toISOString();
+    }
+    if (messageTimestampLte != null) {
+      where.messageTimestamp.lte = new Date(Number(messageTimestampLte) * 1000).toISOString();
+    }
+  }
+
+  return evoFetch(`/chat/findMessages/${encodeURIComponent(instance)}`, {
+    method: 'POST',
+    body: JSON.stringify({ where, page, offset }),
+  });
+}
+
+export async function fetchChatMessagesSince(remoteJid, { days = 5, pageSize = 100, maxPages = 15 } = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const gte = now - Math.max(1, days) * 24 * 3600;
+  const opts = { pageSize, maxPages };
+
+  const withUnixFilter = await paginateChatMessages(
+    (page, offset) =>
+      findChatMessages(remoteJid, {
+        page,
+        offset,
+        messageTimestampGte: gte,
+        messageTimestampLte: now,
+      }),
+    opts,
+  );
+  if (withUnixFilter.length) return filterRecordsByDays(withUnixFilter, gte, now);
+
+  const withIsoFilter = await paginateChatMessages(
+    (page, offset) =>
+      findChatMessagesIso(remoteJid, {
+        page,
+        offset,
+        messageTimestampGte: gte,
+        messageTimestampLte: now,
+      }),
+    opts,
+  );
+  if (withIsoFilter.length) return filterRecordsByDays(withIsoFilter, gte, now);
+
+  const unfiltered = await paginateChatMessages(
+    (page, offset) => findChatMessages(remoteJid, { page, offset }),
+    opts,
+  );
+  return filterRecordsByDays(unfiltered, gte, now);
 }
 
 function collectFindMessagesRecords(body) {
@@ -496,4 +569,28 @@ export async function configureInstanceWebhook(webhookUrl, secret) {
     method: 'POST',
     body: JSON.stringify({ webhook }),
   });
+}
+
+export async function fetchProfilePictureUrl(number) {
+  const { instance } = getEvolutionConfig();
+  const normalized = toWhatsAppNumber(number) || String(number || '').replace(/\D/g, '');
+  if (!normalized) return null;
+
+  const body = await evoFetch(`/chat/fetchProfilePictureUrl/${encodeURIComponent(instance)}`, {
+    method: 'POST',
+    body: JSON.stringify({ number: normalized }),
+    timeoutMs: 15000,
+  });
+
+  if (!body || typeof body !== 'object') return null;
+
+  const url =
+    body.profilePictureUrl ||
+    body.profilePicUrl ||
+    body.picture ||
+    body.url ||
+    body?.data?.profilePictureUrl ||
+    body?.data?.profilePicUrl;
+
+  return typeof url === 'string' && url.trim() ? url.trim() : null;
 }

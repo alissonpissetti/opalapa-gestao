@@ -8,7 +8,7 @@ import {
 import { fmtDate, formatPhoneDisplay, escapeHtml } from '../lib/format.js';
 import { wrapWhatsappBubble, renderWhatsappReactions } from '../lib/whatsapp-reactions.js';
 import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
-import { renderWhatsappMediaHtml, hydrateWhatsappMedia, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
+import { renderWhatsappMediaHtml, hydrateWhatsappMedia, retryPendingWhatsappMedia, patchWhatsappMessageMedia, stableMediaRef, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
 import { onEventoChange } from '../lib/evento.js';
 
 function wsUrl() {
@@ -23,6 +23,70 @@ function wsUrl() {
     }
   }
   return `${proto}//${location.host}/ws/whatsapp`;
+}
+
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
+function resolveApiAssetUrl(url) {
+  if (!url) return url;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `${API_BASE}${url}`;
+}
+
+function participantInitial(name) {
+  return (name || '?').trim().charAt(0).toUpperCase();
+}
+
+function renderContactAvatar(contact, className = 'wa-thread-avatar') {
+  const initial = participantInitial(contact?.participanteNome);
+  if (!contact?.avatarUrl) {
+    return `<span class="${className}" data-initial="${escapeHtml(initial)}">${escapeHtml(initial)}</span>`;
+  }
+  const src = escapeHtml(resolveApiAssetUrl(contact.avatarUrl));
+  return `<span class="${className} ${className}--photo" data-initial="${escapeHtml(initial)}"><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
+}
+
+function mountContactAvatar(el, contact, className = 'wa-chat-avatar') {
+  if (!el) return;
+  const initial = participantInitial(contact?.participanteNome);
+  el.className = className;
+  el.dataset.initial = initial;
+  el.replaceChildren();
+  if (!contact?.avatarUrl) {
+    el.textContent = initial;
+    return;
+  }
+  el.classList.add(`${className}--photo`);
+  const img = document.createElement('img');
+  img.src = resolveApiAssetUrl(contact.avatarUrl);
+  img.alt = '';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.addEventListener(
+    'error',
+    () => {
+      el.className = className;
+      el.textContent = initial;
+    },
+    { once: true },
+  );
+  el.appendChild(img);
+}
+
+function bindContactAvatars(container) {
+  if (!container) return;
+  container.querySelectorAll('.wa-thread-avatar--photo img, .wa-chat-avatar--photo img').forEach((img) => {
+    img.addEventListener(
+      'error',
+      () => {
+        const wrap = img.closest('.wa-thread-avatar, .wa-chat-avatar');
+        if (!wrap) return;
+        wrap.className = wrap.classList.contains('wa-chat-avatar') ? 'wa-chat-avatar' : 'wa-thread-avatar';
+        wrap.textContent = wrap.dataset.initial || '?';
+      },
+      { once: true },
+    );
+  });
 }
 
 function previewText(msg) {
@@ -48,6 +112,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   const chatActive = document.getElementById('wa-chat-active');
   const chatName = document.getElementById('wa-chat-name');
   const chatPhone = document.getElementById('wa-chat-phone');
+  const chatAvatar = document.getElementById('wa-chat-avatar');
   const chatMessages = document.getElementById('wa-chat-messages');
   const chatForm = document.getElementById('wa-chat-form');
   const chatInput = document.getElementById('wa-chat-input');
@@ -66,6 +131,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   let pollTimer = null;
   const POLL_INTERVAL_MS = 5000;
   let filter = '';
+  let inboxStatus = null;
   let unbindReactions = null;
 
   function isChatNearBottom(threshold = 96) {
@@ -82,7 +148,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
           .map((r) => `${r.autorKey}:${r.emoji}`)
           .sort()
           .join(';');
-        return `${m.id}|${m.evolutionMessageId || ''}|${m.texto || ''}|${m.tipo}|${m.midiaUrl || ''}|${reactions}`;
+        return `${m.id}|${m.evolutionMessageId || ''}|${m.texto || ''}|${m.tipo}|${stableMediaRef(m)}|${reactions}`;
       })
       .join('\n');
   }
@@ -100,8 +166,8 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     const bubble = `
       <article class="wa-bubble ${out ? 'wa-bubble--out' : 'wa-bubble--in'}" data-msg-id="${m.id}">
         <time class="wa-bubble-time">${fmtDate(m.enviadoEm)}</time>
-        ${text}
         ${media}
+        ${text}
       </article>`;
     return wrapWhatsappBubble(bubble, {
       out,
@@ -140,8 +206,13 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
 
     const stickToBottom = forceBottom || isChatNearBottom();
     const prevScrollTop = chatMessages.scrollTop;
+    const total = activeThread?.totalMensagens || messages.length;
+    const historyHint =
+      total <= messages.length
+        ? `<p class="wa-chat-history-hint">Início da conversa · ${messages.length} mensagem(ns) carregada(s)</p>`
+        : `<p class="wa-chat-history-hint">${messages.length} de ${total} mensagens · role para cima para ver mais antigas</p>`;
 
-    chatMessages.innerHTML = messages.map(renderMessageBubble).join('');
+    chatMessages.innerHTML = historyHint + messages.map(renderMessageBubble).join('');
 
     if (stickToBottom) {
       chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -150,23 +221,32 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     }
 
     void hydrateWhatsappMedia(chatMessages);
+    retryPendingWhatsappMedia(chatMessages);
     bindReactionControls();
+  }
+
+  function filteredThreads() {
+    const q = filter.trim().toLowerCase();
+    if (!q) return threads;
+    const qDigits = q.replace(/\D/g, '');
+    return threads.filter((t) => {
+      const name = String(t.participanteNome || '').toLowerCase();
+      const nameMatch = name.includes(q);
+      const phoneDigits = String(t.telefone || '').replace(/\D/g, '');
+      const phoneMatch = qDigits.length > 0 && phoneDigits.includes(qDigits);
+      return nameMatch || phoneMatch;
+    });
   }
 
   function renderThreads() {
     if (!threadList) return;
     const q = filter.trim().toLowerCase();
-    const list = q
-      ? threads.filter(
-          (t) =>
-            t.participanteNome.toLowerCase().includes(q) ||
-            String(t.telefone || '').includes(q.replace(/\D/g, '')),
-        )
-      : threads;
+    const list = q ? filteredThreads() : threads;
 
     if (!list.length) {
-      threadList.innerHTML =
-        '<p class="wa-thread-empty">Nenhum lead com WhatsApp neste evento.</p>';
+      threadList.innerHTML = q
+        ? '<p class="wa-thread-empty">Nenhum lead encontrado para esta busca.</p>'
+        : '<p class="wa-thread-empty">Nenhum lead com WhatsApp neste evento.</p>';
       return;
     }
 
@@ -175,10 +255,9 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
         const active = activeThread?.participanteId === t.participanteId;
         const preview = previewText(t.ultimaMensagem);
         const time = t.ultimaMensagem?.enviadoEm ? fmtDate(t.ultimaMensagem.enviadoEm) : '';
-        const initial = (t.participanteNome || '?').trim().charAt(0).toUpperCase();
         return `
         <button type="button" class="wa-thread${active ? ' wa-thread--active' : ''}" data-participante-id="${t.participanteId}" role="listitem">
-          <span class="wa-thread-avatar" aria-hidden="true">${escapeHtml(initial)}</span>
+          ${renderContactAvatar(t)}
           <span class="wa-thread-body">
             <span class="wa-thread-top">
               <strong class="wa-thread-name">${escapeHtml(t.participanteNome)}</strong>
@@ -193,19 +272,27 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     threadList.querySelectorAll('.wa-thread').forEach((btn) => {
       btn.addEventListener('click', () => selectThread(Number(btn.dataset.participanteId)));
     });
+    bindContactAvatars(threadList);
   }
 
   function updateStatus(status) {
     if (!statusEl) return;
-    if (!status?.configured) {
+    if (status) inboxStatus = status;
+    const current = inboxStatus || status;
+    if (!current?.configured) {
       statusEl.textContent = 'Evolution API não configurada.';
       return;
     }
-    if (!status.connected) {
+    if (!current.connected) {
       statusEl.textContent = 'WhatsApp desconectado — conecte pelo botão no menu superior.';
       return;
     }
     const wsLabel = wsConnected ? 'tempo real ativo' : 'atualizando a cada 5s';
+    const q = filter.trim();
+    if (q) {
+      statusEl.textContent = `${filteredThreads().length} de ${threads.length} lead(s) · ${wsLabel}`;
+      return;
+    }
     statusEl.textContent = `${threads.length} lead(s) com WhatsApp · ${wsLabel}`;
   }
 
@@ -257,21 +344,24 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     btnChatSync.textContent = 'Sincronizando…';
     if (chatMessages) {
       chatMessages.innerHTML =
-        '<p class="wa-chat-placeholder">Sincronizando mensagens, mídias e reações…<br><small>Isso pode levar até um minuto.</small></p>';
+        '<p class="wa-chat-placeholder">Sincronizando mensagens, mídias e reações…<br><small>Últimos 5 dias na Evolution. Pode levar até 1 minuto.</small></p>';
     }
     try {
-      const data = await syncWhatsappInboxThread(participanteId, { days: 14 });
+      const data = await syncWhatsappInboxThread(participanteId, { days: 5 });
       mergeMessages(data.mensagens || [], { forceBottom: true });
       const parts = [];
-      if (data.history?.imported) parts.push(`${data.history.imported} msg`);
+      if (data.history?.total) parts.push(`${data.history.total} no histórico`);
+      if (data.history?.imported) parts.push(`${data.history.imported} novas`);
       if (data.reactions?.applied) parts.push(`${data.reactions.applied} reações`);
-      if (data.media?.mirrored) parts.push(`${data.media.mirrored} mídias`);
+      if (data.media?.mirrored) parts.push(`${data.media.mirrored} mídias baixadas`);
+      if (data.media?.failed) parts.push(`${data.media.failed} mídias falharam`);
+      if (data.media?.pending) parts.push(`${data.media.pending} mídias pendentes`);
       if (data.errors?.length) {
         statusEl.textContent = `Sync com avisos: ${data.errors[0]}`;
       } else if (parts.length) {
-        statusEl.textContent = `Sincronizado: ${parts.join(', ')}`;
+        statusEl.textContent = `Sincronizado (${data.days || 5} dias): ${parts.join(', ')}`;
       } else {
-        statusEl.textContent = 'Conversa sincronizada';
+        statusEl.textContent = 'Conversa sincronizada — nada novo no período';
       }
       await loadInbox();
     } catch (err) {
@@ -298,6 +388,9 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     if (chatName) chatName.textContent = thread.participanteNome;
     if (chatPhone) {
       chatPhone.textContent = thread.telefone ? formatPhoneDisplay(thread.telefone) : '';
+    }
+    if (chatAvatar) {
+      mountContactAvatar(chatAvatar, thread, 'wa-chat-avatar');
     }
     showChatPane(true);
     renderThreads();
@@ -395,7 +488,9 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     if (idx === -1) return;
     messages = [...messages];
     messages[idx] = { ...messages[idx], ...mensagem };
-    renderMessages();
+    if (!patchWhatsappMessageMedia(chatMessages, messages[idx], { classPrefix: 'wa' })) {
+      renderMessages();
+    }
   }
 
   function handleWsPayload(payload) {
@@ -549,8 +644,14 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   searchEl?.addEventListener('input', () => {
     filter = searchEl.value;
     renderThreads();
+    updateStatus();
   });
   chatForm?.addEventListener('submit', submitMessage);
+  chatInput?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    chatForm?.requestSubmit();
+  });
   btnChatBack?.addEventListener('click', () => {
     activeThread = null;
     showChatPane(false);

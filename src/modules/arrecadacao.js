@@ -40,7 +40,7 @@ import {
 } from '../lib/format.js';
 import { wrapWhatsappBubble } from '../lib/whatsapp-reactions.js';
 import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
-import { renderWhatsappMediaHtml, hydrateWhatsappMedia, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
+import { renderWhatsappMediaHtml, hydrateWhatsappMedia, retryPendingWhatsappMedia, patchWhatsappMessageMedia, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
 import { LABELS, COLORS, FUNIL_STATUS_ORDER } from '../lib/constants.js';
 
 const PAGE_CONFIG = {
@@ -2238,8 +2238,8 @@ export function initArrecadacaoModule(
         const bubble = `
         <article class="lw-whatsapp-bubble ${out ? 'lw-whatsapp-bubble--out' : 'lw-whatsapp-bubble--in'}">
           <time class="lw-whatsapp-time">${fmtDate(m.enviadoEm)}</time>
-          ${text}
           ${media}
+          ${text}
         </article>`;
         return wrapWhatsappBubble(bubble, {
           out,
@@ -2253,6 +2253,7 @@ export function initArrecadacaoModule(
       .join('');
     els.leadWhatsappMessages.scrollTop = els.leadWhatsappMessages.scrollHeight;
     void hydrateWhatsappMedia(els.leadWhatsappMessages);
+    retryPendingWhatsappMedia(els.leadWhatsappMessages);
     unbindLeadWhatsappReactions?.();
     unbindLeadWhatsappReactions = bindWhatsappReactionControls(els.leadWhatsappMessages, {
       onReact: async (mensagemId, emoji) => {
