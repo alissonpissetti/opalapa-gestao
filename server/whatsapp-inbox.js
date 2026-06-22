@@ -144,6 +144,13 @@ export async function listWhatsappInbox(pool, eventoId) {
   });
 }
 
+export async function getWhatsappInboxThread(pool, eventoId, participanteId) {
+  const id = Number(participanteId);
+  if (!Number.isInteger(id) || id < 1) return null;
+  const threads = await listWhatsappInbox(pool, eventoId);
+  return threads.find((thread) => thread.participanteId === id) || null;
+}
+
 export async function listMessagesForParticipante(
   pool,
   eventoId,

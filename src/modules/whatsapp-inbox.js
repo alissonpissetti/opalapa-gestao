@@ -1,5 +1,6 @@
 import {
   fetchWhatsappInbox,
+  fetchWhatsappInboxThread,
   fetchWhatsappThreadMessages,
   syncWhatsappInboxThread,
   sendWhatsappInboxMessage,
@@ -13,6 +14,12 @@ import { renderWhatsappBubbleTextHtml, bubbleModifierClasses } from '../lib/what
 import { initWhatsappCompose } from '../lib/whatsapp-compose.js';
 import { readWhatsappDraft, writeWhatsappDraft, clearWhatsappDraft } from '../lib/whatsapp-drafts.js';
 import { onEventoChange } from '../lib/evento.js';
+import {
+  bindContactAvatarImages,
+  mountContactAvatar,
+  participantInitial,
+  resolveApiAssetUrl,
+} from '../lib/contact-avatar.js';
 
 function wsUrl() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -28,18 +35,6 @@ function wsUrl() {
   return `${proto}//${location.host}/ws/whatsapp`;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
-
-function resolveApiAssetUrl(url) {
-  if (!url) return url;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  return `${API_BASE}${url}`;
-}
-
-function participantInitial(name) {
-  return (name || '?').trim().charAt(0).toUpperCase();
-}
-
 function renderContactAvatar(contact, className = 'wa-thread-avatar') {
   const initial = participantInitial(contact?.participanteNome);
   if (!contact?.avatarUrl) {
@@ -49,47 +44,8 @@ function renderContactAvatar(contact, className = 'wa-thread-avatar') {
   return `<span class="${className} ${className}--photo" data-initial="${escapeHtml(initial)}"><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
 }
 
-function mountContactAvatar(el, contact, className = 'wa-chat-avatar') {
-  if (!el) return;
-  const initial = participantInitial(contact?.participanteNome);
-  el.className = className;
-  el.dataset.initial = initial;
-  el.replaceChildren();
-  if (!contact?.avatarUrl) {
-    el.textContent = initial;
-    return;
-  }
-  el.classList.add(`${className}--photo`);
-  const img = document.createElement('img');
-  img.src = resolveApiAssetUrl(contact.avatarUrl);
-  img.alt = '';
-  img.loading = 'lazy';
-  img.decoding = 'async';
-  img.addEventListener(
-    'error',
-    () => {
-      el.className = className;
-      el.textContent = initial;
-    },
-    { once: true },
-  );
-  el.appendChild(img);
-}
-
 function bindContactAvatars(container) {
-  if (!container) return;
-  container.querySelectorAll('.wa-thread-avatar--photo img, .wa-chat-avatar--photo img').forEach((img) => {
-    img.addEventListener(
-      'error',
-      () => {
-        const wrap = img.closest('.wa-thread-avatar, .wa-chat-avatar');
-        if (!wrap) return;
-        wrap.className = wrap.classList.contains('wa-chat-avatar') ? 'wa-chat-avatar' : 'wa-thread-avatar';
-        wrap.textContent = wrap.dataset.initial || '?';
-      },
-      { once: true },
-    );
-  });
+  bindContactAvatarImages(container, 'wa-thread-avatar');
 }
 
 function previewText(msg) {
@@ -647,6 +603,22 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     pollTimer = null;
   }
 
+  async function ensureThread(participanteId) {
+    const id = Number(participanteId);
+    if (!Number.isInteger(id) || id < 1) return null;
+    const existing = threads.find((t) => t.participanteId === id);
+    if (existing) return existing;
+    try {
+      const data = await fetchWhatsappInboxThread(id);
+      if (!data?.thread) return null;
+      threads = [data.thread, ...threads.filter((t) => t.participanteId !== id)];
+      renderThreads();
+      return data.thread;
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function openInbox({ participanteId = null } = {}) {
     persistActiveDraft();
     screen.classList.remove('hidden');
@@ -660,11 +632,13 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     connectWs();
     startPolling();
     if (participanteId) {
-      const thread = threads.find((t) => t.participanteId === participanteId);
+      const thread = await ensureThread(participanteId);
       if (thread) {
-        await selectThread(participanteId);
+        await selectThread(thread.participanteId);
       } else {
-        alert('Conversa não encontrada para este lead. Verifique se o WhatsApp está cadastrado.');
+        alert(
+          'Não foi possível abrir a conversa. Verifique se o participante tem WhatsApp cadastrado e lead vinculado neste evento.',
+        );
       }
     }
   }

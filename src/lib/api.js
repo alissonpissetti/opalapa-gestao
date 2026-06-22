@@ -161,6 +161,14 @@ export function fetchArrecadacao({ scope = 'comercial' } = {}) {
   return apiRequest(`/api/arrecadacao?scope=${encodeURIComponent(scope)}`);
 }
 
+export function fetchArrecadacaoById(id) {
+  return apiRequest(`/api/arrecadacao/${id}`);
+}
+
+export function fetchArrecadacaoByEspacoId(espacoId) {
+  return apiRequest(`/api/arrecadacao/by-espaco/${espacoId}`);
+}
+
 export function createPatrocinio(data) {
   return apiRequest('/api/arrecadacao', {
     method: 'POST',
@@ -365,8 +373,12 @@ export function fetchWhatsappInbox() {
   return apiRequest('/api/whatsapp/inbox');
 }
 
-export function fetchWhatsappThreadMessages(participanteId, { prepare = false } = {}) {
-  const qs = prepare ? '?prepare=1' : '';
+export function fetchWhatsappInboxThread(participanteId) {
+  return apiRequest(`/api/whatsapp/inbox/${participanteId}`);
+}
+
+export function fetchWhatsappThreadMessages(participanteId, { prepare = true } = {}) {
+  const qs = prepare ? '' : '?prepare=0';
   return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages${qs}`, {
     timeoutMs: prepare ? 90000 : 15000,
   });

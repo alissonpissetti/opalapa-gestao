@@ -20,9 +20,9 @@ import { exportCSV } from './export.js';
 import { initMapEditor } from './map-editor.js';
 
 const VIEW_MODE_KEY = 'espacos-view-mode';
+const TOTALS_VISIBLE_KEY = 'espacos-totals-visible';
 
 export function initSpacesModule(store, shortcuts = {}) {
-  const { onOpenParticipante, onOpenWhatsapp, onOpenLead } = shortcuts;
   const {
     spaces,
     persist,
@@ -45,6 +45,7 @@ export function initSpacesModule(store, shortcuts = {}) {
   let draggingNumero = null;
   let kanbanCardWasDragged = false;
   let shortcutContext = null;
+  let totalsVisible = true;
   const selectedNumeros = new Set();
   const els = {
     grupoTabs: document.getElementById('grupo-tabs'),
@@ -142,6 +143,25 @@ export function initSpacesModule(store, shortcuts = {}) {
     }));
   }
 
+  function loadTotalsPreference() {
+    totalsVisible = localStorage.getItem(TOTALS_VISIBLE_KEY) !== '0';
+  }
+
+  function applyTotalsLayout() {
+    const root = document.getElementById('view-espacos');
+    root?.classList.toggle('page--totals-hidden', !totalsVisible);
+    const btn = document.getElementById('btn-espacos-toggle-totals');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', totalsVisible ? 'true' : 'false');
+    btn.textContent = totalsVisible ? 'Ocultar totais' : 'Mostrar totais';
+  }
+
+  function toggleTotalsVisible() {
+    totalsVisible = !totalsVisible;
+    localStorage.setItem(TOTALS_VISIBLE_KEY, totalsVisible ? '1' : '0');
+    applyTotalsLayout();
+  }
+
   function renderStatusSelectOptions(selected = 'disp') {
     if (!els.mStatus) return;
     const etapas = spaceStatusEtapas();
@@ -176,8 +196,8 @@ export function initSpacesModule(store, shortcuts = {}) {
       els.syncStatus.textContent = `Erro ao salvar: ${store.saveError}`;
       els.syncStatus.className = 'sync-status error';
     } else {
-      els.syncStatus.textContent = 'Dados salvos no banco de dados';
-      els.syncStatus.className = 'sync-status ok';
+      els.syncStatus.textContent = '';
+      els.syncStatus.className = 'sync-status hidden';
     }
   }
 
@@ -365,6 +385,7 @@ export function initSpacesModule(store, shortcuts = {}) {
         participanteId: data.participanteId,
         participanteNome: data.participanteNome || '',
         arrecadacaoId: data.arrecadacaoId || null,
+        espacoId: data.id || null,
       };
     }
     return null;
@@ -374,17 +395,21 @@ export function initSpacesModule(store, shortcuts = {}) {
     const fromInput = readParticipanteInput();
     if (fromInput.participanteId) {
       let arrecadacaoId = null;
+      let espacoId = null;
       for (const numero of editNumeros) {
         const data = spaces[numero];
         if (data?.participanteId === fromInput.participanteId && data?.arrecadacaoId) {
           arrecadacaoId = data.arrecadacaoId;
-          break;
+        }
+        if (data?.participanteId === fromInput.participanteId && data?.id) {
+          espacoId = data.id;
         }
       }
       return {
         participanteId: fromInput.participanteId,
         participanteNome: fromInput.participanteNome || '',
         arrecadacaoId,
+        espacoId,
       };
     }
     return resolveShortcutContextFromSpaces(editNumeros);
@@ -400,7 +425,9 @@ export function initSpacesModule(store, shortcuts = {}) {
     const participante = store.participantes.find((p) => p.id === shortcutContext.participanteId);
     const hasWhatsapp = Boolean(String(participante?.contatoTelefone || '').trim());
     if (els.mShortcutWhatsapp) els.mShortcutWhatsapp.disabled = !hasWhatsapp;
-    if (els.mShortcutLead) els.mShortcutLead.disabled = !shortcutContext.arrecadacaoId;
+    if (els.mShortcutLead) {
+      els.mShortcutLead.disabled = !(shortcutContext.arrecadacaoId || shortcutContext.espacoId);
+    }
   }
 
   function renderTiposComercio() {
@@ -796,6 +823,7 @@ export function initSpacesModule(store, shortcuts = {}) {
 
       els.modalTitle.innerHTML = `Venda em grupo <span id="m-num">${list.length} espaços</span>`;
       els.mLbl.textContent = idsLabel(list);
+      els.mLbl.classList.remove('hidden');
       els.btnClear.textContent = 'Limpar todos';
       els.btnSave.textContent = `Salvar em ${list.length} espaços`;
       fillModalForm(
@@ -812,8 +840,9 @@ export function initSpacesModule(store, shortcuts = {}) {
       );
     } else {
       const numero = list[0];
-      els.modalTitle.innerHTML = `Espaço <span id="m-num">${numero}</span>`;
-      els.mLbl.textContent = spaceLabel(numero);
+      els.modalTitle.textContent = spaceLabel(numero);
+      els.mLbl.textContent = '';
+      els.mLbl.classList.add('hidden');
       els.btnClear.textContent = 'Limpar';
       els.btnSave.textContent = 'Salvar';
       fillModalForm(spaces[numero], false);
@@ -1294,6 +1323,8 @@ export function initSpacesModule(store, shortcuts = {}) {
       btn.addEventListener('click', () => setViewMode(btn.dataset.espView));
     });
 
+    document.getElementById('btn-espacos-toggle-totals')?.addEventListener('click', toggleTotalsVisible);
+
     document.getElementById('btn-cancel').addEventListener('click', closeModal);
     els.btnClear.addEventListener('click', clearSpace);
     els.btnSave.addEventListener('click', saveSpace);
@@ -1315,14 +1346,20 @@ export function initSpacesModule(store, shortcuts = {}) {
     els.mParticipante.addEventListener('change', syncParticipanteIdFromInput);
 
     els.mShortcutWhatsapp?.addEventListener('click', () => {
-      if (!shortcutContext?.participanteId || els.mShortcutWhatsapp?.disabled) return;
-      void onOpenWhatsapp?.(shortcutContext.participanteId);
+      const participanteId = shortcutContext?.participanteId;
+      if (!participanteId || els.mShortcutWhatsapp?.disabled) return;
+      closeModal();
+      void shortcuts.onOpenWhatsapp?.(participanteId);
     });
     els.mShortcutLead?.addEventListener('click', () => {
-      if (!shortcutContext?.arrecadacaoId || els.mShortcutLead?.disabled) return;
-      const arrecadacaoId = shortcutContext.arrecadacaoId;
+      if (els.mShortcutLead?.disabled || !shortcutContext) return;
+      const payload = {
+        arrecadacaoId: shortcutContext.arrecadacaoId || null,
+        espacoId: shortcutContext.espacoId || null,
+      };
+      if (!payload.arrecadacaoId && !payload.espacoId) return;
       closeModal();
-      void onOpenLead?.(arrecadacaoId);
+      void shortcuts.onOpenLead?.(payload);
     });
 
     els.btnExport.addEventListener('click', () => exportCSV(store));
@@ -1353,6 +1390,8 @@ export function initSpacesModule(store, shortcuts = {}) {
 
   renderGrupoTabs();
   bindEvents();
+  loadTotalsPreference();
+  applyTotalsLayout();
   loadFunilEtapas();
   loadTiposComercio();
   renderParticipantesDatalist();

@@ -1,6 +1,7 @@
 node_modules
 dist
 .git
+.github
 .gitignore
 .env
 .env.*
@@ -9,3 +10,4 @@ dist
 *.md
 .cursor
 map.png
+agent-tools

@@ -1,6 +1,5 @@
-import './css/app.css';
 import { fetchSession, logout } from './lib/auth.js';
-import { setUnauthorizedHandler, fetchEventos, fetchParticipantes } from './lib/api.js';
+import { setUnauthorizedHandler, fetchEventos, fetchParticipantes, fetchArrecadacaoByEspacoId } from './lib/api.js';
 import { initEventoContext, onEventoChange } from './lib/evento.js';
 import { createSpacesStore } from './lib/store.js';
 import { initSpacesModule } from './modules/spaces.js';
@@ -185,9 +184,23 @@ async function initApp(user) {
   spaceShortcuts.onOpenWhatsapp = async (participanteId) => {
     await whatsappInboxModule?.openThread(participanteId);
   };
-  spaceShortcuts.onOpenLead = async (arrecadacaoId) => {
-    navigation?.navigate('arrecadacao');
-    await arrecadacaoModule?.openLeadDetail(arrecadacaoId, { tipo: 'espaco' });
+  spaceShortcuts.onOpenLead = async (payload) => {
+    let arrecadacaoId =
+      typeof payload === 'number' ? payload : Number(payload?.arrecadacaoId) || null;
+    if (!arrecadacaoId && payload?.espacoId) {
+      try {
+        const data = await fetchArrecadacaoByEspacoId(payload.espacoId);
+        arrecadacaoId = data?.item?.id || null;
+      } catch (_) {
+        arrecadacaoId = null;
+      }
+    }
+    if (!arrecadacaoId) {
+      alert('Lead não encontrado para este espaço. Salve o espaço e tente novamente.');
+      return;
+    }
+    const opened = await arrecadacaoModule?.openLeadDetail(arrecadacaoId, { tipo: 'espaco' });
+    if (opened) navigation?.navigate('arrecadacao');
   };
 }
 
@@ -202,10 +215,13 @@ const loginScreen = initLoginScreen(async (user) => {
   }
 });
 
-document.getElementById('btn-logout').addEventListener('click', async () => {
+async function handleLogout() {
   await logout();
   showLoginOnly();
-});
+}
+
+document.getElementById('btn-logout')?.addEventListener('click', handleLogout);
+document.getElementById('btn-logout-drawer')?.addEventListener('click', handleLogout);
 
 setUnauthorizedHandler(() => {
   showLoginOnly();

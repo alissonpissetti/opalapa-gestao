@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/css/app.css" />
   </head>
   <body>
     <div id="app-loading" class="app-loading">Carregando…</div>
@@ -51,7 +52,10 @@
     <header class="app-header">
       <div class="app-header-inner">
         <div class="brand">Opalapa <span>· Gestão</span></div>
-        <nav class="nav" aria-label="Módulos">
+        <div class="nav-scroll" role="presentation">
+          <div class="nav-drawer-backdrop" id="nav-drawer-backdrop" hidden></div>
+        <nav class="nav nav-drawer" id="nav-drawer" aria-label="Módulos">
+          <div class="nav-drawer-links">
           <a href="#eventos" class="nav-link" data-view="eventos" id="nav-eventos">Eventos</a>
           <a href="#espacos" class="nav-link active" data-view="espacos" id="nav-espacos" aria-current="page">Espaços</a>
           <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao">Arrecadação</a>
@@ -67,10 +71,13 @@
               <a href="#usuarios" class="nav-link" data-view="usuarios" id="nav-usuarios" role="menuitem">Usuários</a>
             </div>
           </div>
+          </div>
+          <div class="nav-drawer-evento evento-selector">
+            <label for="evento-select" class="evento-select-label">Evento</label>
+            <select id="evento-select" class="evento-select" title="Evento ativo"></select>
+          </div>
+          <button type="button" class="nav-drawer-logout" id="btn-logout-drawer">Sair</button>
         </nav>
-        <div class="evento-selector">
-          <label for="evento-select" class="evento-select-label">Evento</label>
-          <select id="evento-select" class="evento-select" title="Evento ativo"></select>
         </div>
         <div class="user-menu">
           <button
@@ -97,6 +104,16 @@
           <span id="user-name" class="user-name"></span>
           <button class="tbtn" type="button" id="btn-logout">Sair</button>
         </div>
+        <button
+          type="button"
+          class="nav-menu-toggle"
+          id="nav-menu-toggle"
+          aria-expanded="false"
+          aria-controls="nav-drawer"
+          aria-label="Abrir menu de navegação"
+        >
+          <span class="nav-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
       </div>
     </header>
 
@@ -110,7 +127,7 @@
       </div>
       <p class="report-summary" id="eventos-summary"></p>
       <div class="table-wrap">
-        <table>
+        <table class="table-eventos">
           <thead>
             <tr>
               <th>Nome</th>
@@ -137,6 +154,13 @@
         na tabela, clique na linha para editar um espaço
       </p>
 
+      <div class="espacos-totals-toolbar">
+        <button class="tbtn tbtn-sm" type="button" id="btn-espacos-toggle-totals" aria-pressed="true">
+          Ocultar totais
+        </button>
+      </div>
+
+      <div class="espacos-totals" id="espacos-totals">
       <div class="stats">
         <div class="stat">
           <div class="lbl">Total</div>
@@ -165,6 +189,7 @@
       </div>
 
       <div class="status-totals" id="status-totals" aria-label="Totais por status"></div>
+      </div>
 
       <div class="legend">
         <div class="leg"><div class="dot" style="background: #5dcaa5"></div>Disponível</div>
@@ -213,7 +238,7 @@
 
       <div class="toolbar">
         <button class="tbtn" type="button" id="btn-map-edit-toggle">Editar mapa</button>
-        <span id="sync-status" class="sync-status ok">Dados salvos no banco de dados</span>
+        <span id="sync-status" class="sync-status hidden" aria-live="polite"></span>
         <button class="tbtn" type="button" id="btn-print">Imprimir</button>
         <button class="tbtn" type="button" id="btn-export">Exportar CSV</button>
       </div>
@@ -248,7 +273,7 @@
         </div>
         <div id="espacos-lista-view">
           <div class="table-wrap">
-            <table>
+            <table class="table-espacos">
               <thead>
                 <tr>
                   <th>
@@ -293,7 +318,7 @@
           <button class="tbtn" type="button" data-arr-view="kanban" data-arr-scope="comercial" role="tab" aria-selected="false">Kanban</button>
         </div>
         <div class="arrecadacao-toolbar-actions">
-          <button class="tbtn hidden" type="button" id="btn-arrecadacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
+          <button class="tbtn" type="button" id="btn-arrecadacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
           <button class="tbtn" type="button" id="btn-funil-config">Configurar funil</button>
         </div>
       </div>
@@ -343,8 +368,11 @@
           <h1>Artístico</h1>
           <p class="subtitle">Artistas, contatos e orçamentos — abra o lead para editar dados, registrar interações e agendar follow-ups.</p>
         </div>
-        <button class="tbtn primary" type="button" id="btn-artistico-new">Novo lead</button>
-        <button class="tbtn" type="button" id="btn-funil-config-artistico">Configurar funil</button>
+        <div class="report-head-actions report-head-actions--split">
+          <button class="tbtn primary" type="button" id="btn-artistico-new">Novo lead</button>
+          <button class="tbtn" type="button" id="btn-artistico-toggle-overview" aria-pressed="true">Ocultar resumo</button>
+          <button class="tbtn" type="button" id="btn-funil-config-artistico">Configurar funil</button>
+        </div>
       </div>
 
       <div class="artistico-overview" id="artistico-overview">
@@ -780,7 +808,6 @@
           <div class="lw-header-text">
             <h1 id="lead-detail-title">Lead</h1>
             <div class="lw-badges" id="lead-detail-badges"></div>
-            <p class="lw-sub" id="lead-detail-sub"></p>
           </div>
         </div>
         <div class="lw-header-actions row-actions" id="lead-detail-actions"></div>
@@ -796,6 +823,8 @@
             <h2>Interações</h2>
             <p class="lw-hint">Registre anotações, acompanhe tarefas agendadas e planeje o próximo contato.</p>
           </div>
+
+          <div class="lw-whatsapp-interaction" id="lead-whatsapp-interaction" hidden></div>
 
           <section class="lw-anotacoes" aria-labelledby="lead-anotacoes-title">
             <details class="lw-anotacoes-details" id="lead-anotacoes-details">
@@ -885,14 +914,6 @@
                 </form>
               </div>
             </details>
-          </section>
-
-          <section class="lw-whatsapp-action hidden" id="lead-whatsapp-section" aria-labelledby="lead-whatsapp-title">
-            <h3 class="lw-section-label" id="lead-whatsapp-title">WhatsApp</h3>
-            <p class="lw-hint lw-whatsapp-action-hint">Abra a conversa na central de mensagens do sistema.</p>
-            <button type="button" class="tbtn primary lw-whatsapp-open-btn" id="lead-whatsapp-open">
-              Abrir conversa no WhatsApp
-            </button>
           </section>
 
           <div class="lw-timeline" id="lead-interacoes-list" aria-live="polite"></div>

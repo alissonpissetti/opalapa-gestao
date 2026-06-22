@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/whatsapp-media/
+data/whatsapp-avatars/
 .venv-poly/
 .DS_Store
 *.local

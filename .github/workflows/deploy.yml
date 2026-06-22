@@ -1,0 +1,52 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-build:
+    name: Validar build Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: opalapa-gestao:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Disparar deploy no Coolify
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via webhook
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_WEBHOOK" ]; then
+            echo "::error::Configure o secret COOLIFY_WEBHOOK em GitHub → Settings → Secrets and variables → Actions."
+            echo "Copie a URL em Coolify → Application → Webhooks → Deploy Webhook."
+            exit 1
+          fi
+
+          args=(-fsS --request GET "$COOLIFY_WEBHOOK")
+          if [ -n "$COOLIFY_TOKEN" ]; then
+            args+=(--header "Authorization: Bearer $COOLIFY_TOKEN")
+          fi
+
+          curl "${args[@]}"
+          echo "Deploy disparado no Coolify."

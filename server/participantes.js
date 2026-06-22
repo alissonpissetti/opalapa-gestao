@@ -1,4 +1,5 @@
 import { recordSeguidoresHistorico } from './seguidores-historico.js';
+import { syncParticipanteAvatar } from './whatsapp-avatars.js';
 
 function rowToParticipante(row) {
   return {
@@ -8,6 +9,10 @@ function rowToParticipante(row) {
     seguidores: row.seguidores != null ? Number(row.seguidores) : null,
     contatoNome: row.contato_nome || '',
     contatoTelefone: row.contato_telefone || '',
+    whatsappAvatarPath: row.whatsapp_avatar_path || null,
+    whatsappAvatarSyncedAt: row.whatsapp_avatar_synced_at
+      ? new Date(row.whatsapp_avatar_synced_at).toISOString()
+      : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
@@ -79,11 +84,24 @@ export async function migrateParticipantes(pool) {
           ON DELETE SET NULL
     `);
   }
+
+  const [avatarCols] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'participantes' AND COLUMN_NAME = 'whatsapp_avatar_path'`,
+  );
+  if (avatarCols.length === 0) {
+    await pool.query(`
+      ALTER TABLE participantes
+        ADD COLUMN whatsapp_avatar_path VARCHAR(512) NULL AFTER contato_telefone,
+        ADD COLUMN whatsapp_avatar_synced_at DATETIME(3) NULL AFTER whatsapp_avatar_path
+    `);
+  }
 }
 
 export async function listParticipantes(pool) {
   const [rows] = await pool.query(
-    `SELECT id, nome, instagram, seguidores, contato_nome, contato_telefone, created_at, updated_at
+    `SELECT id, nome, instagram, seguidores, contato_nome, contato_telefone,
+            whatsapp_avatar_path, whatsapp_avatar_synced_at, created_at, updated_at
      FROM participantes ORDER BY nome`,
   );
   return rows.map(rowToParticipante);
@@ -91,7 +109,8 @@ export async function listParticipantes(pool) {
 
 export async function findParticipanteById(pool, id) {
   const [rows] = await pool.query(
-    `SELECT id, nome, instagram, seguidores, contato_nome, contato_telefone, created_at, updated_at
+    `SELECT id, nome, instagram, seguidores, contato_nome, contato_telefone,
+            whatsapp_avatar_path, whatsapp_avatar_synced_at, created_at, updated_at
      FROM participantes WHERE id = ? LIMIT 1`,
     [id],
   );
@@ -112,6 +131,9 @@ export async function createParticipante(pool, input) {
       anterior: null,
       novo: data.seguidores,
     });
+  }
+  if (created?.contatoTelefone) {
+    void syncParticipanteAvatar(pool, created.id, created.contatoTelefone, { force: true }).catch(() => {});
   }
   return created;
 }
@@ -142,7 +164,11 @@ export async function updateParticipante(pool, id, input) {
     });
   }
 
-  return findParticipanteById(pool, id);
+  const updated = await findParticipanteById(pool, id);
+  if (updated?.contatoTelefone && updated.contatoTelefone !== existing.contatoTelefone) {
+    void syncParticipanteAvatar(pool, id, updated.contatoTelefone, { force: true }).catch(() => {});
+  }
+  return updated;
 }
 
 export async function upsertParticipanteByNome(pool, input) {

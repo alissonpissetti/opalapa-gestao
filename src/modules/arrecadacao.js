@@ -1,5 +1,6 @@
 import {
   fetchArrecadacao,
+  fetchArrecadacaoById,
   fetchParticipantes,
   fetchSeguidoresHistorico,
   createPatrocinio,
@@ -21,6 +22,7 @@ import {
   createInteracao,
   fetchUsers,
   fetchMarketing,
+  fetchTiposComercio,
 } from '../lib/api.js';
 import {
   fmtMoney,
@@ -35,6 +37,7 @@ import {
   maskValorInput,
 } from '../lib/format.js';
 import { LABELS, COLORS, FUNIL_STATUS_ORDER } from '../lib/constants.js';
+import { mountContactAvatar } from '../lib/contact-avatar.js';
 
 const PAGE_CONFIG = {
   comercial: {
@@ -58,6 +61,8 @@ const PAGE_CONFIG = {
     },
   },
   artistico: {
+    viewRootId: 'view-artistico',
+    overviewKey: 'artistico-overview-visible',
     createTipo: 'artistico',
     navView: 'artistico',
     listOnly: true,
@@ -208,6 +213,12 @@ function actionIconBtn({ action, id, title, icon, danger = false }) {
   return `<button class="${cls}" type="button" data-action="${action}" data-id="${id}" title="${label}" aria-label="${label}">${icon}</button>`;
 }
 
+function leadActionIconBtn({ action, title, icon, danger = false }) {
+  const cls = danger ? 'icon-btn danger tip-center' : 'icon-btn tip-center';
+  const label = escapeHtml(title);
+  return `<button class="${cls}" type="button" data-lead-action="${action}" data-tip="${label}" aria-label="${label}">${icon}</button>`;
+}
+
 export function initArrecadacaoModule(
   store,
   {
@@ -292,10 +303,10 @@ export function initArrecadacaoModule(
     leadAvatar: document.getElementById('lead-avatar'),
     leadDetailTitle: document.getElementById('lead-detail-title'),
     leadDetailBadges: document.getElementById('lead-detail-badges'),
-    leadDetailSub: document.getElementById('lead-detail-sub'),
     leadDetailActions: document.getElementById('lead-detail-actions'),
     leadDealPanel: document.getElementById('lead-deal-panel'),
     leadInteracoesList: document.getElementById('lead-interacoes-list'),
+    leadWhatsappInteraction: document.getElementById('lead-whatsapp-interaction'),
     leadInteracaoForm: document.getElementById('lead-interacao-form'),
     leadAnotacoesDetails: document.getElementById('lead-anotacoes-details'),
     leadTarefasDetails: document.getElementById('lead-tarefas-details'),
@@ -312,8 +323,6 @@ export function initArrecadacaoModule(
     leadOrigemCanal: document.getElementById('lead-origem-canal'),
     leadOrigemCampanha: document.getElementById('lead-origem-campanha'),
     leadOrigemCriativo: document.getElementById('lead-origem-criativo'),
-    leadWhatsappSection: document.getElementById('lead-whatsapp-section'),
-    leadWhatsappOpen: document.getElementById('lead-whatsapp-open'),
     migrateArtisticoPanel: document.getElementById('a-migrate-artistico-panel'),
     migrateArtisticoBtn: document.getElementById('a-migrate-artistico-btn'),
   };
@@ -330,7 +339,10 @@ export function initArrecadacaoModule(
   let leadOrigemSaving = false;
   let draftFunilEtapas = [];
   let viewMode = 'lista';
-  let overviewVisible = true;
+  const overviewVisible = {
+    comercial: true,
+    artistico: true,
+  };
   let loadSeq = 0;
 
   function applyLeadScope(scope) {
@@ -344,6 +356,7 @@ export function initArrecadacaoModule(
     } else {
       viewMode = localStorage.getItem(cfg.viewModeKey) === 'kanban' ? 'kanban' : 'lista';
     }
+    applyOverviewLayout(leadScope);
   }
 
   function funilEscopoLabel(escopo) {
@@ -374,7 +387,9 @@ export function initArrecadacaoModule(
   }
 
   applyLeadScope('comercial');
-  loadOverviewPreference();
+  loadOverviewPreferences();
+  applyOverviewLayout('comercial');
+  applyOverviewLayout('artistico');
   syncAppHeaderHeight();
   window.addEventListener('resize', syncAppHeaderHeight);
   let draggingItemId = null;
@@ -780,6 +795,28 @@ export function initArrecadacaoModule(
       items.find((x) => x.id === numId) ||
       (leadDetailItem?.id === numId ? leadDetailItem : null)
     );
+  }
+
+  async function ensureLeadItem(id) {
+    const numId = Number(id);
+    if (!Number.isInteger(numId) || numId < 1) return null;
+
+    const cached = resolveLeadItem(numId);
+    if (cached) return cached;
+
+    try {
+      const data = await fetchArrecadacaoById(numId);
+      const item = data?.item;
+      if (!item) return null;
+
+      const scope = item.tipo === 'artistico' ? 'artistico' : 'comercial';
+      if (scope === leadScope && !items.some((x) => x.id === numId)) {
+        items = [...items, item];
+      }
+      return item;
+    } catch (_) {
+      return null;
+    }
   }
 
   function canMigrateToArtistico(item) {
@@ -1241,35 +1278,48 @@ export function initArrecadacaoModule(
     return [...funilEtapas].filter((e) => e.ativo).sort((a, b) => a.ordem - b.ordem);
   }
 
-  function loadOverviewPreference() {
-    const stored = localStorage.getItem(PAGE_CONFIG.comercial.overviewKey);
-    overviewVisible = stored !== '0';
+  function loadOverviewPreferences() {
+    overviewVisible.comercial = localStorage.getItem(PAGE_CONFIG.comercial.overviewKey) !== '0';
+    overviewVisible.artistico = localStorage.getItem(PAGE_CONFIG.artistico.overviewKey) !== '0';
   }
 
-  function applyArrecadacaoLayout() {
-    const root = document.getElementById(PAGE_CONFIG.comercial.viewRootId);
-    if (!root || leadScope !== 'comercial') return;
+  function applyOverviewLayout(scope = leadScope) {
+    const cfg = PAGE_CONFIG[scope];
+    if (!cfg?.viewRootId) return;
+    const root = document.getElementById(cfg.viewRootId);
+    if (!root) return;
 
-    const isKanban = viewMode === 'kanban';
-    root.classList.toggle('page--kanban', isKanban);
-    root.classList.toggle('page--overview-hidden', isKanban && !overviewVisible);
+    if (cfg.overviewKey) {
+      const visible = overviewVisible[scope] ?? true;
+      root.classList.toggle('page--overview-hidden', !visible);
+      const toggleId =
+        scope === 'artistico' ? 'btn-artistico-toggle-overview' : 'btn-arrecadacao-toggle-overview';
+      const toggleBtn = document.getElementById(toggleId);
+      if (toggleBtn) {
+        toggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+        toggleBtn.textContent = visible ? 'Ocultar resumo' : 'Mostrar resumo';
+      }
+    }
 
-    const toggleBtn = document.getElementById('btn-arrecadacao-toggle-overview');
-    if (toggleBtn) {
-      toggleBtn.classList.toggle('hidden', !isKanban);
-      toggleBtn.setAttribute('aria-pressed', overviewVisible ? 'true' : 'false');
-      toggleBtn.textContent = overviewVisible ? 'Ocultar resumo' : 'Mostrar resumo';
+    if (scope === 'comercial') {
+      root.classList.toggle('page--kanban', viewMode === 'kanban');
     }
   }
 
-  function setOverviewVisible(visible) {
-    overviewVisible = visible;
-    localStorage.setItem(PAGE_CONFIG.comercial.overviewKey, visible ? '1' : '0');
-    applyArrecadacaoLayout();
+  function applyArrecadacaoLayout() {
+    applyOverviewLayout('comercial');
   }
 
-  function toggleOverviewVisible() {
-    setOverviewVisible(!overviewVisible);
+  function setOverviewVisible(visible, scope = leadScope) {
+    const key = PAGE_CONFIG[scope]?.overviewKey;
+    if (!key) return;
+    overviewVisible[scope] = visible;
+    localStorage.setItem(key, visible ? '1' : '0');
+    applyOverviewLayout(scope);
+  }
+
+  function toggleOverviewVisible(scope = leadScope) {
+    setOverviewVisible(!overviewVisible[scope], scope);
   }
 
   function setViewMode(mode) {
@@ -1364,6 +1414,32 @@ export function initArrecadacaoModule(
     return `https://www.instagram.com/${encodeURIComponent(handle)}/`;
   }
 
+  function hasParticipanteInstagram(p) {
+    return Boolean(
+      String(p?.instagram || '')
+        .trim()
+        .replace(/^@/, '')
+        .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+        .replace(/\/.*$/, '')
+        .split('/')[0],
+    );
+  }
+
+  async function ensureTiposComercioDatalist() {
+    try {
+      const data = await fetchTiposComercio();
+      store?.setTiposComercio?.(data.tipos || []);
+    } catch (_) {
+      store?.setTiposComercio?.([]);
+    }
+    const datalist = document.getElementById('tipos-comercio');
+    if (!datalist) return;
+    const tipos = [...(store?.tiposComercio || [])].sort((a, b) =>
+      a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }),
+    );
+    datalist.innerHTML = tipos.map((t) => `<option value="${escapeHtml(t)}">`).join('');
+  }
+
   function participantInitials(name) {
     const parts = String(name || '')
       .trim()
@@ -1409,7 +1485,8 @@ export function initArrecadacaoModule(
   }
 
   function renderSeguidoresHistoricoBlock(item) {
-    if (item.tipo !== 'artistico' || !item.participanteId) return '';
+    const p = getParticipanteById(item.participanteId);
+    if (!item.participanteId || !hasParticipanteInstagram(p)) return '';
 
     const historico = leadSeguidoresHistorico.historico || [];
     const resumo = leadSeguidoresHistorico.resumo || {};
@@ -1482,6 +1559,8 @@ export function initArrecadacaoModule(
         return p?.instagram ? formatInstagram(p.instagram) : '—';
       case 'seguidores':
         return formatSeguidores(p?.seguidores);
+      case 'tipoComercio':
+        return item.espacoTipo?.trim() || '—';
       case 'whatsapp':
         return p?.contatoTelefone ? formatPhoneDisplay(p.contatoTelefone) : '—';
       case 'status':
@@ -1498,16 +1577,19 @@ export function initArrecadacaoModule(
   }
 
   function leadFieldCanEdit(field, item) {
+    const p = getParticipanteById(item.participanteId);
     const isEspaco = item.tipo === 'espaco';
-    const isArtistico = item.tipo === 'artistico';
     if (isEspaco && (field === 'status' || field === 'descricao')) {
       return false;
     }
     if (field === 'contatoNome' && !item.participanteId) {
       return false;
     }
-    if (field === 'seguidores' && !isArtistico) {
+    if (field === 'seguidores' && !hasParticipanteInstagram(p)) {
       return false;
+    }
+    if (field === 'tipoComercio') {
+      return item.tipo === 'espaco' && Boolean(item.espacoId);
     }
     return true;
   }
@@ -1519,6 +1601,7 @@ export function initArrecadacaoModule(
       contatoNome: 'Nome do contato',
       instagram: 'Instagram',
       seguidores: 'Seguidores',
+      tipoComercio: 'Tipo de comércio',
       whatsapp: 'WhatsApp',
       status: 'Status',
       descricao: isArtistico ? 'Atração' : 'Referência',
@@ -1533,8 +1616,25 @@ export function initArrecadacaoModule(
       const url = instagramProfileUrl(p?.instagram);
       return url || '';
     }
-    if (field === 'whatsapp') {
-      return whatsappLink(p?.contatoTelefone);
+    return '';
+  }
+
+  function renderLeadWhatsappChatButton() {
+    return `<button type="button" class="lw-field-ext lw-field-ext--whatsapp" data-action="open-whatsapp-chat" title="Abrir conversa no WhatsApp" aria-label="Abrir conversa no WhatsApp">↗</button>`;
+  }
+
+  function leadFieldExtButton(field, item, p, display) {
+    if (
+      field === 'whatsapp' &&
+      display !== '—' &&
+      String(p?.contatoTelefone || '').trim() &&
+      item?.participanteId
+    ) {
+      return renderLeadWhatsappChatButton();
+    }
+    const extUrl = leadFieldExternalLink(field, p);
+    if (extUrl && display !== '—') {
+      return `<a href="${extUrl}" class="lw-field-ext" target="_blank" rel="noopener noreferrer" title="Abrir em nova janela" aria-label="Abrir em nova janela" onclick="event.stopPropagation()">↗</a>`;
     }
     return '';
   }
@@ -1543,17 +1643,20 @@ export function initArrecadacaoModule(
     const canEdit = leadFieldCanEdit(field, item);
     const display = leadFieldDisplayValue(field, item, p);
     const extUrl = leadFieldExternalLink(field, p);
-    const extBtn =
-      extUrl && display !== '—'
-        ? `<a href="${extUrl}" class="lw-field-ext" target="_blank" rel="noopener noreferrer" title="Abrir em nova janela" aria-label="Abrir em nova janela" onclick="event.stopPropagation()">↗</a>`
-        : '';
+    const extBtn = leadFieldExtButton(field, item, p, display);
+    const isWhatsapp = field === 'whatsapp';
 
     if (!canEdit) {
+      const valueHtml =
+        !isWhatsapp && extUrl && display !== '—'
+          ? `<a href="${extUrl}" class="lw-ext-link" target="_blank" rel="noopener noreferrer">${escapeHtml(display)}</a>`
+          : `<span>${escapeHtml(display)}</span>`;
       return `
         <div class="lw-info-row" data-lw-row="${field}">
           <dt>${escapeHtml(leadFieldLabel(field, item))}</dt>
           <dd class="lw-field-cell lw-field-cell--static">
-            ${extUrl && display !== '—' ? `<a href="${extUrl}" class="lw-ext-link" target="_blank" rel="noopener noreferrer">${escapeHtml(display)}</a>` : `<span>${escapeHtml(display)}</span>`}
+            ${valueHtml}
+            ${extBtn}
           </dd>
         </div>`;
     }
@@ -1575,34 +1678,29 @@ export function initArrecadacaoModule(
     cancelLeadFieldEdit();
 
     const p = getParticipanteById(item.participanteId);
+    if (item.tipo === 'espaco' && item.espacoId) {
+      void ensureTiposComercioDatalist();
+    }
     const isArtistico = item.tipo === 'artistico';
     const isEspaco = item.tipo === 'espaco';
     const falta = Math.max(0, item.valorTotal - item.valorPago);
     const quitado = falta <= 0 && isVendaEtapaStatus(item.status);
 
     const fields = ['participante', 'contatoNome'];
-    if (isArtistico) {
-      fields.push('instagram', 'seguidores', 'whatsapp');
-    } else {
-      fields.push('instagram', 'whatsapp');
+    fields.push('instagram', 'whatsapp');
+    if (hasParticipanteInstagram(p)) {
+      fields.push('seguidores');
+    }
+    if (isEspaco && item.espacoId) {
+      fields.push('tipoComercio');
     }
     if (!isEspaco) {
       fields.push('descricao');
     }
     fields.push('valorTotal');
-    if (!isArtistico) {
-      // pago/falta estáticos
-    }
     fields.push('obs');
 
     const staticRows = [];
-    if (!isArtistico && p?.seguidores != null) {
-      staticRows.push(`
-        <div class="lw-info-row">
-          <dt>Seguidores</dt>
-          <dd class="lw-field-cell lw-field-cell--static"><span>${formatSeguidores(p.seguidores)}</span></dd>
-        </div>`);
-    }
     if (!isArtistico) {
       staticRows.push(`
         <div class="lw-info-row">
@@ -1640,7 +1738,12 @@ export function initArrecadacaoModule(
       btn.addEventListener('click', () => startLeadFieldEdit(btn.dataset.lwField, item));
     });
 
-    renderLeadFunilPanel(item);
+    els.leadDealPanel.querySelectorAll('[data-action="open-whatsapp-chat"]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openLeadWhatsappChat();
+      });
+    });
     renderLeadOrigemFields(item);
   }
 
@@ -1829,7 +1932,7 @@ export function initArrecadacaoModule(
     if (patch.participanteWhatsapp !== undefined) {
       payload.participanteWhatsapp = patch.participanteWhatsapp;
     }
-    if (item.tipo === 'artistico' && patch.participanteSeguidores !== undefined) {
+    if (patch.participanteSeguidores !== undefined) {
       payload.participanteSeguidores = patch.participanteSeguidores;
     }
 
@@ -1903,9 +2006,6 @@ export function initArrecadacaoModule(
     if (els.leadDetailTitle) {
       els.leadDetailTitle.textContent = leadDetailItem.participanteNome;
     }
-    if (els.leadDetailSub) {
-      els.leadDetailSub.textContent = leadDetailItem.descricao || 'Sem referência';
-    }
     renderLeadAvatar(leadDetailItem);
     renderLeadBadges(leadDetailItem);
     renderLeadDealPanel(leadDetailItem);
@@ -1924,6 +2024,15 @@ export function initArrecadacaoModule(
     row?.classList.add('lw-info-row--saving');
 
     try {
+      if (patch.espacoTipo !== undefined) {
+        await updateArrecadacao(item.id, { espacoTipo: patch.espacoTipo });
+        await loadArrecadacao();
+        leadDetailItem = items.find((x) => x.id === item.id) || leadDetailItem;
+        await refreshLeadDetailUi(leadDetailItem);
+        if (leadDetailItem.tipo === 'espaco') await onEspacosDataChanged?.();
+        return;
+      }
+
       if (item.participanteId && isParticipanteProfilePatch(patch)) {
         const pBefore = getParticipanteById(item.participanteId);
         const prevSeguidores =
@@ -1935,7 +2044,6 @@ export function initArrecadacaoModule(
         });
 
         if (
-          item.tipo === 'artistico' &&
           patch.participanteSeguidores !== undefined &&
           prevSeguidores !== patch.participanteSeguidores
         ) {
@@ -1944,7 +2052,7 @@ export function initArrecadacaoModule(
             await createInteracao(item.id, { tipo: 'sistema', texto });
             await loadLeadDetailInteracoes(item.id);
           }
-          await loadSeguidoresHistorico(item.participanteId);
+          if (item.participanteId) await loadSeguidoresHistorico(item.participanteId);
         }
 
         await refreshParticipantesList();
@@ -2041,6 +2149,13 @@ export function initArrecadacaoModule(
       input.addEventListener('input', (e) => {
         e.target.value = e.target.value.replace(/\D/g, '');
       });
+    } else if (field === 'tipoComercio') {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'lw-field-editor';
+      input.setAttribute('list', 'tipos-comercio');
+      input.placeholder = 'Ex.: Alimentação';
+      input.value = item.espacoTipo || '';
     } else {
       input = document.createElement('input');
       input.type = 'text';
@@ -2074,6 +2189,8 @@ export function initArrecadacaoModule(
       } else if (field === 'seguidores') {
         const raw = input.value.trim();
         patch.participanteSeguidores = raw ? Number(raw) : null;
+      } else if (field === 'tipoComercio') {
+        patch.espacoTipo = input.value.trim();
       } else if (field === 'status') {
         patch.status = input.value;
       } else if (field === 'descricao') {
@@ -2129,9 +2246,16 @@ export function initArrecadacaoModule(
   }
 
   function renderLeadAvatar(item) {
-    if (els.leadAvatar) {
-      els.leadAvatar.textContent = participantInitials(item.participanteNome);
-    }
+    if (!els.leadAvatar) return;
+    const p = getParticipanteById(item?.participanteId);
+    mountContactAvatar(
+      els.leadAvatar,
+      {
+        participanteNome: item?.participanteNome,
+        avatarUrl: p?.avatarUrl,
+      },
+      'lw-avatar',
+    );
   }
 
   function renderLeadBadges(item) {
@@ -2157,18 +2281,14 @@ export function initArrecadacaoModule(
 
     const artistico = item.tipo === 'artistico';
     els.leadDetailActions.innerHTML = `
-      ${
-        artistico
-          ? ''
-          : '<button class="tbtn" type="button" data-lead-action="pagamento">Registrar pagamento</button>'
-      }
+      ${artistico ? '' : leadActionIconBtn({ action: 'pagamento', title: 'Registrar pagamento', icon: ICON_PAYMENT })}
       ${
         canMigrateToArtistico(item)
-          ? '<button class="tbtn" type="button" data-lead-action="migrar-artistico">Mover para Artístico</button>'
+          ? leadActionIconBtn({ action: 'migrar-artistico', title: 'Mover para Artístico', icon: ICON_ARTISTIC })
           : ''
       }
-      ${canRegisterPerdaLead(item) ? '<button class="tbtn danger-text" type="button" data-lead-action="perda">Perda do lead</button>' : ''}
-      ${artistico ? '<button class="tbtn danger-text" type="button" data-lead-action="excluir">Excluir lead</button>' : ''}
+      ${canRegisterPerdaLead(item) ? leadActionIconBtn({ action: 'perda', title: 'Perda do lead', icon: ICON_PERDA, danger: true }) : ''}
+      ${artistico ? leadActionIconBtn({ action: 'excluir', title: 'Excluir lead', icon: ICON_DELETE, danger: true }) : ''}
     `;
     els.leadDetailActions.querySelectorAll('[data-lead-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -2187,14 +2307,60 @@ export function initArrecadacaoModule(
     });
   }
 
-  function renderInteracoesList() {
-    if (!els.leadInteracoesList) return;
-    if (!leadDetailInteracoes.length) {
-      els.leadInteracoesList.innerHTML =
-        '<p class="cell-empty lead-interacoes-empty">Nenhuma interação registrada.</p>';
+  function renderLeadWhatsappTimelineLink(item = leadDetailItem) {
+    const p = getParticipanteById(item?.participanteId);
+    const phone = String(p?.contatoTelefone || '').trim();
+    if (!phone) return '';
+
+    const display = formatPhoneDisplay(phone);
+    return `
+      <article class="lead-interacao-item lead-interacao-item--whatsapp-chat" data-tipo="whatsapp-chat">
+        <button type="button" class="lead-interacao-whatsapp-chat" data-action="open-whatsapp-chat">
+          <span class="lead-interacao-whatsapp-chat-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22">
+              <path fill="currentColor" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+            </svg>
+          </span>
+          <span class="lead-interacao-whatsapp-chat-body">
+            <strong>Conversa no WhatsApp</strong>
+            <span class="lead-interacao-whatsapp-chat-phone">${escapeHtml(display)}</span>
+          </span>
+          <span class="lead-interacao-whatsapp-chat-action" aria-hidden="true">Abrir</span>
+        </button>
+      </article>`;
+  }
+
+  function bindLeadWhatsappChatAction(root = document) {
+    root.querySelectorAll('[data-action="open-whatsapp-chat"]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openLeadWhatsappChat();
+      });
+    });
+  }
+
+  function renderLeadWhatsappInteraction(item = leadDetailItem) {
+    if (!els.leadWhatsappInteraction) return;
+    const html = renderLeadWhatsappTimelineLink(item);
+    if (!html) {
+      els.leadWhatsappInteraction.hidden = true;
+      els.leadWhatsappInteraction.innerHTML = '';
       return;
     }
-    els.leadInteracoesList.innerHTML = leadDetailInteracoes
+    els.leadWhatsappInteraction.hidden = false;
+    els.leadWhatsappInteraction.innerHTML = html;
+    bindLeadWhatsappChatAction(els.leadWhatsappInteraction);
+  }
+
+  function renderInteracoesLoading(message = 'Carregando histórico…') {
+    if (!els.leadInteracoesList) return;
+    els.leadInteracoesList.innerHTML = `<p class="cell-muted lead-interacoes-loading">${escapeHtml(message)}</p>`;
+  }
+
+  function renderInteracoesList() {
+    if (!els.leadInteracoesList) return;
+
+    const interacoesHtml = leadDetailInteracoes
       .map((i) => {
         if (i.tipo === 'sistema') {
           return `
@@ -2215,6 +2381,14 @@ export function initArrecadacaoModule(
         </article>`;
       })
       .join('');
+
+    if (!interacoesHtml) {
+      els.leadInteracoesList.innerHTML =
+        '<p class="cell-empty lead-interacoes-empty">Nenhuma interação registrada.</p>';
+      return;
+    }
+
+    els.leadInteracoesList.innerHTML = interacoesHtml;
   }
 
   async function loadLeadDetailInteracoes(id) {
@@ -2224,21 +2398,20 @@ export function initArrecadacaoModule(
   }
 
   function renderLeadWhatsappAction(item) {
-    if (!els.leadWhatsappSection) return;
-    const p = getParticipanteById(item?.participanteId);
-    const hasWhatsapp = Boolean(String(p?.contatoTelefone || '').trim());
-    els.leadWhatsappSection.classList.toggle('hidden', !hasWhatsapp);
+    renderLeadWhatsappInteraction(item);
+    renderInteracoesList();
   }
 
   function openLeadWhatsappChat() {
-    if (!leadDetailItem?.participanteId) return;
-    const p = getParticipanteById(leadDetailItem.participanteId);
+    const participanteId = leadDetailItem?.participanteId;
+    if (!participanteId) return;
+    const p = getParticipanteById(participanteId);
     if (!String(p?.contatoTelefone || '').trim()) {
       alert('Cadastre um WhatsApp para este lead nos dados do lead.');
       return;
     }
     closeLeadWorkspace();
-    onOpenWhatsappChat?.(leadDetailItem.participanteId);
+    onOpenWhatsappChat?.(participanteId);
   }
 
   function renderResponsavelOptions(selectEl, selectedId = null) {
@@ -2405,8 +2578,11 @@ export function initArrecadacaoModule(
   }
 
   async function openLeadDetailModal(id) {
-    const item = resolveLeadItem(id);
-    if (!item) return;
+    const item = await ensureLeadItem(id);
+    if (!item) {
+      alert('Lead não encontrado.');
+      return false;
+    }
 
     leadDetailId = id;
     leadDetailItem = item;
@@ -2414,9 +2590,6 @@ export function initArrecadacaoModule(
     leadDetailTarefas = [];
 
     if (els.leadDetailTitle) els.leadDetailTitle.textContent = item.participanteNome;
-    if (els.leadDetailSub) {
-      els.leadDetailSub.textContent = item.descricao || 'Sem referência';
-    }
 
     renderLeadAvatar(item);
     renderLeadBadges(item);
@@ -2427,7 +2600,7 @@ export function initArrecadacaoModule(
     if (els.leadInteracaoTipo) els.leadInteracaoTipo.value = 'nota';
     if (els.leadInteracaoTexto) els.leadInteracaoTexto.value = '';
     resetLeadTarefaForm();
-    els.leadInteracoesList.innerHTML = '<p class="cell-muted">Carregando histórico…</p>';
+    renderInteracoesLoading();
     if (els.leadTarefasTable) {
       els.leadTarefasTable.innerHTML =
         '<tr class="lead-tarefas-empty-row"><td colspan="5">Carregando…</td></tr>';
@@ -2442,14 +2615,16 @@ export function initArrecadacaoModule(
       await loadMarketingData();
       await ensureFunilForItem(item);
       const loads = [loadLeadDetailInteracoes(id), loadLeadDetailTarefas(id)];
-      if (item.tipo === 'artistico' && item.participanteId) {
+      const pOpen = getParticipanteById(item.participanteId);
+      if (item.participanteId && hasParticipanteInstagram(pOpen)) {
         loads.push(loadSeguidoresHistorico(item.participanteId));
       }
       await Promise.all(loads);
-      if (item.tipo === 'artistico') renderLeadDealPanel(item);
+      renderLeadDealPanel(leadDetailItem || item);
       renderLeadFunilPanel(leadDetailItem || item);
       renderLeadOrigemFields(leadDetailItem || item);
     } catch (err) {
+      renderLeadWhatsappInteraction(item);
       els.leadInteracoesList.innerHTML = `<p class="cell-empty">${escapeHtml(err.message)}</p>`;
       if (els.leadTarefasTable) {
         els.leadTarefasTable.innerHTML = `<tr class="lead-tarefas-empty-row"><td colspan="5">${escapeHtml(err.message)}</td></tr>`;
@@ -2457,27 +2632,28 @@ export function initArrecadacaoModule(
     }
 
     els.leadInteracaoTexto?.focus();
+    return true;
   }
 
-  async function openLeadDetail(id, { tipo } = {}) {
+  async function openLeadDetail(id, { tipo, navigate = false } = {}) {
     if (tipo === 'artistico') {
-      await switchLeadScope('artistico');
+      await switchLeadScope('artistico', { navigate });
     } else if (tipo === 'patrocinio' || tipo === 'espaco') {
-      await switchLeadScope('comercial');
+      await switchLeadScope('comercial', { navigate });
     } else if (!items.find((x) => x.id === id)) {
       for (const scope of ['comercial', 'artistico']) {
         const data = await fetchArrecadacao({ scope });
         const found = itemsForScope(data.items || [], scope).find((x) => x.id === id);
         if (found) {
-          await switchLeadScope(scope);
+          await switchLeadScope(scope, { navigate });
           break;
         }
       }
     }
-    if (!items.find((x) => x.id === id)) {
+    if (!resolveLeadItem(id)) {
       await loadArrecadacao();
     }
-    await openLeadDetailModal(id);
+    return openLeadDetailModal(id);
   }
 
   async function switchLeadScope(scope, { navigate = false } = {}) {
@@ -2492,7 +2668,6 @@ export function initArrecadacaoModule(
     if (!item) return;
     leadDetailItem = item;
     if (els.leadDetailTitle) els.leadDetailTitle.textContent = item.participanteNome;
-    if (els.leadDetailSub) els.leadDetailSub.textContent = item.descricao || 'Sem referência';
     renderLeadAvatar(item);
     renderLeadBadges(item);
     renderLeadDealPanel(item);
@@ -3246,7 +3421,12 @@ export function initArrecadacaoModule(
       setViewMode(btn.dataset.arrView);
     });
   });
-  document.getElementById('btn-arrecadacao-toggle-overview')?.addEventListener('click', toggleOverviewVisible);
+  document.getElementById('btn-arrecadacao-toggle-overview')?.addEventListener('click', () => {
+    toggleOverviewVisible('comercial');
+  });
+  document.getElementById('btn-artistico-toggle-overview')?.addEventListener('click', () => {
+    toggleOverviewVisible('artistico');
+  });
   els.btnFunilConfig?.addEventListener('click', openFunilModal);
   document.getElementById('btn-funil-config')?.addEventListener('click', openFunilModal);
   document.getElementById('btn-funil-config-artistico')?.addEventListener('click', openFunilModal);
@@ -3280,7 +3460,6 @@ export function initArrecadacaoModule(
     const criativoId = Number(els.leadOrigemCriativo.value) || null;
     saveLeadOrigem({ marketingCriativoId: criativoId });
   });
-  els.leadWhatsappOpen?.addEventListener('click', openLeadWhatsappChat);
 
   PAGE_CONFIG.artistico.ids.btnNew &&
     document

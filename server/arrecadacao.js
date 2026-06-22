@@ -28,6 +28,7 @@ function rowToArrecadacao(row) {
     tipo: row.tipo,
     status: row.status || 'neg',
     espacoId: row.espaco_id != null ? Number(row.espaco_id) : null,
+    espacoTipo: row.espaco_tipo || '',
     descricao: row.descricao || '',
     valorTotal,
     valorPago,
@@ -289,11 +290,13 @@ const ARRECADACAO_SELECT = `
          a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
          a.marketing_canal_id, a.marketing_campanha_id, a.marketing_criativo_id,
          a.created_at, a.updated_at, p.nome AS participante_nome,
+         e.tipo AS espaco_tipo,
          mc.nome AS marketing_canal_nome,
          mcp.nome AS marketing_campanha_nome,
          mcr.nome AS marketing_criativo_nome
   FROM arrecadacao a
   JOIN participantes p ON p.id = a.participante_id
+  LEFT JOIN espacos e ON e.id = a.espaco_id
   LEFT JOIN marketing_canais mc ON mc.id = a.marketing_canal_id
   LEFT JOIN marketing_campanhas mcp ON mcp.id = a.marketing_campanha_id
   LEFT JOIN marketing_criativos mcr ON mcr.id = a.marketing_criativo_id`;
@@ -336,6 +339,11 @@ export async function listEspacosDisponiveis(pool, eventoId) {
 
 export async function findArrecadacaoById(pool, id) {
   const [rows] = await pool.query(`${ARRECADACAO_SELECT} WHERE a.id = ? LIMIT 1`, [id]);
+  return rows[0] ? rowToArrecadacao(rows[0]) : null;
+}
+
+export async function findArrecadacaoByEspacoId(pool, espacoId) {
+  const [rows] = await pool.query(`${ARRECADACAO_SELECT} WHERE a.espaco_id = ? LIMIT 1`, [espacoId]);
   return rows[0] ? rowToArrecadacao(rows[0]) : null;
 }
 
@@ -469,11 +477,16 @@ export async function updateArrecadacao(pool, id, raw) {
       eventoRows[0]?.evento_id,
       status,
     );
+    const espacoSets = ['valor = ?', 'status = ?', 'updated_at = CURRENT_TIMESTAMP(3)'];
+    const espacoParams = [valorTotal, espacoStatus];
+    if (raw.espacoTipo !== undefined || raw.espaco_tipo !== undefined) {
+      espacoSets.splice(2, 0, 'tipo = ?');
+      espacoParams.push(String(raw.espacoTipo ?? raw.espaco_tipo ?? '').trim());
+    }
+    espacoParams.push(existing.espacoId);
     await pool.query(
-      `UPDATE espacos SET
-         valor = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
-       WHERE id = ?`,
-      [valorTotal, espacoStatus, existing.espacoId],
+      `UPDATE espacos SET ${espacoSets.join(', ')} WHERE id = ?`,
+      espacoParams,
     );
   }
 

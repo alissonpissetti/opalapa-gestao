@@ -88,16 +88,30 @@ O servidor Express serve a API e os arquivos estáticos de `dist/` na mesma port
 
 ## Deploy no Coolify (Hostinger)
 
-O repositório inclui um `Dockerfile` pronto para o Coolify fazer build e deploy a cada `git push`.
+O deploy automático usa **GitHub Actions** + **Coolify**: a cada `git push` na branch `main`, o workflow valida o `Dockerfile` e dispara o deploy no Coolify.
 
-### Configuração no Coolify
+### 1. Configuração no Coolify
 
-1. Crie um novo **Resource** → **Application** → conecte este repositório Git
-2. Tipo de build: **Dockerfile** (caminho: `Dockerfile` na raiz)
-3. Porta do container: use a variável `PORT` (padrão `3000`)
-4. Health check: `GET /api/health`
+1. Crie um **Resource** → **Application** → conecte o repositório `alissonpissetti/opalapa-gestao`
+2. Branch: `main`
+3. Tipo de build: **Dockerfile** (caminho: `Dockerfile` na raiz)
+4. Porta do container: `3000` (ou variável `PORT`)
+5. Health check: `GET /api/health` na porta `3000`
+6. Em **General**, ative **Auto Deploy** (opcional — o GitHub Actions também dispara o deploy)
+7. Em **Webhooks**, copie a **Deploy Webhook URL**
 
-### Variáveis de ambiente (obrigatórias)
+### 2. Secrets no GitHub
+
+Em [Settings → Secrets and variables → Actions](https://github.com/alissonpissetti/opalapa-gestao/settings/secrets/actions):
+
+| Secret             | Onde obter                                                                 |
+|--------------------|----------------------------------------------------------------------------|
+| `COOLIFY_WEBHOOK`  | Coolify → Application → Webhooks → Deploy Webhook URL                      |
+| `COOLIFY_TOKEN`    | Coolify → Keys & Tokens → API token com permissão **deploy** (recomendado) |
+
+Sem o `COOLIFY_WEBHOOK`, o workflow falha e o deploy não é disparado.
+
+### 3. Variáveis de ambiente no Coolify (obrigatórias)
 
 | Variável         | Exemplo                                      |
 |------------------|----------------------------------------------|
@@ -105,17 +119,27 @@ O repositório inclui um `Dockerfile` pronto para o Coolify fazer build e deploy
 | `SESSION_SECRET` | chave longa e aleatória                      |
 | `NODE_ENV`       | `production` (já definido no Dockerfile)     |
 
-Opcional: `PORT`.
+Opcional: `PORT`, `APP_PUBLIC_URL`, variáveis Evolution/WhatsApp/Nextcloud (ver `.env.example`).
 
 Após o deploy, crie o primeiro usuário com `npm run user:create` (localmente apontando para o mesmo banco) ou via terminal do Coolify.
 
 ### Fluxo CI/CD
 
 ```
-git push → Coolify detecta → docker build → deploy → /api/health
+git push (main)
+  → GitHub Actions: docker build (validação)
+  → GitHub Actions: curl webhook Coolify
+  → Coolify: docker build + deploy
+  → GET /api/health
 ```
 
 O banco MariaDB/MySQL deve estar acessível a partir do servidor Coolify (rede/firewall).
+
+### Deploy manual
+
+No GitHub: **Actions** → **Deploy** → **Run workflow**.
+
+No Coolify: botão **Deploy** na aplicação.
 
 ## Estrutura
 

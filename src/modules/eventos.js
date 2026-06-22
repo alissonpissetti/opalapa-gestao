@@ -103,11 +103,11 @@ export function initEventosModule({ onEventosChanged }) {
           : '—';
         const isActive = getActiveEvento()?.id === e.id;
         return `<tr data-id="${e.id}">
-          <td>${escapeHtml(e.nome)}${isActive ? ' <span class="badge badge-active">Ativo</span>' : ''}</td>
-          <td>${e.edicao}</td>
-          <td>${anterior}</td>
-          <td>${fmtDate(e.createdAt)}</td>
-          <td class="row-actions-icons">
+          <td class="evento-cell-nome">${escapeHtml(e.nome)}${isActive ? ' <span class="badge badge-active">Ativo</span>' : ''}</td>
+          <td class="evento-cell-edicao" data-label="Edição (ano)">${e.edicao}</td>
+          <td class="evento-cell-anterior" data-label="Edição anterior">${anterior}</td>
+          <td class="evento-cell-cadastro" data-label="Cadastro">${fmtDate(e.createdAt)}</td>
+          <td class="row-actions-icons evento-cell-acoes">
             <button type="button" class="icon-btn" data-action="comparar" title="Comparar com edição anterior" aria-label="Comparar">📊</button>
             <button type="button" class="icon-btn" data-action="ativar" title="Usar este evento" aria-label="Ativar">✓</button>
             <button type="button" class="icon-btn" data-action="editar" title="Editar" aria-label="Editar">✎</button>

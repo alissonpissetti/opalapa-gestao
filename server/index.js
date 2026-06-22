@@ -45,6 +45,7 @@ import {
   listPagamentosByParticipante,
   summarizeArrecadacao,
   findArrecadacaoById,
+  findArrecadacaoByEspacoId,
 } from './arrecadacao.js';
 import {
   migrateEventos,
@@ -97,13 +98,14 @@ import {
 import {
   listWhatsappInbox,
   listMessagesForParticipante,
+  getWhatsappInboxThread,
   syncInboxParticipante,
   prepareWhatsappConversation,
 } from './whatsapp-inbox.js';
 import { attachWhatsappWebSocket } from './whatsapp-ws.js';
 import { configureInstanceWebhook, getEvolutionConfig } from './evolution.js';
 import { streamWhatsappMensagemMedia, attachMediaTokensToMensagens, attachMediaTokenToMensagem } from './whatsapp-media.js';
-import { attachAvatarUrlsToThreads, streamWhatsappAvatar } from './whatsapp-avatars.js';
+import { attachAvatarUrlsToThreads, streamWhatsappAvatar, syncStaleParticipantAvatars, attachAvatarUrlsToParticipantes } from './whatsapp-avatars.js';
 import {
   migrateSeguidoresHistorico,
   getSeguidoresHistoricoResumo,
@@ -300,7 +302,10 @@ app.get('/api/grupos', requireAuth, requireEvento, async (req, res) => {
 app.get('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res) => {
   try {
     const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
-    const participantes = await listParticipantes(pool);
+    const participantes = attachAvatarUrlsToParticipantes(
+      await listParticipantes(pool),
+      req.eventoId,
+    );
     res.json({ ...result, participantes });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -309,9 +314,13 @@ app.get('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res
   }
 });
 
-app.get('/api/participantes', requireAuth, async (_req, res) => {
+app.get('/api/participantes', requireAuth, async (req, res) => {
   try {
-    const participantes = await listParticipantes(pool);
+    const eventoId = Number(req.headers['x-evento-id']);
+    let participantes = await listParticipantes(pool);
+    if (Number.isInteger(eventoId) && eventoId > 0) {
+      participantes = attachAvatarUrlsToParticipantes(participantes, eventoId);
+    }
     res.json({ participantes });
   } catch (err) {
     console.error('GET /api/participantes', err);
@@ -403,7 +412,10 @@ app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
     }
     const items = await listArrecadacao(pool, req.eventoId, { scope });
     const espacosDisponiveis = await listEspacosDisponiveis(pool, req.eventoId);
-    const participantes = await listParticipantes(pool);
+    const participantes = attachAvatarUrlsToParticipantes(
+      await listParticipantes(pool),
+      req.eventoId,
+    );
     const funilEtapas = await listFunilEtapas(pool, req.eventoId, { escopo: scope });
     res.json({
       items,
@@ -416,6 +428,49 @@ app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
   } catch (err) {
     console.error('GET /api/arrecadacao', err);
     res.status(500).json({ error: 'Falha ao carregar arrecadação' });
+  }
+});
+
+app.get('/api/arrecadacao/by-espaco/:espacoId', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const espacoId = Number(req.params.espacoId);
+    if (!Number.isInteger(espacoId) || espacoId < 1) {
+      return res.status(400).json({ error: 'Espaço inválido' });
+    }
+    const [spaceRows] = await pool.query(
+      `SELECT e.id FROM espacos e
+       JOIN grupos_espacos g ON g.id = e.grupo_id
+       WHERE e.id = ? AND g.evento_id = ?
+       LIMIT 1`,
+      [espacoId, req.eventoId],
+    );
+    if (!spaceRows[0]) return res.status(404).json({ error: 'Espaço não encontrado neste evento' });
+    const item = await findArrecadacaoByEspacoId(pool, espacoId);
+    if (!item) return res.status(404).json({ error: 'Lead não vinculado a este espaço' });
+    res.json({ item });
+  } catch (err) {
+    console.error('GET /api/arrecadacao/by-espaco/:espacoId', err);
+    res.status(500).json({ error: 'Falha ao carregar lead do espaço' });
+  }
+});
+
+app.get('/api/arrecadacao/:id', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const [check] = await pool.query(
+      'SELECT id FROM arrecadacao WHERE id = ? AND evento_id = ? LIMIT 1',
+      [id, req.eventoId],
+    );
+    if (!check[0]) return res.status(404).json({ error: 'Lead não encontrado neste evento' });
+    const item = await findArrecadacaoById(pool, id);
+    if (!item) return res.status(404).json({ error: 'Lead não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    console.error('GET /api/arrecadacao/:id', err);
+    res.status(500).json({ error: 'Falha ao carregar lead' });
   }
 });
 
@@ -605,6 +660,9 @@ app.get('/api/whatsapp/inbox', requireAuth, requireEvento, async (req, res) => {
     );
     const status = await getWhatsappStatusQuick(8000);
     res.json({ threads, status });
+    void syncStaleParticipantAvatars(pool, req.eventoId).catch((err) => {
+      console.warn('syncStaleParticipantAvatars:', err.message);
+    });
   } catch (err) {
     console.error('GET /api/whatsapp/inbox', err);
     res.status(500).json({ error: 'Falha ao carregar conversas' });
@@ -622,6 +680,28 @@ app.get('/api/whatsapp/avatar/:participanteId', authorizeWhatsappAvatar, async (
   }
 });
 
+app.get('/api/whatsapp/inbox/:participanteId', requireAuth, requireEvento, async (req, res) => {
+  try {
+    const participanteId = Number(req.params.participanteId);
+    if (!Number.isInteger(participanteId) || participanteId < 1) {
+      return res.status(400).json({ error: 'Participante inválido' });
+    }
+    const thread = attachAvatarUrlsToThreads(
+      [await getWhatsappInboxThread(pool, req.eventoId, participanteId)].filter(Boolean),
+      req.eventoId,
+    )[0];
+    if (!thread) {
+      return res.status(404).json({
+        error: 'Contato sem WhatsApp cadastrado ou sem lead vinculado neste evento.',
+      });
+    }
+    res.json({ thread });
+  } catch (err) {
+    console.error('GET /api/whatsapp/inbox/:participanteId', err);
+    res.status(500).json({ error: 'Falha ao carregar conversa' });
+  }
+});
+
 app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
@@ -629,7 +709,7 @@ app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEven
       return res.status(400).json({ error: 'Participante inválido' });
     }
 
-    const prepare = req.query.prepare === '1' || req.query.prepare === 'true';
+    const prepare = req.query.prepare !== '0' && req.query.prepare !== 'false';
     const mensagens = attachMediaTokensToMensagens(
       await listMessagesForParticipante(pool, req.eventoId, participanteId, { prepare }),
     );
@@ -1147,7 +1227,10 @@ app.post('/api/grupos/:slug/espacos/mover-grupo', requireAuth, requireEvento, as
     await ensureTiposComercio(pool, [req.body?.tipo]);
     const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
     const tipos = await fetchTiposComercio(pool);
-    const participantes = await listParticipantes(pool);
+    const participantes = attachAvatarUrlsToParticipantes(
+      await listParticipantes(pool),
+      req.eventoId,
+    );
     res.json({ ...result, tipos, participantes });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -1173,7 +1256,10 @@ app.post('/api/grupos/:slug/espacos/:numero/mover', requireAuth, requireEvento, 
     await ensureTiposComercio(pool, [req.body?.tipo]);
     const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
     const tipos = await fetchTiposComercio(pool);
-    const participantes = await listParticipantes(pool);
+    const participantes = attachAvatarUrlsToParticipantes(
+      await listParticipantes(pool),
+      req.eventoId,
+    );
     res.json({ ...result, tipos, participantes });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -1196,7 +1282,10 @@ app.put('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res
     );
     const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
     const tipos = await fetchTiposComercio(pool);
-    const participantes = await listParticipantes(pool);
+    const participantes = attachAvatarUrlsToParticipantes(
+      await listParticipantes(pool),
+      req.eventoId,
+    );
     res.json({ ...result, tipos, participantes });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
