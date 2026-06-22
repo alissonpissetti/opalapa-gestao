@@ -14,12 +14,15 @@ import { initEventosModule, initEventoSelector } from './modules/eventos.js';
 import { initMarketingModule } from './modules/marketing.js';
 import { initWhatsappConnect } from './modules/whatsapp-connect.js';
 import { initWhatsappInbox } from './modules/whatsapp-inbox.js';
+import { initParticipantesModule } from './modules/participantes.js';
 
 const loadingEl = document.getElementById('app-loading');
 const appScreen = document.getElementById('app-screen');
 const userNameEl = document.getElementById('user-name');
 let spacesModule = null;
 let arrecadacaoModule = null;
+let participantesModule = null;
+let whatsappInboxModule = null;
 let tarefasModule = null;
 let marketingModule = null;
 let usersModule = null;
@@ -109,10 +112,19 @@ async function initApp(user) {
 
   store = createSpacesStore();
   await store.load();
-  spacesModule = initSpacesModule(store);
+
+  const spaceShortcuts = {};
+  spacesModule = initSpacesModule(store, spaceShortcuts);
   spacesModule.renderGrupoTabs();
   spacesModule.renderAll();
   spacesModule.updateSyncStatus();
+
+  participantesModule = initParticipantesModule(store, {
+    onSaved: () => {
+      void syncParticipantesList();
+      spacesModule?.renderParticipantesDatalist?.();
+    },
+  });
 
   const tarefaEditor = initTarefaEditor({
     onSaved: async () => {
@@ -127,6 +139,7 @@ async function initApp(user) {
     openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
     onEspacosDataChanged: () => reloadEspacosFromServer(),
     currentUser: user,
+    onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
   });
   tarefasModule = initTarefasModule({
     openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
@@ -160,11 +173,22 @@ async function initApp(user) {
   });
 
   initWhatsappConnect();
-  initWhatsappInbox({
+  whatsappInboxModule = initWhatsappInbox({
     onOpenLead: async (arrecadacaoId) => {
       await arrecadacaoModule?.openLeadDetail(arrecadacaoId);
     },
   });
+
+  spaceShortcuts.onOpenParticipante = (participanteId) => {
+    participantesModule?.openParticipante(participanteId);
+  };
+  spaceShortcuts.onOpenWhatsapp = async (participanteId) => {
+    await whatsappInboxModule?.openThread(participanteId);
+  };
+  spaceShortcuts.onOpenLead = async (arrecadacaoId) => {
+    navigation?.navigate('arrecadacao');
+    await arrecadacaoModule?.openLeadDetail(arrecadacaoId, { tipo: 'espaco' });
+  };
 }
 
 const loginScreen = initLoginScreen(async (user) => {
@@ -174,6 +198,7 @@ const loginScreen = initLoginScreen(async (user) => {
   } catch (err) {
     await logout();
     loginScreen.showError(`Falha ao carregar dados: ${err.message}`);
+    loginScreen.show();
   }
 });
 
@@ -200,10 +225,15 @@ async function boot() {
     if (loadingEl) {
       loadingEl.textContent = `Falha ao conectar: ${err.message}`;
       loadingEl.classList.add('error');
+    } else {
+      console.error(err);
+      alert(`Falha ao carregar o sistema: ${err.message}`);
     }
     return;
   } finally {
-    loadingEl?.remove();
+    if (!loadingEl?.classList.contains('error')) {
+      loadingEl?.remove();
+    }
   }
 }
 

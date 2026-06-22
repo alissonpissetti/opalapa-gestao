@@ -1345,12 +1345,14 @@ export function parseOutboundWhatsappMediaBody(body) {
   let mimetype = String(body?.mimetype || '').trim();
 
   if (typeof raw === 'string' && raw.startsWith('data:')) {
-    const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+    const match = raw.match(/^data:([^;]+);base64,([\s\S]+)$/);
     if (match) {
       mimetype = mimetype || match[1];
       raw = match[2];
     }
   }
+
+  raw = String(raw || '').replace(/\s/g, '');
 
   if (typeof raw !== 'string' || !raw.trim()) {
     throw Object.assign(new Error('Arquivo de mídia inválido'), { status: 400 });
@@ -1370,9 +1372,15 @@ export function parseOutboundWhatsappMediaBody(body) {
   const fileName = String(body?.fileName || '').trim();
 
   if (mediaType === 'image') {
-    mimetype = mimetype || 'image/jpeg';
+    mimetype = (mimetype || 'image/jpeg').split(';')[0].trim().toLowerCase();
     if (!mimetype.startsWith('image/')) {
       throw Object.assign(new Error('Formato de imagem não suportado'), { status: 400 });
+    }
+    if (mimetype === 'image/heic' || mimetype === 'image/heif') {
+      throw Object.assign(
+        new Error('Fotos HEIC não são suportadas. Converta para JPG ou PNG antes de enviar.'),
+        { status: 400 },
+      );
     }
   } else {
     mimetype = mimetype || 'audio/ogg';
@@ -1417,6 +1425,7 @@ export async function sendWhatsappMediaToLead(pool, arrecadacaoId, payload) {
     response = await sendMediaMessage(phone, {
       mediatype: 'image',
       media: dataUri,
+      mimetype: midiaMimetype,
       caption,
       fileName,
     });

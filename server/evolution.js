@@ -153,7 +153,7 @@ export async function sendTextMessage(phone, text) {
   });
 }
 
-export async function sendMediaMessage(phone, { mediatype, media, caption, fileName }) {
+export async function sendMediaMessage(phone, { mediatype, media, caption, fileName, mimetype }) {
   const { instance } = getEvolutionConfig();
   const number = toWhatsAppNumber(phone);
   if (!number) throw Object.assign(new Error('Telefone inválido'), { status: 400 });
@@ -164,6 +164,7 @@ export async function sendMediaMessage(phone, { mediatype, media, caption, fileN
     mediatype: String(mediatype || '').toLowerCase(),
     media: String(media),
   };
+  if (mimetype) payload.mimetype = String(mimetype);
   if (caption) payload.caption = String(caption);
   if (fileName) payload.fileName = String(fileName);
 

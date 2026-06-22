@@ -137,8 +137,23 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
-app.use(express.json({ limit: '1mb' }));
+
+const jsonDefault = express.json({ limit: '1mb' });
 const jsonWhatsappMedia = express.json({ limit: '16mb' });
+
+function isWhatsappMediaSendPath(pathname) {
+  return (
+    /^\/api\/whatsapp\/inbox\/\d+\/send$/.test(pathname) ||
+    /^\/api\/arrecadacao\/\d+\/whatsapp\/send$/.test(pathname)
+  );
+}
+
+app.use((req, res, next) => {
+  if (isWhatsappMediaSendPath(req.path)) {
+    return jsonWhatsappMedia(req, res, next);
+  }
+  return jsonDefault(req, res, next);
+});
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -614,7 +629,7 @@ app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEven
       return res.status(400).json({ error: 'Participante inválido' });
     }
 
-    const prepare = req.query.prepare !== '0' && req.query.prepare !== 'false';
+    const prepare = req.query.prepare === '1' || req.query.prepare === 'true';
     const mensagens = attachMediaTokensToMensagens(
       await listMessagesForParticipante(pool, req.eventoId, participanteId, { prepare }),
     );
@@ -665,7 +680,7 @@ app.post('/api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', re
   }
 });
 
-app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento, jsonWhatsappMedia, async (req, res) => {
+app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     if (!Number.isInteger(participanteId) || participanteId < 1) {
@@ -711,12 +726,15 @@ app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
     }
     const item = await findArrecadacaoById(pool, id);
     if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
-    const [status, prepared] = await Promise.all([
-      getWhatsappStatus(),
-      prepareWhatsappConversation(pool, { arrecadacaoId: id, days: 7 }),
-    ]);
+    const prepare = req.query.prepare === '1' || req.query.prepare === 'true';
+    const status = await getWhatsappStatus();
+    if (prepare) {
+      const prepared = await prepareWhatsappConversation(pool, { arrecadacaoId: id, days: 7 });
+      const mensagens = attachMediaTokensToMensagens(await listWhatsappMessages(pool, id));
+      return res.json({ mensagens, status, prepared });
+    }
     const mensagens = attachMediaTokensToMensagens(await listWhatsappMessages(pool, id));
-    res.json({ mensagens, status, prepared });
+    res.json({ mensagens, status });
   } catch (err) {
     console.error('GET /api/arrecadacao/:id/whatsapp', err);
     res.status(500).json({ error: 'Falha ao carregar conversa WhatsApp' });
@@ -765,7 +783,7 @@ app.post('/api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', requireA
   }
 });
 
-app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, jsonWhatsappMedia, async (req, res) => {
+app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -1185,6 +1203,16 @@ app.put('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res
     console.error('PUT /api/grupos/:slug/espacos', err);
     res.status(500).json({ error: 'Falha ao salvar espaços' });
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Arquivo muito grande. O limite é 16 MB.' });
+  }
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Corpo da requisição inválido' });
+  }
+  next(err);
 });
 
 app.use('/api', (req, res) => {

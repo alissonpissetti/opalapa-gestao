@@ -25,6 +25,15 @@ function truncateText(text, max = 42) {
 const FILTER_KEY = 'tarefas-status-filter';
 const FILTERS = new Set(['pendentes', 'atrasadas', 'concluidas', 'todas']);
 
+const TAREFA_TIPO_LABELS = {
+  presencial: 'Presencial',
+  ligacao: 'Ligação',
+  whatsapp: 'WhatsApp',
+  email: 'E-mail',
+  reuniao_online: 'Reunião online',
+  outro: 'Outro',
+};
+
 function readStoredFilter() {
   const stored = localStorage.getItem(FILTER_KEY);
   return FILTERS.has(stored) ? stored : 'pendentes';
@@ -103,7 +112,7 @@ export function initTarefasModule({ onOpenLead, openTarefaEditor } = {}) {
             : filter === 'todas'
               ? 'Nenhuma tarefa cadastrada.'
               : 'Nenhuma tarefa agendada. Crie follow-ups nos leads da arrecadação.';
-      els.table.innerHTML = `<tr><td colspan="6" class="cell-empty">${emptyMsg}</td></tr>`;
+      els.table.innerHTML = `<tr class="tarefa-empty-row"><td colspan="6" class="cell-empty">${emptyMsg}</td></tr>`;
       els.summary.textContent = '0 tarefa(s)';
       return;
     }
@@ -118,17 +127,26 @@ export function initTarefasModule({ onOpenLead, openTarefaEditor } = {}) {
     els.table.innerHTML = list
       .map((t) => {
         const atrasada = isTarefaAtrasada(t.agendadoPara, t.concluida);
+        const tipoLabel = TAREFA_TIPO_LABELS[t.tipoTarefa] || t.tipoTarefa || '';
+        const metaParts = [tipoLabel, t.responsavelNome].filter(Boolean);
+        const metaHtml = metaParts.length
+          ? `<div class="tarefa-card-meta">${metaParts.map((part) => `<span>${escapeHtml(part)}</span>`).join('')}</div>`
+          : '';
+
+        const hasContato = Boolean(t.participanteInstagram || t.participanteWhatsapp);
+        const obsText = String(t.observacao || '').trim();
 
         const leadCell = t.arrecadacaoId
           ? `<button class="tbtn linkish" type="button" data-action="ver-lead" data-id="${t.arrecadacaoId}" data-arr-tipo="${escapeHtml(t.arrecadacaoTipo || '')}">${escapeHtml(truncateText(t.arrecadacaoDescricao || 'Ver lead', 36))}</button>`
-          : '<span class="cell-muted">—</span>';
+          : '';
 
         const actions = t.concluida
           ? ''
-          : `<button class="tbtn" type="button" data-action="editar" data-id="${t.id}">Editar</button>
-             <button class="tbtn" type="button" data-action="concluir" data-id="${t.id}">Concluir</button>`;
+          : `<button class="tbtn tbtn--compact" type="button" data-action="editar" data-id="${t.id}">Editar</button>
+             <button class="tbtn tbtn--compact primary" type="button" data-action="concluir" data-id="${t.id}">Concluir</button>`;
 
         const rowClass = [
+          'tarefa-card-row',
           atrasada ? 'tarefa-row-atrasada' : '',
           t.arrecadacaoId ? 'tarefa-row-clickable' : '',
         ]
@@ -141,12 +159,15 @@ export function initTarefasModule({ onOpenLead, openTarefaEditor } = {}) {
           data-tarefa-id="${t.id}"
           ${t.arrecadacaoId ? `data-arrecadacao-id="${t.arrecadacaoId}" data-arrecadacao-tipo="${escapeHtml(t.arrecadacaoTipo || '')}"` : ''}
         >
-          <td class="tarefa-quando-cell">${renderQuandoCell(t)}</td>
-          <td><strong>${escapeHtml(t.participanteNome)}</strong></td>
-          <td>${leadCell}</td>
-          <td>${renderContatoCell(t)}</td>
-          <td class="${t.observacao ? 'cell-muted' : 'cell-empty'}">${t.observacao ? escapeHtml(t.observacao) : '—'}</td>
-          <td class="row-actions">${actions}</td>
+          <td class="tarefa-cell-quando tarefa-quando-cell">${renderQuandoCell(t)}</td>
+          <td class="tarefa-cell-participante">
+            <strong class="tarefa-card-nome">${escapeHtml(t.participanteNome)}</strong>
+            ${metaHtml}
+          </td>
+          <td class="tarefa-cell-lead${leadCell ? '' : ' tarefa-cell-lead--empty'}">${leadCell || '<span class="tarefa-cell-placeholder">—</span>'}</td>
+          <td class="tarefa-cell-contato${hasContato ? '' : ' tarefa-cell-contato--empty'}">${hasContato ? renderContatoCell(t) : '<span class="tarefa-cell-placeholder">—</span>'}</td>
+          <td class="tarefa-cell-obs${obsText ? ' cell-muted' : ' tarefa-cell-obs--empty'}">${obsText ? escapeHtml(obsText) : '<span class="tarefa-cell-placeholder">—</span>'}</td>
+          <td class="tarefa-cell-acoes row-actions row-actions--tarefa">${actions}</td>
         </tr>`;
       })
       .join('');

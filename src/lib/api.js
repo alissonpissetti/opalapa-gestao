@@ -54,7 +54,11 @@ export async function apiRequest(path, options = {}) {
     try {
       const body = await res.json();
       if (body.error) message = body.error;
-    } catch (_) {}
+    } catch (_) {
+      if (res.status === 413) {
+        message = 'Arquivo muito grande. O limite é 16 MB.';
+      }
+    }
     if (res.status === 401 && onUnauthorized && !path.includes('/auth/login')) {
       onUnauthorized();
     }
@@ -326,8 +330,11 @@ export function disconnectWhatsapp() {
   return apiRequest('/api/whatsapp/disconnect', { method: 'POST' });
 }
 
-export function fetchLeadWhatsapp(arrecadacaoId) {
-  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp`, { timeoutMs: 90000 });
+export function fetchLeadWhatsapp(arrecadacaoId, { prepare = false } = {}) {
+  const qs = prepare ? '?prepare=1' : '';
+  return apiRequest(`/api/arrecadacao/${arrecadacaoId}/whatsapp${qs}`, {
+    timeoutMs: prepare ? 90000 : 15000,
+  });
 }
 
 export function syncLeadWhatsapp(arrecadacaoId, { days = 5 } = {}) {
@@ -358,10 +365,10 @@ export function fetchWhatsappInbox() {
   return apiRequest('/api/whatsapp/inbox');
 }
 
-export function fetchWhatsappThreadMessages(participanteId, { prepare = true } = {}) {
-  const qs = prepare ? '' : '?prepare=0';
+export function fetchWhatsappThreadMessages(participanteId, { prepare = false } = {}) {
+  const qs = prepare ? '?prepare=1' : '';
   return apiRequest(`/api/whatsapp/inbox/${participanteId}/messages${qs}`, {
-    timeoutMs: prepare ? 90000 : 30000,
+    timeoutMs: prepare ? 90000 : 15000,
   });
 }
 

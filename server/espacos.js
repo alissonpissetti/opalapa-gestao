@@ -91,6 +91,7 @@ function rowToSpace(row) {
     valorPago,
     valorFalta,
     saleGroup: row.sale_group || '',
+    arrecadacaoId: row.arrecadacao_id != null ? Number(row.arrecadacao_id) : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
 }

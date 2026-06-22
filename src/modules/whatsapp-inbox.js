@@ -11,6 +11,7 @@ import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
 import { renderWhatsappMediaHtml, hydrateWhatsappMedia, retryPendingWhatsappMedia, patchWhatsappMessageMedia, stableMediaRef, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
 import { renderWhatsappBubbleTextHtml, bubbleModifierClasses } from '../lib/whatsapp-bubble-text.js';
 import { initWhatsappCompose } from '../lib/whatsapp-compose.js';
+import { readWhatsappDraft, writeWhatsappDraft, clearWhatsappDraft } from '../lib/whatsapp-drafts.js';
 import { onEventoChange } from '../lib/evento.js';
 
 function wsUrl() {
@@ -113,6 +114,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   const chatEmpty = document.getElementById('wa-chat-empty');
   const chatActive = document.getElementById('wa-chat-active');
   const chatName = document.getElementById('wa-chat-name');
+  const chatFunil = document.getElementById('wa-chat-funil');
   const chatPhone = document.getElementById('wa-chat-phone');
   const chatAvatar = document.getElementById('wa-chat-avatar');
   const chatMessages = document.getElementById('wa-chat-messages');
@@ -136,6 +138,26 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   let inboxStatus = null;
   let unbindReactions = null;
   let unbindCompose = null;
+  let draftInputTimer = null;
+
+  function persistActiveDraft() {
+    if (!activeThread?.participanteId || !chatInput) return;
+    writeWhatsappDraft(activeThread.participanteId, chatInput.value);
+  }
+
+  function loadDraftForThread(participanteId) {
+    if (!chatInput) return;
+    chatInput.value = readWhatsappDraft(participanteId);
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function scheduleDraftSave() {
+    if (!activeThread?.participanteId || !chatInput) return;
+    clearTimeout(draftInputTimer);
+    draftInputTimer = setTimeout(() => {
+      writeWhatsappDraft(activeThread.participanteId, chatInput.value);
+    }, 250);
+  }
 
   function isChatNearBottom(threshold = 96) {
     if (!chatMessages) return true;
@@ -323,6 +345,13 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     try {
       const data = await fetchWhatsappInbox();
       threads = data.threads || [];
+      if (activeThread) {
+        const refreshed = threads.find((t) => t.participanteId === activeThread.participanteId);
+        if (refreshed) {
+          activeThread = refreshed;
+          renderChatFunil(activeThread);
+        }
+      }
       updateStatus(data.status);
       renderThreads();
     } catch (err) {
@@ -330,7 +359,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     }
   }
 
-  async function loadThreadMessages(participanteId, { silent = false, forceBottom = false, prepare = true } = {}) {
+  async function loadThreadMessages(participanteId, { silent = false, forceBottom = false, prepare = false } = {}) {
     const data = await fetchWhatsappThreadMessages(participanteId, { prepare });
     mergeMessages(data.mensagens || [], { silent, forceBottom });
     if (!silent && activeThread?.participanteId === participanteId) {
@@ -383,11 +412,33 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     screen.classList.toggle('wa-inbox-screen--chat-open', show);
   }
 
+  function renderChatFunil(thread) {
+    if (!chatFunil) return;
+    const etapa = thread?.etapaFunil;
+    if (!etapa?.titulo) {
+      chatFunil.classList.add('hidden');
+      chatFunil.textContent = '';
+      chatFunil.style.removeProperty('--funil-color');
+      return;
+    }
+    chatFunil.textContent = etapa.titulo;
+    chatFunil.classList.remove('hidden');
+    if (etapa.cor) {
+      chatFunil.style.setProperty('--funil-color', etapa.cor);
+    } else {
+      chatFunil.style.removeProperty('--funil-color');
+    }
+  }
+
   async function selectThread(participanteId) {
+    if (activeThread?.participanteId && activeThread.participanteId !== participanteId) {
+      persistActiveDraft();
+    }
     const thread = threads.find((t) => t.participanteId === participanteId);
     if (!thread) return;
     activeThread = thread;
     if (chatName) chatName.textContent = thread.participanteNome;
+    renderChatFunil(thread);
     if (chatPhone) {
       chatPhone.textContent = thread.telefone ? formatPhoneDisplay(thread.telefone) : '';
     }
@@ -396,10 +447,12 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     }
     showChatPane(true);
     renderThreads();
+    loadDraftForThread(participanteId);
     chatMessages.innerHTML = '<p class="wa-chat-placeholder">Carregando conversa…</p>';
     try {
       messages = [];
-      await loadThreadMessages(participanteId, { forceBottom: true });
+      await loadThreadMessages(participanteId, { forceBottom: true, prepare: false });
+      void loadThreadMessages(participanteId, { silent: true, prepare: true }).catch(() => {});
     } catch (err) {
       chatMessages.innerHTML = `<p class="wa-chat-placeholder">${escapeHtml(err.message)}</p>`;
     }
@@ -594,7 +647,8 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     pollTimer = null;
   }
 
-  async function openInbox() {
+  async function openInbox({ participanteId = null } = {}) {
+    persistActiveDraft();
     screen.classList.remove('hidden');
     screen.setAttribute('aria-hidden', 'false');
     document.body.classList.add('wa-inbox-open');
@@ -605,9 +659,24 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     await loadInbox();
     connectWs();
     startPolling();
+    if (participanteId) {
+      const thread = threads.find((t) => t.participanteId === participanteId);
+      if (thread) {
+        await selectThread(participanteId);
+      } else {
+        alert('Conversa não encontrada para este lead. Verifique se o WhatsApp está cadastrado.');
+      }
+    }
+  }
+
+  async function openThread(participanteId) {
+    await openInbox({ participanteId: Number(participanteId) });
   }
 
   function closeInbox() {
+    persistActiveDraft();
+    clearTimeout(draftInputTimer);
+    draftInputTimer = null;
     screen.classList.add('hidden');
     screen.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('wa-inbox-open');
@@ -639,15 +708,20 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     micBtnId: 'wa-chat-mic',
     sendBtnId: 'wa-chat-send',
     recordingPanelId: 'wa-chat-recording',
+    dropZoneEl: chatActive,
     onSendText: async (text) => {
       await deliverOutboundMessage({ text });
+      if (activeThread?.participanteId) clearWhatsappDraft(activeThread.participanteId);
     },
     onSendMedia: async (payload) => {
       await deliverOutboundMessage(payload);
+      if (activeThread?.participanteId) {
+        writeWhatsappDraft(activeThread.participanteId, chatInput?.value || '');
+      }
     },
   });
 
-  btnOpen.addEventListener('click', openInbox);
+  btnOpen.addEventListener('click', () => openInbox());
   btnClose?.addEventListener('click', closeInbox);
   btnRefresh?.addEventListener('click', loadInbox);
   searchEl?.addEventListener('input', () => {
@@ -656,7 +730,13 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     updateStatus();
   });
   btnChatBack?.addEventListener('click', () => {
+    persistActiveDraft();
     activeThread = null;
+    if (chatInput) {
+      chatInput.value = '';
+      chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    renderChatFunil(null);
     showChatPane(false);
     renderThreads();
   });
@@ -669,6 +749,8 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     syncActiveThread();
   });
 
+  chatInput?.addEventListener('input', scheduleDraftSave);
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isOpen()) closeInbox();
   });
@@ -677,5 +759,5 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     if (isOpen()) loadInbox();
   });
 
-  return { openInbox, closeInbox, reload: loadInbox };
+  return { openInbox, openThread, closeInbox, reload: loadInbox };
 }

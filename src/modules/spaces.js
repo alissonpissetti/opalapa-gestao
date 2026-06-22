@@ -21,7 +21,8 @@ import { initMapEditor } from './map-editor.js';
 
 const VIEW_MODE_KEY = 'espacos-view-mode';
 
-export function initSpacesModule(store) {
+export function initSpacesModule(store, shortcuts = {}) {
+  const { onOpenParticipante, onOpenWhatsapp, onOpenLead } = shortcuts;
   const {
     spaces,
     persist,
@@ -43,6 +44,7 @@ export function initSpacesModule(store) {
   let funilEtapas = [];
   let draggingNumero = null;
   let kanbanCardWasDragged = false;
+  let shortcutContext = null;
   const selectedNumeros = new Set();
   const els = {
     grupoTabs: document.getElementById('grupo-tabs'),
@@ -84,6 +86,9 @@ export function initSpacesModule(store) {
     mParticipanteField: document.getElementById('m-participante-field'),
     mParticipante: document.getElementById('m-participante'),
     mParticipanteId: document.getElementById('m-participante-id'),
+    mParticipanteActions: document.getElementById('m-participante-actions'),
+    mShortcutWhatsapp: document.getElementById('m-shortcut-whatsapp'),
+    mShortcutLead: document.getElementById('m-shortcut-lead'),
     mObs: document.getElementById('m-obs'),
     mMoveField: document.getElementById('m-move-field'),
     mMoveLabel: document.getElementById('m-move-label'),
@@ -348,6 +353,54 @@ export function initSpacesModule(store) {
   function syncParticipanteIdFromInput() {
     const matched = matchParticipanteByNome(els.mParticipante.value);
     els.mParticipanteId.value = matched ? String(matched.id) : '';
+    syncParticipanteShortcuts();
+  }
+
+  function resolveShortcutContextFromSpaces(numeros) {
+    const list = sortIds(numeros).map(String);
+    for (const numero of list) {
+      const data = spaces[numero];
+      if (!data?.participanteId) continue;
+      return {
+        participanteId: data.participanteId,
+        participanteNome: data.participanteNome || '',
+        arrecadacaoId: data.arrecadacaoId || null,
+      };
+    }
+    return null;
+  }
+
+  function resolveShortcutContext() {
+    const fromInput = readParticipanteInput();
+    if (fromInput.participanteId) {
+      let arrecadacaoId = null;
+      for (const numero of editNumeros) {
+        const data = spaces[numero];
+        if (data?.participanteId === fromInput.participanteId && data?.arrecadacaoId) {
+          arrecadacaoId = data.arrecadacaoId;
+          break;
+        }
+      }
+      return {
+        participanteId: fromInput.participanteId,
+        participanteNome: fromInput.participanteNome || '',
+        arrecadacaoId,
+      };
+    }
+    return resolveShortcutContextFromSpaces(editNumeros);
+  }
+
+  function syncParticipanteShortcuts() {
+    if (!els.mParticipanteActions) return;
+    shortcutContext = resolveShortcutContext();
+    const visible = Boolean(shortcutContext?.participanteId);
+    els.mParticipanteActions.classList.toggle('hidden', !visible);
+    if (!visible) return;
+
+    const participante = store.participantes.find((p) => p.id === shortcutContext.participanteId);
+    const hasWhatsapp = Boolean(String(participante?.contatoTelefone || '').trim());
+    if (els.mShortcutWhatsapp) els.mShortcutWhatsapp.disabled = !hasWhatsapp;
+    if (els.mShortcutLead) els.mShortcutLead.disabled = !shortcutContext.arrecadacaoId;
   }
 
   function renderTiposComercio() {
@@ -714,6 +767,7 @@ export function initSpacesModule(store) {
     } else {
       els.mValorHint.textContent = '';
     }
+    syncParticipanteShortcuts();
   }
 
   function setFilter(filter) {
@@ -781,6 +835,8 @@ export function initSpacesModule(store) {
   function closeModal() {
     els.modalBg.classList.remove('open');
     if (els.mMoveDestino) els.mMoveDestino.value = '';
+    if (els.mParticipanteActions) els.mParticipanteActions.classList.add('hidden');
+    shortcutContext = null;
     editNumeros = [];
   }
 
@@ -1257,6 +1313,17 @@ export function initSpacesModule(store) {
     els.mValor.addEventListener('input', (e) => maskValorInput(e.target));
     els.mParticipante.addEventListener('input', syncParticipanteIdFromInput);
     els.mParticipante.addEventListener('change', syncParticipanteIdFromInput);
+
+    els.mShortcutWhatsapp?.addEventListener('click', () => {
+      if (!shortcutContext?.participanteId || els.mShortcutWhatsapp?.disabled) return;
+      void onOpenWhatsapp?.(shortcutContext.participanteId);
+    });
+    els.mShortcutLead?.addEventListener('click', () => {
+      if (!shortcutContext?.arrecadacaoId || els.mShortcutLead?.disabled) return;
+      const arrecadacaoId = shortcutContext.arrecadacaoId;
+      closeModal();
+      void onOpenLead?.(arrecadacaoId);
+    });
 
     els.btnExport.addEventListener('click', () => exportCSV(store));
     els.btnPrint.addEventListener('click', () => window.print());

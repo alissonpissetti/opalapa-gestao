@@ -177,9 +177,30 @@ function bindAudioShell(shell) {
         activeAudioElement.pause();
         syncAudioUi(activeAudioElement);
       }
-      void audio.play().catch(() => {
-        shell.classList.add('is-error');
-        alert('Não foi possível reproduzir o áudio.');
+      void audio.play().catch(async () => {
+        if (audio.dataset.playRetried) {
+          shell.classList.add('is-error');
+          alert('Não foi possível reproduzir o áudio.');
+          return;
+        }
+        audio.dataset.playRetried = '1';
+        delete audio.dataset.hydrated;
+        shell.classList.remove('is-ready', 'is-error');
+        playBtn.disabled = true;
+        await applyMediaToNode(shell);
+        if (!shell.classList.contains('is-ready')) {
+          shell.classList.add('is-error');
+          alert('Não foi possível reproduzir o áudio.');
+          return;
+        }
+        try {
+          await audio.play();
+          activeAudioElement = audio;
+          syncAudioUi(audio);
+        } catch {
+          shell.classList.add('is-error');
+          alert('Não foi possível reproduzir o áudio.');
+        }
       });
       activeAudioElement = audio;
     } else {
@@ -218,6 +239,7 @@ function bindAudioShell(shell) {
   audio.addEventListener('pause', () => syncAudioUi(audio));
   audio.addEventListener('play', () => syncAudioUi(audio));
   audio.addEventListener('error', () => {
+    if (!shell.classList.contains('is-ready')) return;
     shell.classList.add('is-error');
     if (playBtn) playBtn.disabled = true;
   });
@@ -483,7 +505,8 @@ async function fetchMediaBlob(url) {
     const blob = await res.blob();
     const headerType = res.headers.get('content-type');
     if (headerType && (!blob.type || blob.type === 'application/octet-stream')) {
-      return new Blob([await blob.arrayBuffer()], { type: headerType.trim() });
+      const normalized = headerType.split(';')[0].trim();
+      return new Blob([await blob.arrayBuffer()], { type: normalized });
     }
     return blob;
   } finally {
@@ -491,7 +514,39 @@ async function fetchMediaBlob(url) {
   }
 }
 
-function blobForNode(node, blob) {
+function sniffAudioMime(bytes) {
+  if (!bytes?.length) return '';
+  if (bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) return 'audio/ogg';
+  if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+    return 'audio/mp4';
+  }
+  if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return 'audio/webm';
+  if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return 'audio/mpeg';
+  return '';
+}
+
+function normalizeAudioMime(mimetype) {
+  const mime = String(mimetype || '').split(';')[0].trim().toLowerCase();
+  if (!mime || mime === 'application/octet-stream') return '';
+  if (mime.startsWith('audio/')) return mime;
+  return '';
+}
+
+async function blobForNode(node, blob) {
+  const tipo = mediaTipoFromNode(node);
+  if (tipo === 'audio') {
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    const sniffed = sniffAudioMime(header);
+    const fromBlob = normalizeAudioMime(blob.type);
+    const fromMeta = normalizeAudioMime(node.dataset.midiaMimetype);
+    const type = sniffed || fromBlob || fromMeta || 'audio/ogg';
+    if (!blob.type || blob.type === type) {
+      return blob.type === type ? blob : new Blob([blob], { type });
+    }
+    return new Blob([await blob.arrayBuffer()], { type });
+  }
+
   const preferred = (node.dataset.midiaMimetype || blob.type || '').trim();
   if (!preferred || preferred === blob.type) return blob;
   return new Blob([blob], { type: preferred });
@@ -508,24 +563,42 @@ function markMediaReady(mediaNode) {
 }
 
 function tryDirectMediaSrc(mediaNode, directUrl) {
+  const isAudio = mediaNode.tagName === 'AUDIO';
   return new Promise((resolve) => {
     let settled = false;
     const finish = (ok) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      mediaNode.removeEventListener('loadedmetadata', onMeta);
+      mediaNode.removeEventListener('canplay', onReady);
+      mediaNode.removeEventListener('canplaythrough', onReady);
+      mediaNode.removeEventListener('error', onError);
       if (ok) markMediaReady(mediaNode);
       resolve(ok);
     };
+    const onMeta = () => {
+      if (!isAudio) onReady();
+    };
+    const onReady = () => finish(true);
+    const onError = () => finish(false);
 
-    mediaNode.addEventListener('loadedmetadata', () => finish(true), { once: true });
-    mediaNode.addEventListener('canplay', () => finish(true), { once: true });
-    mediaNode.addEventListener('error', () => finish(false), { once: true });
+    if (isAudio) {
+      mediaNode.addEventListener('canplay', onReady);
+      mediaNode.addEventListener('canplaythrough', onReady);
+    } else {
+      mediaNode.addEventListener('loadedmetadata', onMeta);
+      mediaNode.addEventListener('canplay', onReady);
+    }
+    mediaNode.addEventListener('error', onError);
+    mediaNode.preload = isAudio ? 'auto' : mediaNode.preload;
     mediaNode.src = directUrl;
     mediaNode.load();
-    const timer = setTimeout(() => finish(mediaNode.readyState >= 1), 6000);
+    const timer = setTimeout(() => finish(!isAudio && mediaNode.readyState >= 1), isAudio ? 20000 : 6000);
   });
 }
+
+const mediaHydrationLocks = new WeakSet();
 
 export function stableMediaRef(m) {
   if (!m?.midiaUrl) return '';
@@ -543,56 +616,66 @@ async function applyMediaToNode(node, attempt = 0) {
   const url = mediaNode.dataset.midiaUrl;
   if (!url || mediaNode.dataset.fallbackShown) return;
 
-  const key = cacheKeyForNode(mediaNode);
-  const tipo = mediaTipoFromNode(mediaNode);
-  const directUrl = resolveMediaFetchUrl(url);
-  const tag = mediaNode.tagName;
+  if (attempt === 0) {
+    if (mediaHydrationLocks.has(mediaNode)) return;
+    mediaHydrationLocks.add(mediaNode);
+  }
 
-  if (tag === 'AUDIO' || tag === 'VIDEO') {
+  try {
+    const key = cacheKeyForNode(mediaNode);
+    const tipo = mediaTipoFromNode(mediaNode);
+    const directUrl = resolveMediaFetchUrl(url);
+    const tag = mediaNode.tagName;
+
+    if (tag === 'AUDIO' || tag === 'VIDEO') {
+      const cached = key ? mediaBlobCache.get(key) : null;
+      if (cached) {
+        mediaNode.src = cached;
+        mediaNode.load();
+        if (await tryDirectMediaSrc(mediaNode, cached)) return;
+      }
+
+      if (tag === 'AUDIO' && attempt === 0 && (await tryDirectMediaSrc(mediaNode, directUrl))) return;
+      if (tag === 'VIDEO' && attempt === 0 && (await tryDirectMediaSrc(mediaNode, directUrl))) return;
+
+      try {
+        const blob = await blobForNode(mediaNode, await fetchMediaBlob(url));
+        const objectUrl = URL.createObjectURL(blob);
+        rememberObjectUrl(key, objectUrl);
+        if (await tryDirectMediaSrc(mediaNode, objectUrl)) return;
+        throw Object.assign(new Error('decode failed'), { status: 404 });
+      } catch (err) {
+        if (attempt < 4) {
+          await sleep(800 * (attempt + 1));
+          return applyMediaToNode(node, attempt + 1);
+        }
+        showWhatsappMediaPending(mediaNode, mediaErrorMessage(err.status, tipo), tipo);
+      }
+      return;
+    }
+
     const cached = key ? mediaBlobCache.get(key) : null;
     if (cached) {
       mediaNode.src = cached;
-      mediaNode.load();
-      if (await tryDirectMediaSrc(mediaNode, cached)) return;
+      markMediaReady(mediaNode);
+      return;
     }
 
-    if (attempt === 0 && (await tryDirectMediaSrc(mediaNode, directUrl))) return;
-
     try {
-      const blob = blobForNode(mediaNode, await fetchMediaBlob(url));
+      const blob = await blobForNode(mediaNode, await fetchMediaBlob(url));
       const objectUrl = URL.createObjectURL(blob);
       rememberObjectUrl(key, objectUrl);
-      if (await tryDirectMediaSrc(mediaNode, objectUrl)) return;
-      throw Object.assign(new Error('decode failed'), { status: 404 });
+      mediaNode.src = objectUrl;
+      markMediaReady(mediaNode);
     } catch (err) {
       if (attempt < 4) {
-        await sleep(800 * (attempt + 1));
+        await sleep(600 * (attempt + 1));
         return applyMediaToNode(node, attempt + 1);
       }
       showWhatsappMediaPending(mediaNode, mediaErrorMessage(err.status, tipo), tipo);
     }
-    return;
-  }
-
-  const cached = key ? mediaBlobCache.get(key) : null;
-  if (cached) {
-    mediaNode.src = cached;
-    markMediaReady(mediaNode);
-    return;
-  }
-
-  try {
-    const blob = blobForNode(mediaNode, await fetchMediaBlob(url));
-    const objectUrl = URL.createObjectURL(blob);
-    rememberObjectUrl(key, objectUrl);
-    mediaNode.src = objectUrl;
-    markMediaReady(mediaNode);
-  } catch (err) {
-    if (attempt < 4) {
-      await sleep(600 * (attempt + 1));
-      return applyMediaToNode(node, attempt + 1);
-    }
-    showWhatsappMediaPending(mediaNode, mediaErrorMessage(err.status, tipo), tipo);
+  } finally {
+    if (attempt === 0) mediaHydrationLocks.delete(mediaNode);
   }
 }
 
@@ -641,11 +724,9 @@ export function patchWhatsappMessageMedia(container, mensagem, { classPrefix = '
 export async function hydrateWhatsappMedia(container) {
   if (!container) return;
 
-  const nodes = container.querySelectorAll(
+  const candidates = container.querySelectorAll(
     [
       'img[data-midia-url]:not([data-hydrated]):not([data-fallback-shown])',
-      'audio[data-midia-url]:not([data-hydrated]):not([data-fallback-shown])',
-      'video[data-midia-url]:not([data-hydrated]):not([data-fallback-shown])',
       '.wa-bubble-audio-shell:not(.is-ready):not(:has([data-fallback-shown]))',
       '.lw-whatsapp-bubble-audio-shell:not(.is-ready):not(:has([data-fallback-shown]))',
       '.wa-bubble-video-shell:not(.is-ready):not(:has([data-fallback-shown]))',
@@ -653,7 +734,19 @@ export async function hydrateWhatsappMedia(container) {
     ].join(', '),
   );
 
-  await Promise.all([...nodes].map((node) => applyMediaToNode(node)));
+  const seen = new Set();
+  const nodes = [];
+  for (const node of candidates) {
+    const mediaNode = node.matches('audio,video,img')
+      ? node
+      : node.querySelector('audio,video,img');
+    const key = cacheKeyForNode(mediaNode || node);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    nodes.push(node);
+  }
+
+  await Promise.all(nodes.map((node) => applyMediaToNode(node)));
   await hydrateDocumentPreviews(container);
   hydrateAudioPlayers(container);
   await hydrateLinkPreviews(container);

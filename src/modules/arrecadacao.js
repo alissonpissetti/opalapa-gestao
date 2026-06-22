@@ -21,10 +21,6 @@ import {
   createInteracao,
   fetchUsers,
   fetchMarketing,
-  fetchLeadWhatsapp,
-  syncLeadWhatsapp,
-  sendLeadWhatsapp,
-  sendLeadWhatsappReaction,
 } from '../lib/api.js';
 import {
   fmtMoney,
@@ -38,11 +34,6 @@ import {
   formatValorInput,
   maskValorInput,
 } from '../lib/format.js';
-import { wrapWhatsappBubble } from '../lib/whatsapp-reactions.js';
-import { bindWhatsappReactionControls } from '../lib/whatsapp-reactions-ui.js';
-import { renderWhatsappMediaHtml, hydrateWhatsappMedia, retryPendingWhatsappMedia, patchWhatsappMessageMedia, shouldShowWhatsappBubbleText } from '../lib/whatsapp-media.js';
-import { renderWhatsappBubbleTextHtml, bubbleModifierClasses } from '../lib/whatsapp-bubble-text.js';
-import { initWhatsappCompose } from '../lib/whatsapp-compose.js';
 import { LABELS, COLORS, FUNIL_STATUS_ORDER } from '../lib/constants.js';
 
 const PAGE_CONFIG = {
@@ -219,7 +210,14 @@ function actionIconBtn({ action, id, title, icon, danger = false }) {
 
 export function initArrecadacaoModule(
   store,
-  { onTarefaChanged, onNavigate, openTarefaEditor, onEspacosDataChanged, currentUser } = {},
+  {
+    onTarefaChanged,
+    onNavigate,
+    openTarefaEditor,
+    onEspacosDataChanged,
+    currentUser,
+    onOpenWhatsappChat,
+  } = {},
 ) {
   let leadScope = 'comercial';
 
@@ -299,6 +297,8 @@ export function initArrecadacaoModule(
     leadDealPanel: document.getElementById('lead-deal-panel'),
     leadInteracoesList: document.getElementById('lead-interacoes-list'),
     leadInteracaoForm: document.getElementById('lead-interacao-form'),
+    leadAnotacoesDetails: document.getElementById('lead-anotacoes-details'),
+    leadTarefasDetails: document.getElementById('lead-tarefas-details'),
     leadInteracaoTipo: document.getElementById('lead-interacao-tipo'),
     leadInteracaoTexto: document.getElementById('lead-interacao-texto'),
     leadTarefaForm: document.getElementById('lead-tarefa-form'),
@@ -313,11 +313,7 @@ export function initArrecadacaoModule(
     leadOrigemCampanha: document.getElementById('lead-origem-campanha'),
     leadOrigemCriativo: document.getElementById('lead-origem-criativo'),
     leadWhatsappSection: document.getElementById('lead-whatsapp-section'),
-    leadWhatsappStatus: document.getElementById('lead-whatsapp-status'),
-    leadWhatsappMessages: document.getElementById('lead-whatsapp-messages'),
-    leadWhatsappForm: document.getElementById('lead-whatsapp-form'),
-    leadWhatsappInput: document.getElementById('lead-whatsapp-input'),
-    leadWhatsappSync: document.getElementById('lead-whatsapp-sync'),
+    leadWhatsappOpen: document.getElementById('lead-whatsapp-open'),
     migrateArtisticoPanel: document.getElementById('a-migrate-artistico-panel'),
     migrateArtisticoBtn: document.getElementById('a-migrate-artistico-btn'),
   };
@@ -387,9 +383,6 @@ export function initArrecadacaoModule(
   let leadDetailItem = null;
   let leadDetailInteracoes = [];
   let leadSeguidoresHistorico = { historico: [], resumo: {} };
-  let leadWhatsappMessages = [];
-  let leadWhatsappConnection = null;
-  let unbindLeadWhatsappReactions = null;
   let leadFieldEditing = null;
   let leadFieldSaving = false;
   let editId = null;
@@ -1483,6 +1476,8 @@ export function initArrecadacaoModule(
     switch (field) {
       case 'participante':
         return item.participanteNome || '—';
+      case 'contatoNome':
+        return p?.contatoNome?.trim() || '—';
       case 'instagram':
         return p?.instagram ? formatInstagram(p.instagram) : '—';
       case 'seguidores':
@@ -1505,7 +1500,10 @@ export function initArrecadacaoModule(
   function leadFieldCanEdit(field, item) {
     const isEspaco = item.tipo === 'espaco';
     const isArtistico = item.tipo === 'artistico';
-    if (isEspaco && (field === 'participante' || field === 'status' || field === 'descricao')) {
+    if (isEspaco && (field === 'status' || field === 'descricao')) {
+      return false;
+    }
+    if (field === 'contatoNome' && !item.participanteId) {
       return false;
     }
     if (field === 'seguidores' && !isArtistico) {
@@ -1517,7 +1515,8 @@ export function initArrecadacaoModule(
   function leadFieldLabel(field, item) {
     const isArtistico = item.tipo === 'artistico';
     const map = {
-      participante: isArtistico ? 'Artista / contato' : 'Participante',
+      participante: isArtistico ? 'Artista / lead' : 'Nome do lead',
+      contatoNome: 'Nome do contato',
       instagram: 'Instagram',
       seguidores: 'Seguidores',
       whatsapp: 'WhatsApp',
@@ -1581,19 +1580,14 @@ export function initArrecadacaoModule(
     const falta = Math.max(0, item.valorTotal - item.valorPago);
     const quitado = falta <= 0 && isVendaEtapaStatus(item.status);
 
-    const fields = ['participante'];
+    const fields = ['participante', 'contatoNome'];
     if (isArtistico) {
       fields.push('instagram', 'seguidores', 'whatsapp');
     } else {
       fields.push('instagram', 'whatsapp');
     }
-    if (p?.contatoNome) {
-      // pessoa fica como linha estática abaixo
-    }
     if (!isEspaco) {
-      fields.push('descricao', 'status');
-    } else {
-      fields.push('status');
+      fields.push('descricao');
     }
     fields.push('valorTotal');
     if (!isArtistico) {
@@ -1602,13 +1596,6 @@ export function initArrecadacaoModule(
     fields.push('obs');
 
     const staticRows = [];
-    if (p?.contatoNome) {
-      staticRows.push(`
-        <div class="lw-info-row">
-          <dt>Pessoa</dt>
-          <dd class="lw-field-cell lw-field-cell--static"><span>${escapeHtml(p.contatoNome)}</span></dd>
-        </div>`);
-    }
     if (!isArtistico && p?.seguidores != null) {
       staticRows.push(`
         <div class="lw-info-row">
@@ -1658,7 +1645,7 @@ export function initArrecadacaoModule(
   }
 
   function funnelStepsForLead() {
-    return activeFunilEtapas().filter((e) => e.tipo === 'normal');
+    return activeFunilEtapas().filter((e) => e.tipo !== 'perda');
   }
 
   function renderLeadFunilPanel(item) {
@@ -1699,6 +1686,11 @@ export function initArrecadacaoModule(
       btn.addEventListener('click', async () => {
         const status = btn.dataset.funilStatus;
         if (!status || status === item.status || leadFieldSaving) return;
+        const etapa = etapaForStatus(status);
+        if (etapa?.tipo === 'perda') {
+          openPerdaLeadModal(item);
+          return;
+        }
         try {
           const { item: updated } = await updateArrecadacao(item.id, { status });
           if (updated) await refreshLeadDetailUi(updated);
@@ -1858,12 +1850,18 @@ export function initArrecadacaoModule(
     return payload;
   }
 
-  function isContactOnlyPatch(patch) {
+  function isParticipanteProfilePatch(patch) {
     const keys = Object.keys(patch);
     return (
       keys.length > 0 &&
       keys.every((key) =>
-        ['participanteInstagram', 'participanteWhatsapp', 'participanteSeguidores'].includes(key),
+        [
+          'participanteNome',
+          'participanteContatoNome',
+          'participanteInstagram',
+          'participanteWhatsapp',
+          'participanteSeguidores',
+        ].includes(key),
       )
     );
   }
@@ -1874,7 +1872,10 @@ export function initArrecadacaoModule(
       throw new Error('Participante não encontrado. Recarregue o lead e tente novamente.');
     }
     return {
-      nome: p.nome,
+      nome:
+        patch.participanteNome !== undefined
+          ? String(patch.participanteNome || '').trim()
+          : p.nome,
       instagram:
         patch.participanteInstagram !== undefined ? patch.participanteInstagram : p.instagram || '',
       seguidores:
@@ -1883,7 +1884,10 @@ export function initArrecadacaoModule(
         patch.participanteWhatsapp !== undefined
           ? patch.participanteWhatsapp
           : p.contatoTelefone || '',
-      contatoNome: p.contatoNome || '',
+      contatoNome:
+        patch.participanteContatoNome !== undefined
+          ? String(patch.participanteContatoNome || '').trim()
+          : p.contatoNome || '',
     };
   }
 
@@ -1908,6 +1912,7 @@ export function initArrecadacaoModule(
     renderLeadFunilPanel(leadDetailItem);
     renderLeadOrigemFields(leadDetailItem);
     renderLeadDetailActions(leadDetailItem);
+    renderLeadWhatsappAction(leadDetailItem);
   }
 
   async function persistLeadPatch(patch) {
@@ -1919,7 +1924,7 @@ export function initArrecadacaoModule(
     row?.classList.add('lw-info-row--saving');
 
     try {
-      if (item.participanteId && isContactOnlyPatch(patch)) {
+      if (item.participanteId && isParticipanteProfilePatch(patch)) {
         const pBefore = getParticipanteById(item.participanteId);
         const prevSeguidores =
           patch.participanteSeguidores !== undefined ? (pBefore?.seguidores ?? null) : null;
@@ -1943,10 +1948,13 @@ export function initArrecadacaoModule(
         }
 
         await refreshParticipantesList();
-        await refreshLeadDetailUi(item);
+        await loadArrecadacao();
+        leadDetailItem = items.find((x) => x.id === item.id) || leadDetailItem;
+        await refreshLeadDetailUi(leadDetailItem);
         if (patch.participanteWhatsapp !== undefined) {
-          await loadLeadWhatsapp(item.id);
+          renderLeadWhatsappAction(leadDetailItem);
         }
+        if (leadDetailItem.tipo === 'espaco') await onEspacosDataChanged?.();
         return;
       }
 
@@ -1962,7 +1970,7 @@ export function initArrecadacaoModule(
       leadDetailItem = items.find((x) => x.id === item.id) || leadDetailItem;
       await refreshLeadDetailUi(leadDetailItem);
       if (patch.participanteWhatsapp !== undefined) {
-        await loadLeadWhatsapp(leadDetailItem.id);
+        renderLeadWhatsappAction(leadDetailItem);
       }
       if (leadDetailItem.tipo === 'espaco') await onEspacosDataChanged?.();
     } catch (err) {
@@ -2010,6 +2018,12 @@ export function initArrecadacaoModule(
       input.className = 'lw-field-editor';
       input.setAttribute('list', 'arrecadacao-participantes-list');
       input.value = item.participanteNome || '';
+    } else if (field === 'contatoNome') {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'lw-field-editor';
+      input.placeholder = 'Ex.: Maria (responsável pelo WhatsApp)';
+      input.value = p?.contatoNome || '';
     } else if (field === 'whatsapp') {
       input = document.createElement('input');
       input.type = 'text';
@@ -2051,6 +2065,8 @@ export function initArrecadacaoModule(
       const patch = {};
       if (field === 'participante') {
         patch.participanteNome = input.value.trim();
+      } else if (field === 'contatoNome') {
+        patch.participanteContatoNome = input.value.trim();
       } else if (field === 'instagram') {
         patch.participanteInstagram = input.value.trim();
       } else if (field === 'whatsapp') {
@@ -2207,142 +2223,23 @@ export function initArrecadacaoModule(
     renderInteracoesList();
   }
 
-  function renderLeadWhatsappStatus(status) {
-    if (!els.leadWhatsappStatus) return;
-    leadWhatsappConnection = status || null;
-    if (!status?.configured) {
-      els.leadWhatsappStatus.textContent =
-        'Evolution API não configurada no servidor. Defina EVOLUTION_API_URL e EVOLUTION_API_KEY.';
-      return;
-    }
-    if (!status.connected) {
-      els.leadWhatsappStatus.textContent = `WhatsApp desconectado (instância “${status.instance}”). Conecte a instância na Evolution API.`;
-      return;
-    }
-    els.leadWhatsappStatus.textContent = `WhatsApp conectado · instância “${status.instance}”.`;
-  }
-
-  function renderLeadWhatsappMessages() {
-    if (!els.leadWhatsappMessages) return;
-    if (!leadWhatsappMessages.length) {
-      els.leadWhatsappMessages.innerHTML =
-        '<p class="cell-empty lead-whatsapp-empty">Nenhuma mensagem nesta conversa ainda.</p>';
-      return;
-    }
-
-    els.leadWhatsappMessages.innerHTML = leadWhatsappMessages
-      .map((m) => {
-        const out = m.direcao === 'out';
-        const media = renderWhatsappMediaHtml(m, { classPrefix: 'lw-whatsapp' });
-        const text = shouldShowWhatsappBubbleText(m)
-          ? renderWhatsappBubbleTextHtml(m, { classPrefix: 'lw-whatsapp' })
-          : '';
-        const mods = bubbleModifierClasses(m, { classPrefix: 'lw-whatsapp' });
-        const bubble = `
-        <article class="lw-whatsapp-bubble ${out ? 'lw-whatsapp-bubble--out' : 'lw-whatsapp-bubble--in'}${mods ? ` ${mods}` : ''}">
-          <time class="lw-whatsapp-time">${fmtDate(m.enviadoEm)}</time>
-          ${media}
-          ${text}
-        </article>`;
-        return wrapWhatsappBubble(bubble, {
-          out,
-          reacoes: m.reacoes,
-          wrapClass: 'lw-whatsapp-bubble-wrap',
-          reactionsClass: 'lw-whatsapp-reactions',
-          actionsClass: 'lw-whatsapp-msg-actions',
-          msgId: m.id,
-        });
-      })
-      .join('');
-    els.leadWhatsappMessages.scrollTop = els.leadWhatsappMessages.scrollHeight;
-    void hydrateWhatsappMedia(els.leadWhatsappMessages);
-    retryPendingWhatsappMedia(els.leadWhatsappMessages);
-    unbindLeadWhatsappReactions?.();
-    unbindLeadWhatsappReactions = bindWhatsappReactionControls(els.leadWhatsappMessages, {
-      onReact: async (mensagemId, emoji) => {
-        if (!leadDetailId) return;
-        try {
-          const result = await sendLeadWhatsappReaction(leadDetailId, mensagemId, emoji);
-          const idx = leadWhatsappMessages.findIndex((item) => item.id === mensagemId);
-          if (idx >= 0) {
-            leadWhatsappMessages = [...leadWhatsappMessages];
-            leadWhatsappMessages[idx] = { ...leadWhatsappMessages[idx], reacoes: result.reacoes || [] };
-            renderLeadWhatsappMessages();
-          }
-        } catch (err) {
-          alert(err.message);
-        }
-      },
-    });
-  }
-
-  async function loadLeadWhatsapp(id) {
+  function renderLeadWhatsappAction(item) {
     if (!els.leadWhatsappSection) return;
-    els.leadWhatsappMessages.innerHTML = '<p class="cell-muted">Carregando conversa…</p>';
-    try {
-      const data = await fetchLeadWhatsapp(id);
-      leadWhatsappMessages = data.mensagens || [];
-      renderLeadWhatsappStatus(data.status);
-      renderLeadWhatsappMessages();
-    } catch (err) {
-      els.leadWhatsappMessages.innerHTML = `<p class="cell-empty">${escapeHtml(err.message)}</p>`;
-      if (els.leadWhatsappStatus) {
-        els.leadWhatsappStatus.textContent = 'Não foi possível carregar o WhatsApp deste lead.';
-      }
-    }
+    const p = getParticipanteById(item?.participanteId);
+    const hasWhatsapp = Boolean(String(p?.contatoTelefone || '').trim());
+    els.leadWhatsappSection.classList.toggle('hidden', !hasWhatsapp);
   }
 
-  async function syncLeadWhatsappHistory(id, { silent = false } = {}) {
-    const btn = els.leadWhatsappSync;
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Sincronizando…';
+  function openLeadWhatsappChat() {
+    if (!leadDetailItem?.participanteId) return;
+    const p = getParticipanteById(leadDetailItem.participanteId);
+    if (!String(p?.contatoTelefone || '').trim()) {
+      alert('Cadastre um WhatsApp para este lead nos dados do lead.');
+      return;
     }
-    try {
-      const data = await syncLeadWhatsapp(id, { days: 5 });
-      leadWhatsappMessages = data.mensagens || [];
-      renderLeadWhatsappMessages();
-      if (!silent && els.leadWhatsappStatus) {
-        const imported = data.imported ?? 0;
-        els.leadWhatsappStatus.textContent = `Histórico sincronizado (últimos 5 dias) · ${imported} mensagem(ns) importada(s).`;
-      }
-    } catch (err) {
-      if (!silent) alert(err.message);
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Sincronizar histórico';
-      }
-    }
+    closeLeadWorkspace();
+    onOpenWhatsappChat?.(leadDetailItem.participanteId);
   }
-
-  async function deliverLeadWhatsapp(payload) {
-    if (!leadDetailId) return null;
-    const { mensagem } = await sendLeadWhatsapp(leadDetailId, payload);
-    if (mensagem) {
-      leadWhatsappMessages = [...leadWhatsappMessages, mensagem].sort(
-        (a, b) => new Date(a.enviadoEm) - new Date(b.enviadoEm),
-      );
-      renderLeadWhatsappMessages();
-    }
-    return mensagem;
-  }
-
-  initWhatsappCompose({
-    formEl: els.leadWhatsappForm,
-    inputEl: els.leadWhatsappInput,
-    fileInputId: 'lead-whatsapp-file',
-    attachBtnId: 'lead-whatsapp-attach',
-    micBtnId: 'lead-whatsapp-mic',
-    sendBtnId: 'lead-whatsapp-send',
-    recordingPanelId: 'lead-whatsapp-recording',
-    onSendText: async (text) => {
-      await deliverLeadWhatsapp({ text });
-    },
-    onSendMedia: async (payload) => {
-      await deliverLeadWhatsapp(payload);
-    },
-  });
 
   function renderResponsavelOptions(selectEl, selectedId = null) {
     if (!selectEl) return;
@@ -2504,8 +2401,6 @@ export function initArrecadacaoModule(
     leadDetailInteracoes = [];
     leadSeguidoresHistorico = { historico: [], resumo: {} };
     leadDetailTarefas = [];
-    leadWhatsappMessages = [];
-    leadWhatsappConnection = null;
     cancelLeadFieldEdit();
   }
 
@@ -2517,8 +2412,6 @@ export function initArrecadacaoModule(
     leadDetailItem = item;
     leadDetailInteracoes = [];
     leadDetailTarefas = [];
-    leadWhatsappMessages = [];
-    leadWhatsappConnection = null;
 
     if (els.leadDetailTitle) els.leadDetailTitle.textContent = item.participanteNome;
     if (els.leadDetailSub) {
@@ -2529,6 +2422,7 @@ export function initArrecadacaoModule(
     renderLeadBadges(item);
     renderLeadDealPanel(item);
     renderLeadDetailActions(item);
+    renderLeadWhatsappAction(item);
 
     if (els.leadInteracaoTipo) els.leadInteracaoTipo.value = 'nota';
     if (els.leadInteracaoTexto) els.leadInteracaoTexto.value = '';
@@ -2538,11 +2432,8 @@ export function initArrecadacaoModule(
       els.leadTarefasTable.innerHTML =
         '<tr class="lead-tarefas-empty-row"><td colspan="5">Carregando…</td></tr>';
     }
-    if (els.leadWhatsappMessages) {
-      els.leadWhatsappMessages.innerHTML = '<p class="cell-muted">Carregando conversa…</p>';
-    }
-    if (els.leadWhatsappStatus) els.leadWhatsappStatus.textContent = '';
-    if (els.leadWhatsappInput) els.leadWhatsappInput.value = '';
+    if (els.leadAnotacoesDetails) els.leadAnotacoesDetails.open = false;
+    if (els.leadTarefasDetails) els.leadTarefasDetails.open = false;
 
     openLeadWorkspaceUi();
 
@@ -2550,11 +2441,7 @@ export function initArrecadacaoModule(
       await ensureUsuariosLoaded();
       await loadMarketingData();
       await ensureFunilForItem(item);
-      const loads = [
-        loadLeadDetailInteracoes(id),
-        loadLeadDetailTarefas(id),
-        loadLeadWhatsapp(id),
-      ];
+      const loads = [loadLeadDetailInteracoes(id), loadLeadDetailTarefas(id)];
       if (item.tipo === 'artistico' && item.participanteId) {
         loads.push(loadSeguidoresHistorico(item.participanteId));
       }
@@ -2632,6 +2519,7 @@ export function initArrecadacaoModule(
     try {
       await createInteracao(leadDetailId, { tipo, texto });
       if (els.leadInteracaoTexto) els.leadInteracaoTexto.value = '';
+      if (els.leadAnotacoesDetails) els.leadAnotacoesDetails.open = false;
       await loadLeadDetailInteracoes(leadDetailId);
     } catch (err) {
       alert(err.message);
@@ -3392,9 +3280,7 @@ export function initArrecadacaoModule(
     const criativoId = Number(els.leadOrigemCriativo.value) || null;
     saveLeadOrigem({ marketingCriativoId: criativoId });
   });
-  els.leadWhatsappSync?.addEventListener('click', () => {
-    if (leadDetailId) syncLeadWhatsappHistory(leadDetailId);
-  });
+  els.leadWhatsappOpen?.addEventListener('click', openLeadWhatsappChat);
 
   PAGE_CONFIG.artistico.ids.btnNew &&
     document

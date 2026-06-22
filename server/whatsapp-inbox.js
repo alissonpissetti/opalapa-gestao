@@ -13,6 +13,7 @@ import {
   midiaPreviewUrlForMensagemRow,
   backfillWhatsappMediaForParticipante,
 } from './whatsapp-media.js';
+import { listFunilEtapas, etapaByStatus } from './funil.js';
 
 const prepareCache = new Map();
 const PREPARE_COOLDOWN_MS = 45000;
@@ -48,6 +49,8 @@ export async function listWhatsappInbox(pool, eventoId) {
        p.nome AS participante_nome,
        p.contato_telefone,
        MIN(a.id) AS primary_arrecadacao_id,
+       SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.id), ',', 1) AS lead_status,
+       SUBSTRING_INDEX(GROUP_CONCAT(a.tipo ORDER BY a.id), ',', 1) AS lead_tipo,
        GROUP_CONCAT(DISTINCT a.id ORDER BY a.id) AS arrecadacao_ids,
        COUNT(DISTINCT w.evolution_message_id) AS total_mensagens,
        MAX(w.enviado_em) AS ultima_mensagem_em
@@ -96,8 +99,17 @@ export async function listWhatsappInbox(pool, eventoId) {
     }
   }
 
+  const [etapasComercial, etapasArtistico] = await Promise.all([
+    listFunilEtapas(pool, eventoId, { escopo: 'comercial' }),
+    listFunilEtapas(pool, eventoId, { escopo: 'artistico' }),
+  ]);
+
   return rows.map((row) => {
     const last = lastByParticipante.get(row.participante_id);
+    const leadTipo = row.lead_tipo || '';
+    const leadStatus = row.lead_status || '';
+    const etapas = leadTipo === 'artistico' ? etapasArtistico : etapasComercial;
+    const etapa = etapaByStatus(etapas, leadStatus);
     return {
       participanteId: Number(row.participante_id),
       participanteNome: row.participante_nome,
@@ -108,6 +120,18 @@ export async function listWhatsappInbox(pool, eventoId) {
         .map((id) => Number(id))
         .filter((id) => id > 0),
       totalMensagens: Number(row.total_mensagens || 0),
+      leadTipo,
+      leadStatus,
+      etapaFunil: etapa
+        ? {
+            titulo: etapa.titulo,
+            cor: etapa.cor,
+            status: etapa.status,
+            tipo: etapa.tipo,
+          }
+        : leadStatus
+          ? { titulo: leadStatus, cor: null, status: leadStatus, tipo: 'normal' }
+          : null,
       ultimaMensagem: last
         ? {
             texto: last.texto || '',
@@ -124,7 +148,7 @@ export async function listMessagesForParticipante(
   pool,
   eventoId,
   participanteId,
-  { limit = 500, prepare = true, days = 7 } = {},
+  { limit = 500, prepare = false, days = 7 } = {},
 ) {
   if (prepare) {
     await prepareWhatsappConversation(pool, { eventoId, participanteId, days });

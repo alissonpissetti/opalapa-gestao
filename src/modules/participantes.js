@@ -24,7 +24,7 @@ function formatInstagram(ig) {
   return ig.startsWith('@') ? ig : `@${ig}`;
 }
 
-export function initParticipantesModule(store) {
+export function initParticipantesModule(store, { onSaved } = {}) {
   const els = {
     table: document.getElementById('participantes-table'),
     summary: document.getElementById('participantes-summary'),
@@ -127,7 +127,21 @@ export function initParticipantesModule(store) {
     el.value = el.value.replace(/\D/g, '');
   }
 
+  function openParticipante(id) {
+    const numId = Number(id);
+    if (!Number.isInteger(numId) || numId < 1) return;
+    const p =
+      participantes.find((x) => x.id === numId) ||
+      store?.participantes?.find((x) => x.id === numId);
+    if (!p) {
+      alert('Participante não encontrado.');
+      return;
+    }
+    openModal(p);
+  }
+
   function openModal(participante = null) {
+    if (!els.modalBg) return;
     editId = participante?.id ?? null;
     const isEdit = editId != null;
 
@@ -144,13 +158,13 @@ export function initParticipantesModule(store) {
       ? formatPhone(participante.contatoTelefone)
       : '';
 
-    els.btnDelete.classList.toggle('hidden', !isEdit);
+    els.btnDelete?.classList.toggle('hidden', !isEdit);
     els.modalBg.classList.add('open');
-    els.nome.focus();
+    els.nome?.focus();
   }
 
   function closeModal() {
-    els.modalBg.classList.remove('open');
+    els.modalBg?.classList.remove('open');
     editId = null;
   }
 
@@ -169,11 +183,12 @@ export function initParticipantesModule(store) {
     const data = await fetchParticipantes();
     participantes = data.participantes || [];
     store?.setParticipantes(participantes);
-    renderTable();
+    if (els.table) renderTable();
     return participantes;
   }
 
   function renderTable() {
+    if (!els.table) return;
     const validIds = new Set(participantes.map((p) => p.id));
     for (const id of selectedIds) {
       if (!validIds.has(id)) selectedIds.delete(id);
@@ -264,6 +279,7 @@ export function initParticipantesModule(store) {
       } catch (err) {
         alert(`Dados salvos, mas falhou ao atualizar a lista: ${err.message}`);
       }
+      onSaved?.();
     } catch (err) {
       alert(err.message);
     } finally {
@@ -329,23 +345,23 @@ export function initParticipantesModule(store) {
     }
   }
 
-  els.btnNew.addEventListener('click', () => openModal());
+  els.btnNew?.addEventListener('click', () => openModal());
   els.chkAll?.addEventListener('change', (e) => toggleSelectAll(e.target.checked));
   els.btnClearSelection?.addEventListener('click', clearSelection);
   els.btnDeleteSelected?.addEventListener('click', removeSelected);
-  els.btnCancel.addEventListener('click', closeModal);
-  els.btnSave.addEventListener('click', saveParticipante);
-  els.btnDelete.addEventListener('click', removeParticipante);
-  els.contatoTelefone.addEventListener('input', (e) => maskPhoneInput(e.target));
-  els.seguidores.addEventListener('input', (e) => maskSeguidoresInput(e.target));
+  els.btnCancel?.addEventListener('click', closeModal);
+  els.btnSave?.addEventListener('click', saveParticipante);
+  els.btnDelete?.addEventListener('click', removeParticipante);
+  els.contatoTelefone?.addEventListener('input', (e) => maskPhoneInput(e.target));
+  els.seguidores?.addEventListener('input', (e) => maskSeguidoresInput(e.target));
 
-  els.modalBg.addEventListener('click', (e) => {
+  els.modalBg?.addEventListener('click', (e) => {
     if (e.target === els.modalBg) closeModal();
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && els.modalBg.classList.contains('open')) closeModal();
+    if (e.key === 'Escape' && els.modalBg?.classList.contains('open')) closeModal();
   });
 
-  return { loadParticipantes, getParticipantes: () => participantes };
+  return { loadParticipantes, openParticipante, getParticipantes: () => participantes };
 }

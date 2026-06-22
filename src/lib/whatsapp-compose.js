@@ -29,6 +29,49 @@ function blobToDataUrl(blob) {
   });
 }
 
+function dataUrlToBase64(dataUrl) {
+  const raw = String(dataUrl || '');
+  const comma = raw.indexOf(',');
+  if (comma < 0) return raw;
+  return raw.slice(comma + 1);
+}
+
+function mimeFromDataUrl(dataUrl) {
+  const match = String(dataUrl || '').match(/^data:([^;,]+)/);
+  return match?.[1]?.trim() || '';
+}
+
+async function optimizeImageFile(file) {
+  if (!String(file.type || '').startsWith('image/')) return file;
+  const type = file.type.toLowerCase();
+  if (type === 'image/gif') return file;
+  if (type === 'image/heic' || type === 'image/heif') return file;
+  if (file.size <= 900 * 1024 && type === 'image/jpeg') return file;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 2048;
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height, 1));
+    if (scale >= 1 && file.size <= 900 * 1024) {
+      bitmap.close();
+      return file;
+    }
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    if (!blob || !blob.size) return file;
+    const baseName = String(file.name || 'imagem').replace(/\.[^.]+$/, '') || 'imagem';
+    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
 function extensionFromMime(mime) {
   const map = {
     'image/jpeg': 'jpg',
@@ -50,6 +93,18 @@ function updateComposeActions(input, micBtn, sendBtn) {
   if (sendBtn) sendBtn.hidden = !hasText;
 }
 
+function isImageFile(file) {
+  const type = String(file?.type || '').toLowerCase();
+  if (type.startsWith('image/')) return true;
+  const name = String(file?.name || '').toLowerCase();
+  return /\.(jpe?g|png|gif|webp|bmp)$/i.test(name);
+}
+
+function isFileDrag(event) {
+  const types = [...(event.dataTransfer?.types || [])];
+  return types.includes('Files');
+}
+
 export function initWhatsappCompose({
   formEl,
   inputEl,
@@ -60,6 +115,7 @@ export function initWhatsappCompose({
   micBtnId,
   sendBtnId,
   recordingPanelId,
+  dropZoneEl,
 }) {
   if (!formEl || !inputEl || !onSendText || !onSendMedia) return () => {};
 
@@ -124,11 +180,21 @@ export function initWhatsappCompose({
   }
 
   function hideRecordingPanel() {
-    if (recordingPanel) recordingPanel.hidden = true;
+    if (recordingPanel) {
+      recordingPanel.hidden = true;
+      recordingPanel.classList.add('hidden');
+    }
     formEl.classList.remove('is-recording');
     if (recordingTimer) {
       clearInterval(recordingTimer);
       recordingTimer = null;
+    }
+  }
+
+  function showRecordingPanel() {
+    if (recordingPanel) {
+      recordingPanel.hidden = false;
+      recordingPanel.classList.remove('hidden');
     }
   }
 
@@ -148,23 +214,31 @@ export function initWhatsappCompose({
   }
 
   async function sendImageFile(file) {
-    if (!file.type.startsWith('image/')) {
-      alert('Selecione um arquivo de imagem.');
+    if (!isImageFile(file)) {
+      alert('Selecione um arquivo de imagem (JPG, PNG ou WebP).');
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+
+    const prepared = await optimizeImageFile(file);
+    const mime = String(prepared.type || file.type || '').toLowerCase();
+    if (mime === 'image/heic' || mime === 'image/heif') {
+      alert('Fotos HEIC não são suportadas aqui. Converta para JPG ou PNG antes de enviar.');
+      return;
+    }
+    if (prepared.size > MAX_IMAGE_BYTES) {
       alert('Imagem muito grande. O limite é 12 MB.');
       return;
     }
 
     setBusy(true);
     try {
-      const media = await blobToDataUrl(file);
+      const dataUrl = await blobToDataUrl(prepared);
+      const mimetype = mime || mimeFromDataUrl(dataUrl) || 'image/jpeg';
       await onSendMedia({
         mediaType: 'image',
-        media,
-        mimetype: file.type,
-        fileName: file.name || `imagem.${extensionFromMime(file.type)}`,
+        media: dataUrlToBase64(dataUrl),
+        mimetype,
+        fileName: prepared.name || file.name || `imagem.${extensionFromMime(mimetype)}`,
         caption: inputEl.value.trim(),
       });
       inputEl.value = '';
@@ -212,12 +286,13 @@ export function initWhatsappCompose({
 
     setBusy(true);
     try {
-      const media = await blobToDataUrl(blob);
+      const dataUrl = await blobToDataUrl(blob);
+      const mimetype = mimeType.split(';')[0].trim() || mimeFromDataUrl(dataUrl) || 'audio/ogg';
       await onSendMedia({
         mediaType: 'audio',
-        media,
-        mimetype: mimeType,
-        fileName: `audio.${extensionFromMime(mimeType)}`,
+        media: dataUrlToBase64(dataUrl),
+        mimetype,
+        fileName: `audio.${extensionFromMime(mimetype)}`,
       });
     } catch (err) {
       alert(err.message || 'Falha ao enviar áudio');
@@ -250,7 +325,7 @@ export function initWhatsappCompose({
       recordingStartedAt = Date.now();
       micBtn?.classList.add('is-active');
       formEl.classList.add('is-recording');
-      if (recordingPanel) recordingPanel.hidden = false;
+      showRecordingPanel();
       if (recordingTimeEl) recordingTimeEl.textContent = '0:00';
       recordingTimer = setInterval(() => {
         if (recordingTimeEl) {
@@ -316,10 +391,76 @@ export function initWhatsappCompose({
     if (mediaRecorder) void sendRecordedAudio();
   });
 
+  const dropZones = (Array.isArray(dropZoneEl) ? dropZoneEl : dropZoneEl ? [dropZoneEl] : []).filter(Boolean);
+  const dropCleanups = dropZones.map((zone) => {
+    let depth = 0;
+
+    function clearDragover() {
+      depth = 0;
+      zone.classList.remove('is-dragover');
+    }
+
+    function onDragEnter(event) {
+      if (!isFileDrag(event) || busy || mediaRecorder) return;
+      event.preventDefault();
+      depth += 1;
+      zone.classList.add('is-dragover');
+    }
+
+    function onDragOver(event) {
+      if (!isFileDrag(event) || busy || mediaRecorder) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    }
+
+    function onDragLeave(event) {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) zone.classList.remove('is-dragover');
+    }
+
+    function onDrop(event) {
+      event.preventDefault();
+      clearDragover();
+      if (busy || mediaRecorder) return;
+
+      const allFiles = [...(event.dataTransfer?.files || [])];
+      const images = allFiles.filter(isImageFile);
+      if (!images.length) {
+        if (allFiles.length) {
+          alert('Solte apenas imagens (JPG, PNG ou WebP).');
+        }
+        return;
+      }
+
+      void (async () => {
+        for (const file of images) {
+          await sendImageFile(file);
+        }
+      })();
+    }
+
+    zone.addEventListener('dragenter', onDragEnter);
+    zone.addEventListener('dragover', onDragOver);
+    zone.addEventListener('dragleave', onDragLeave);
+    zone.addEventListener('drop', onDrop);
+
+    return () => {
+      clearDragover();
+      zone.removeEventListener('dragenter', onDragEnter);
+      zone.removeEventListener('dragover', onDragOver);
+      zone.removeEventListener('dragleave', onDragLeave);
+      zone.removeEventListener('drop', onDrop);
+    };
+  });
+
   updateComposeActions(inputEl, micBtn, sendBtn);
+  hideRecordingPanel();
 
   return () => {
     cleanupRecorder();
+    dropCleanups.forEach((cleanup) => cleanup());
     formEl.removeEventListener('submit', onSubmit);
     inputEl.removeEventListener('input', onInputChange);
   };
