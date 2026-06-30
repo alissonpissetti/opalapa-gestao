@@ -25,6 +25,46 @@ const STATUS_LABEL = {
   cancelado: 'Cancelado',
 };
 
+const FASE_LABEL = {
+  pre: 'Pré-evento',
+  pos: 'Pós-evento',
+};
+
+function summarizeFromContas(contas) {
+  const ativas = contas.filter((c) => c.status !== 'cancelado');
+  let previstoPre = 0;
+  let previstoPos = 0;
+  let realizadoPre = 0;
+  let realizadoPos = 0;
+
+  for (const c of ativas) {
+    const prev = Number(c.valorPrevisto) || 0;
+    const pago = Number(c.valorPago) || 0;
+    if (c.fase === 'pos') {
+      previstoPos += prev;
+      realizadoPos += pago;
+    } else {
+      previstoPre += prev;
+      realizadoPre += pago;
+    }
+  }
+
+  const previstoGeral = previstoPre + previstoPos;
+  const realizadoGeral = realizadoPre + realizadoPos;
+
+  return {
+    previstoPre,
+    previstoPos,
+    previstoGeral,
+    realizadoPre,
+    realizadoPos,
+    realizadoGeral,
+    previsto: previstoGeral,
+    realizado: realizadoGeral,
+    falta: Math.max(0, previstoGeral - realizadoGeral),
+  };
+}
+
 function cellMoney(val) {
   return fmtMoney(val);
 }
@@ -55,6 +95,7 @@ export function initContasPagarModule() {
   if (contasPagarInstance) return contasPagarInstance;
 
   const els = {
+    kpis: document.getElementById('contas-pagar-kpis'),
     summary: document.getElementById('contas-pagar-summary'),
     empty: document.getElementById('contas-pagar-empty'),
     tableWrap: document.getElementById('contas-pagar-table-wrap'),
@@ -63,9 +104,11 @@ export function initContasPagarModule() {
     btnNew: document.getElementById('btn-contas-pagar-new'),
     modalBg: document.getElementById('contas-pagar-modal-bg'),
     modalTitle: document.getElementById('contas-pagar-modal-title'),
+    modalSub: document.getElementById('contas-pagar-modal-sub'),
     formErrors: document.getElementById('contas-pagar-modal-errors'),
     fieldCategoria: document.getElementById('contas-pagar-modal-categoria'),
     fieldPlano: document.getElementById('contas-pagar-modal-plano'),
+    fieldFase: document.getElementById('contas-pagar-modal-fase'),
     datalistCategorias: document.getElementById('contas-pagar-categorias-list'),
     datalistPlano: document.getElementById('contas-pagar-plano-list'),
     fieldFornecedor: document.getElementById('contas-pagar-modal-fornecedor'),
@@ -88,6 +131,7 @@ export function initContasPagarModule() {
   let contas = [];
   let categorias = [];
   let planoContas = [];
+  let totais = summarizeFromContas([]);
   let editId = null;
   let loading = false;
 
@@ -182,6 +226,49 @@ export function initContasPagarModule() {
     return `<span class="fin-status fin-status--${escapeHtml(status)}">${escapeHtml(label)}</span>`;
   }
 
+  function faseBadge(fase) {
+    const key = fase === 'pos' ? 'pos' : 'pre';
+    const label = FASE_LABEL[key];
+    return `<span class="fin-fase fin-fase--${escapeHtml(key)}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderKpis() {
+    if (!els.kpis) return;
+    const t = totais;
+    const hasContas = contas.some((c) => c.status !== 'cancelado');
+    els.kpis.classList.toggle('hidden', !hasContas);
+    if (!hasContas) {
+      els.kpis.innerHTML = '';
+      return;
+    }
+
+    els.kpis.innerHTML = `
+      <div class="financeiro-kpi">
+        <span class="financeiro-kpi-label">Previsto pré-evento</span>
+        <strong class="financeiro-kpi-val">${cellMoney(t.previstoPre)}</strong>
+      </div>
+      <div class="financeiro-kpi">
+        <span class="financeiro-kpi-label">Previsto pós-evento</span>
+        <strong class="financeiro-kpi-val">${cellMoney(t.previstoPos)}</strong>
+      </div>
+      <div class="financeiro-kpi financeiro-kpi--total">
+        <span class="financeiro-kpi-label">Total previsto</span>
+        <strong class="financeiro-kpi-val">${cellMoney(t.previstoGeral)}</strong>
+      </div>
+      <div class="financeiro-kpi">
+        <span class="financeiro-kpi-label">Realizado pré-evento</span>
+        <strong class="financeiro-kpi-val fin-val--pos">${cellMoney(t.realizadoPre)}</strong>
+      </div>
+      <div class="financeiro-kpi">
+        <span class="financeiro-kpi-label">Realizado pós-evento</span>
+        <strong class="financeiro-kpi-val fin-val--pos">${cellMoney(t.realizadoPos)}</strong>
+      </div>
+      <div class="financeiro-kpi financeiro-kpi--total">
+        <span class="financeiro-kpi-label">Total realizado</span>
+        <strong class="financeiro-kpi-val fin-val--pos">${cellMoney(t.realizadoGeral)}</strong>
+      </div>`;
+  }
+
   function renderTable() {
     const ativas = contas.filter((c) => c.status !== 'cancelado');
     const empty = !contas.length;
@@ -195,6 +282,7 @@ export function initContasPagarModule() {
       els.table.innerHTML = '';
       if (els.tableFoot) els.tableFoot.innerHTML = '';
       if (els.summary) els.summary.textContent = '';
+      renderKpis();
       return;
     }
 
@@ -217,11 +305,13 @@ export function initContasPagarModule() {
         <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
         <td>${escapeHtml(c.fornecedor || '—')}</td>
         <td>${escapeHtml(c.descricao || '—')}</td>
+        <td>${faseBadge(c.fase)}</td>
         <td class="fin-col-money">${cellMoney(prev)}</td>
         <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
         <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
         <td>${statusBadge(c.status)}</td>
         <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
+        <td class="fin-col-actions"></td>
       </tr>`;
       })
       .join('');
@@ -229,11 +319,11 @@ export function initContasPagarModule() {
     if (els.tableFoot) {
       els.tableFoot.innerHTML = `
         <tr class="fin-custo-total">
-          <td colspan="4">Total (exc. canceladas)</td>
+          <td colspan="5">Total (exc. canceladas)</td>
           <td class="fin-col-money">${cellMoney(totalPrev)}</td>
           <td class="fin-col-money fin-val--pos">${cellMoney(totalPago)}</td>
           <td class="fin-col-money fin-val--warn">${cellMoney(Math.max(0, totalPrev - totalPago))}</td>
-          <td colspan="2"></td>
+          <td colspan="3"></td>
         </tr>`;
     }
 
@@ -241,6 +331,7 @@ export function initContasPagarModule() {
     if (els.summary) {
       els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} ativa${n === 1 ? '' : 's'} — clique na linha para editar`;
     }
+    renderKpis();
   }
 
   async function openModal(conta = null) {
@@ -259,6 +350,11 @@ export function initContasPagarModule() {
     if (els.modalTitle) {
       els.modalTitle.textContent = editId ? 'Editar conta a pagar' : 'Nova conta a pagar';
     }
+    if (els.modalSub) {
+      els.modalSub.textContent = editId
+        ? 'Atualize classificação, valores e status desta conta.'
+        : 'Classifique o custo, informe valores e acompanhe pagamentos deste evento.';
+    }
     if (els.fieldCategoria) els.fieldCategoria.value = conta?.categoriaNome || '';
     if (els.fieldPlano) {
       els.fieldPlano.value = conta
@@ -268,6 +364,7 @@ export function initContasPagarModule() {
     refreshPlanoDatalist(conta?.categoriaNome || '');
     if (els.fieldFornecedor) els.fieldFornecedor.value = conta?.fornecedor || '';
     if (els.fieldDescricao) els.fieldDescricao.value = conta?.descricao || '';
+    if (els.fieldFase) els.fieldFase.value = conta?.fase === 'pos' ? 'pos' : 'pre';
     if (els.fieldValorPrevisto) {
       els.fieldValorPrevisto.value =
         conta?.valorPrevisto != null ? formatValorInput(conta.valorPrevisto) : '';
@@ -301,6 +398,7 @@ export function initContasPagarModule() {
       planoNome: normalizeNome(els.fieldPlano?.value),
       fornecedor: els.fieldFornecedor?.value?.trim() || '',
       descricao: els.fieldDescricao?.value?.trim() || '',
+      fase: els.fieldFase?.value === 'pos' ? 'pos' : 'pre',
       valorPrevisto: readMoneyInput(els.fieldValorPrevisto),
       valorPago: readMoneyInput(els.fieldValorPago),
       dtVencimento: els.fieldDtVencimento?.value?.trim() || '',
@@ -321,6 +419,7 @@ export function initContasPagarModule() {
       ]);
       categorias = catRes?.categorias || [];
       contas = contasRes?.contas || [];
+      totais = contasRes?.totais || summarizeFromContas(contas);
       planoContas = planoRes?.planoContas || [];
       renderTable();
     } catch (err) {
@@ -372,6 +471,7 @@ export function initContasPagarModule() {
         planoContaId,
         fornecedor: fields.fornecedor,
         descricao: fields.descricao,
+        fase: fields.fase,
         valorPrevisto: fields.valorPrevisto,
         valorPago: fields.valorPago,
         dtVencimento: fields.dtVencimento,
@@ -388,6 +488,7 @@ export function initContasPagarModule() {
         const { conta } = await createContaPagar(data);
         if (conta) contas.push(conta);
       }
+      totais = summarizeFromContas(contas);
       closeModal();
       renderTable();
     } catch (err) {
@@ -406,6 +507,7 @@ export function initContasPagarModule() {
     try {
       await deleteContaPagar(editId);
       contas = contas.filter((c) => c.id !== editId);
+      totais = summarizeFromContas(contas);
       closeModal();
       renderTable();
     } catch (err) {
