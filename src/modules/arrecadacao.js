@@ -106,14 +106,20 @@ function itemsForScope(list, scope) {
     }
   }
 
-  function summarizeItems(list) {
+function isPerdaStatusForEtapas(status, etapas = []) {
+  if (status === 'perda') return true;
+  return etapas.some((e) => e.tipo === 'perda' && e.status === status);
+}
+
+function summarizeItems(list, funilEtapas = []) {
+  const active = list.filter((i) => !isPerdaStatusForEtapas(i.status, funilEtapas));
   let total = 0;
   let pago = 0;
-  for (const item of list) {
+  for (const item of active) {
     total += Number(item.valorTotal) || 0;
     pago += Number(item.valorPago) || 0;
   }
-  return { total, pago, falta: Math.max(0, total - pago), count: list.length };
+  return { total, pago, falta: Math.max(0, total - pago), count: active.length };
 }
 
 function isArtisticoScope(scope) {
@@ -1254,12 +1260,13 @@ export function initArrecadacaoModule(
 
   function renderArtisticoStats(list) {
     if (!els.stats) return;
-    const orcamento = list.reduce((s, i) => s + (Number(i.valorTotal) || 0), 0);
-    const emAndamento = list.filter((i) => !isPerdaItem(i)).length;
+    const ativos = list.filter((i) => !isPerdaItem(i));
+    const orcamento = ativos.reduce((s, i) => s + (Number(i.valorTotal) || 0), 0);
+    const emAndamento = ativos.length;
     els.stats.innerHTML = `
       <div class="stat">
         <div class="lbl">Leads</div>
-        <div class="val">${list.length}</div>
+        <div class="val">${ativos.length}</div>
       </div>
       <div class="stat">
         <div class="lbl">Orçamentos</div>
@@ -3227,7 +3234,7 @@ export function initArrecadacaoModule(
     funilEscopoAtual = data.funilEscopo || funilEscopoForLeadScope(scope);
     store?.setParticipantes(participantes);
     renderParticipantesDatalist();
-    renderStats(summarizeItems(items));
+    renderStats(summarizeItems(items, funilEtapas));
     setViewMode(viewMode);
     renderDisponiveisTable();
     await refreshLeadWorkspace();
