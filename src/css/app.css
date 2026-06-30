@@ -3816,7 +3816,7 @@ tbody tr .chk-cell {
 }
 
 .field select,
-.field input,
+.field input:not([type='checkbox']):not([type='radio']),
 .field textarea {
   width: 100%;
 }
@@ -8514,6 +8514,24 @@ body.wa-inbox-open {
   gap: 0.5rem;
   font-weight: 500;
   cursor: pointer;
+  margin-bottom: 0;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.field--checkbox input[type='checkbox'] {
+  width: auto;
+  min-width: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.modal--contas-pagar .contas-pagar-bonificacao .field--checkbox {
+  margin-bottom: 0;
+}
+
+.modal--contas-pagar .field--checkbox .checkbox-label {
+  justify-content: flex-start;
 }
 
 .tbtn.danger-outline {
