@@ -8,6 +8,7 @@ export const PERMISSION_CATALOG = [
   { key: 'cronologia', label: 'Cronologia', area: 'Produção' },
   { key: 'premiacoes', label: 'Premiações', area: 'Produção' },
   { key: 'financeiro-gestao', label: 'Gestão financeira', area: 'Financeiro' },
+  { key: 'financeiro-contas-pagar', label: 'Contas a pagar', area: 'Financeiro' },
   { key: 'usuarios', label: 'Usuários', area: 'Acessos' },
   { key: 'permissoes', label: 'Grupos de permissão', area: 'Acessos' },
 ];
@@ -324,6 +325,16 @@ function resolveApiPermission(path, method) {
   if (p.startsWith('/api/marketing')) return { type: 'view', view: 'marketing' };
   if (p.startsWith('/api/producao/cronologia')) return { type: 'view', view: 'cronologia' };
   if (p.startsWith('/api/producao/premiacoes')) return { type: 'view', view: 'premiacoes' };
+  if (p === '/api/financeiro/painel') {
+    return { type: 'anyOf', views: ['financeiro-gestao', 'financeiro-contas-pagar'] };
+  }
+  if (
+    p.startsWith('/api/financeiro/contas-pagar') ||
+    p.startsWith('/api/financeiro/categorias') ||
+    p.startsWith('/api/financeiro/plano-contas')
+  ) {
+    return { type: 'view', view: 'financeiro-contas-pagar' };
+  }
   if (p.startsWith('/api/financeiro/')) return { type: 'view', view: 'financeiro-gestao' };
 
   if (p.startsWith('/api/whatsapp/connect') || p.startsWith('/api/whatsapp/disconnect')) {

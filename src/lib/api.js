@@ -387,6 +387,14 @@ export function deleteProducaoPremiacao(id) {
   return apiRequest(`/api/producao/premiacoes/${id}`, { method: 'DELETE' });
 }
 
+export function clearFinanceiroResultado() {
+  return apiRequest('/api/financeiro/resultado/limpar', { method: 'POST' });
+}
+
+export function fetchFinanceiroPainel() {
+  return apiRequest('/api/financeiro/painel');
+}
+
 export function fetchFinanceiroResultado() {
   return apiRequest('/api/financeiro/resultado');
 }
@@ -414,6 +422,44 @@ export function updateFinanceiroLinha(id, data) {
 
 export function deleteFinanceiroLinha(id) {
   return apiRequest(`/api/financeiro/resultado/linhas/${id}`, { method: 'DELETE' });
+}
+
+export function fetchFinanceiroCategorias() {
+  return apiRequest('/api/financeiro/categorias');
+}
+
+export function fetchFinanceiroPlanoContas({ categoriaId } = {}) {
+  const qs = categoriaId ? `?categoriaId=${encodeURIComponent(categoriaId)}` : '';
+  return apiRequest(`/api/financeiro/plano-contas${qs}`);
+}
+
+export function createFinanceiroPlanoConta(data) {
+  return apiRequest('/api/financeiro/plano-contas', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchContasPagar() {
+  return apiRequest('/api/financeiro/contas-pagar');
+}
+
+export function createContaPagar(data) {
+  return apiRequest('/api/financeiro/contas-pagar', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateContaPagar(id, data) {
+  return apiRequest(`/api/financeiro/contas-pagar/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteContaPagar(id) {
+  return apiRequest(`/api/financeiro/contas-pagar/${id}`, { method: 'DELETE' });
 }
 
 export function fetchWhatsappStatus() {

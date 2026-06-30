@@ -59,22 +59,22 @@ export function initPermissoesModule() {
     els.viewsWrap.innerHTML = grouped
       .map(
         ({ area, items }) => `
-        <fieldset class="permissoes-area">
-          <legend>${escapeHtml(area)}</legend>
+        <div class="permissoes-area" role="group" aria-label="${escapeHtml(area)}">
+          <div class="permissoes-area-title">${escapeHtml(area)}</div>
           <div class="permissoes-area-grid">
             ${items
               .map(
                 (item) => `
               <label class="permissoes-check">
-                <input type="checkbox" name="perm-view" value="${escapeHtml(item.key)}"${
+                <input class="chk" type="checkbox" name="perm-view" value="${escapeHtml(item.key)}"${
                   selectedSet.has(item.key) ? ' checked' : ''
                 } />
-                <span>${escapeHtml(item.label)}</span>
+                <span class="permissoes-check-label">${escapeHtml(item.label)}</span>
               </label>`,
               )
               .join('')}
           </div>
-        </fieldset>`,
+        </div>`,
       )
       .join('');
   }

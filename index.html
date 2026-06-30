@@ -165,6 +165,7 @@
             </button>
             <div class="nav-dropdown-menu" role="menu">
               <a href="#financeiro-gestao" class="nav-link" data-view="financeiro-gestao" id="nav-financeiro-gestao" role="menuitem">Gestão</a>
+              <a href="#financeiro-contas-pagar" class="nav-link" data-view="financeiro-contas-pagar" id="nav-financeiro-contas-pagar" role="menuitem">Contas a pagar</a>
             </div>
           </div>
           <div class="nav-dropdown" id="nav-acessos">
@@ -683,42 +684,47 @@
       <div class="report-head">
         <div>
           <h1>Gestão financeira</h1>
-          <p class="subtitle">Resultado do evento — orçamento, realizado e status por item (aba Resultado).</p>
+          <p class="subtitle">Visão geral do orçamento: custos (contas a pagar) × entradas da arrecadação.</p>
         </div>
-        <div class="report-head-actions report-head-actions--split">
-          <button class="tbtn hidden" type="button" id="btn-financeiro-modelo">Recarregar modelo</button>
-          <button class="tbtn primary" type="button" id="btn-financeiro-new">Nova linha</button>
+        <div class="report-head-actions">
+          <a href="#financeiro-contas-pagar" class="tbtn primary" data-view="financeiro-contas-pagar">Contas a pagar</a>
         </div>
       </div>
-      <p class="report-summary" id="financeiro-summary"></p>
-      <div class="financeiro-empty hidden" id="financeiro-empty">
-        <p>Nenhuma linha neste evento. Carregue o modelo da planilha para preencher a estrutura completa.</p>
-        <button class="tbtn primary" type="button" id="btn-financeiro-empty-modelo">Carregar modelo da planilha</button>
+
+      <div class="financeiro-painel-loading hidden" id="financeiro-painel-loading">Carregando…</div>
+      <div id="financeiro-painel-body"></div>
+    </main>
+
+    <main id="view-financeiro-contas-pagar" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Contas a pagar</h1>
+          <p class="subtitle">Lançamento dos custos do evento. Categoria e plano de contas são obrigatórios; fornecedor é opcional.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-contas-pagar-new">Nova conta</button>
       </div>
-      <div class="table-wrap financeiro-scroll" id="financeiro-table-wrap">
-        <table class="table-financeiro">
+
+      <p class="report-summary" id="contas-pagar-summary"></p>
+      <div class="financeiro-empty hidden" id="contas-pagar-empty">
+        <p>Nenhuma conta cadastrada. Use <strong>Nova conta</strong> para lançar um custo — ex.: categoria RH, plano de contas, descrição e valor previsto.</p>
+      </div>
+      <div class="table-wrap hidden" id="contas-pagar-table-wrap">
+        <table class="table-financeiro-custos table-contas-pagar">
           <thead>
             <tr>
-              <th class="fin-col-item">Item</th>
-              <th class="fin-col-money">Orç. categoria</th>
-              <th class="fin-col-sub">Sub-Item</th>
-              <th>Prev. Qtde</th>
-              <th>Diária</th>
-              <th class="fin-col-money">Orçamento</th>
-              <th class="fin-col-money">R$ Unit</th>
-              <th class="fin-col-money">R$ Bonificado</th>
-              <th class="fin-col-money">R$ Total</th>
-              <th class="fin-col-money">Pré Evento</th>
-              <th class="fin-col-money">Pós Evento</th>
-              <th class="fin-col-money">Realizado</th>
+              <th>Categoria</th>
+              <th>Plano de contas</th>
+              <th>Fornecedor</th>
+              <th>Descrição</th>
+              <th class="fin-col-money">Previsto</th>
+              <th class="fin-col-money">Pago</th>
+              <th class="fin-col-money">Falta</th>
               <th>Status</th>
-              <th>Dt Prevista</th>
-              <th>Dt Realiz</th>
-              <th>Quem?</th>
-              <th class="fin-col-money">Reembolso</th>
+              <th>Vencimento</th>
             </tr>
           </thead>
-          <tbody id="financeiro-table"></tbody>
+          <tbody id="contas-pagar-table"></tbody>
+          <tfoot id="contas-pagar-table-foot"></tfoot>
         </table>
       </div>
     </main>
@@ -1409,102 +1415,67 @@
       </div>
     </div>
 
-    <div class="modal-bg" id="financeiro-modal-bg">
-      <div class="modal modal-form-xl" role="dialog" aria-modal="true" aria-labelledby="financeiro-modal-title">
-        <h2 id="financeiro-modal-title">Linha financeira</h2>
-        <p class="msub" id="financeiro-modal-sub"></p>
-        <p class="form-errors hidden" id="financeiro-modal-errors" role="alert"></p>
+    <div class="modal-bg" id="contas-pagar-modal-bg">
+      <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="contas-pagar-modal-title">
+        <h2 id="contas-pagar-modal-title">Conta a pagar</h2>
+        <p class="form-errors hidden" id="contas-pagar-modal-errors" role="alert"></p>
         <div class="field-row">
           <div class="field">
-            <label for="financeiro-modal-tipo">Tipo de linha</label>
-            <select id="financeiro-modal-tipo">
-              <option value="linha">Linha</option>
-              <option value="categoria">Categoria</option>
-              <option value="secao">Seção</option>
-              <option value="resumo">Resumo</option>
+            <label for="contas-pagar-modal-categoria">Categoria <span class="req">*</span></label>
+            <select id="contas-pagar-modal-categoria" required></select>
+          </div>
+          <div class="field">
+            <label for="contas-pagar-modal-plano">Plano de contas <span class="req">*</span></label>
+            <select id="contas-pagar-modal-plano" required disabled></select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="contas-pagar-modal-fornecedor">Fornecedor <span class="opt">(opcional)</span></label>
+            <input id="contas-pagar-modal-fornecedor" type="text" placeholder="Nome do fornecedor" />
+          </div>
+          <div class="field">
+            <label for="contas-pagar-modal-descricao">Descrição <span class="req">*</span></label>
+            <input id="contas-pagar-modal-descricao" type="text" placeholder="Ex.: Alisson, Som, Palco…" required />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="contas-pagar-modal-valor-previsto">Valor previsto (R$) <span class="req">*</span></label>
+            <input id="contas-pagar-modal-valor-previsto" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" required />
+          </div>
+          <div class="field">
+            <label for="contas-pagar-modal-valor-pago">Valor pago (R$)</label>
+            <input id="contas-pagar-modal-valor-pago" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="contas-pagar-modal-dt-vencimento">Vencimento</label>
+            <input id="contas-pagar-modal-dt-vencimento" type="text" placeholder="DD/MM/AAAA" />
+          </div>
+          <div class="field">
+            <label for="contas-pagar-modal-dt-pagamento">Data pagamento</label>
+            <input id="contas-pagar-modal-dt-pagamento" type="text" placeholder="DD/MM/AAAA" />
+          </div>
+          <div class="field">
+            <label for="contas-pagar-modal-status">Status</label>
+            <select id="contas-pagar-modal-status">
+              <option value="pendente">Pendente</option>
+              <option value="parcial">Parcial</option>
+              <option value="pago">Pago</option>
+              <option value="cancelado">Cancelado</option>
             </select>
           </div>
-          <div class="field">
-            <label for="financeiro-modal-item">Item</label>
-            <input id="financeiro-modal-item" type="text" placeholder="Ex.: RH, MKT…" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-orcamento-categoria">Orçamento categoria (R$)</label>
-            <input id="financeiro-modal-orcamento-categoria" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
         </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="financeiro-modal-sub-item">Sub-Item</label>
-            <input id="financeiro-modal-sub-item" type="text" placeholder="Ex.: Alisson, Registro de Marca…" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-previsto-qtde">Previsto Qtde</label>
-            <input id="financeiro-modal-previsto-qtde" type="text" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-diaria">Diária</label>
-            <input id="financeiro-modal-diaria" type="text" />
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="financeiro-modal-orcamento">Orçamento (R$)</label>
-            <input id="financeiro-modal-orcamento" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-valor-unit">R$ Unit</label>
-            <input id="financeiro-modal-valor-unit" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-valor-bonificado">R$ Bonificado</label>
-            <input id="financeiro-modal-valor-bonificado" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-valor-total">R$ Total</label>
-            <input id="financeiro-modal-valor-total" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="financeiro-modal-pre-evento">Pré Evento (R$)</label>
-            <input id="financeiro-modal-pre-evento" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-pos-evento">Pós Evento (R$)</label>
-            <input id="financeiro-modal-pos-evento" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-realizado-pago">Realizado R$ Pago</label>
-            <input id="financeiro-modal-realizado-pago" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-reembolso">Reembolso (R$)</label>
-            <input id="financeiro-modal-reembolso" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="financeiro-modal-status">Status</label>
-            <input id="financeiro-modal-status" type="text" placeholder="Ex.: Pago, Pendente…" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-dt-prevista">Dt Prevista</label>
-            <input id="financeiro-modal-dt-prevista" type="text" placeholder="DD/MM/AAAA" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-dt-realiz">Dt Realiz</label>
-            <input id="financeiro-modal-dt-realiz" type="text" placeholder="DD/MM/AAAA" />
-          </div>
-          <div class="field">
-            <label for="financeiro-modal-quem">Quem?</label>
-            <input id="financeiro-modal-quem" type="text" />
-          </div>
+        <div class="field">
+          <label for="contas-pagar-modal-obs">Observações</label>
+          <textarea id="contas-pagar-modal-obs" rows="2" placeholder="Opcional"></textarea>
         </div>
         <div class="btns">
-          <button class="btn" type="button" id="financeiro-modal-cancel">Cancelar</button>
-          <button class="btn danger hidden" type="button" id="financeiro-modal-delete">Excluir</button>
-          <button class="btn primary" type="button" id="financeiro-modal-save">Salvar</button>
+          <button class="btn" type="button" id="contas-pagar-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="contas-pagar-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="contas-pagar-modal-save">Salvar</button>
         </div>
       </div>
     </div>

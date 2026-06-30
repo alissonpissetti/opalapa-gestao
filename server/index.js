@@ -100,8 +100,21 @@ import {
   createFinanceiroLinha,
   updateFinanceiroLinha,
   deleteFinanceiroLinha,
+  clearFinanceiroResultado,
   carregarModeloFinanceiroResultado,
 } from './financeiro-resultado.js';
+import { buildFinanceiroPainel } from './financeiro-painel.js';
+import {
+  migrateFinanceiroContasPagar,
+  listFinanceiroCategorias,
+  listFinanceiroPlanoContas,
+  createFinanceiroPlanoConta,
+  listContasPagar,
+  findContaPagarById,
+  createContaPagar,
+  updateContaPagar,
+  deleteContaPagar,
+} from './financeiro-contas-pagar.js';
 import {
   migrateWhatsapp,
   listWhatsappMessages,
@@ -1366,6 +1379,94 @@ app.delete('/api/producao/premiacoes/:id', requireEvento, async (req, res) => {
   }
 });
 
+app.get('/api/financeiro/categorias', requireEvento, async (req, res) => {
+  try {
+    const categorias = await listFinanceiroCategorias(pool, req.eventoId);
+    res.json({ categorias });
+  } catch (err) {
+    console.error('GET /api/financeiro/categorias', err);
+    res.status(500).json({ error: 'Falha ao carregar categorias' });
+  }
+});
+
+app.get('/api/financeiro/plano-contas', requireEvento, async (req, res) => {
+  try {
+    const categoriaId = req.query.categoriaId ? Number(req.query.categoriaId) : undefined;
+    const planoContas = await listFinanceiroPlanoContas(pool, req.eventoId, { categoriaId });
+    res.json({ planoContas });
+  } catch (err) {
+    console.error('GET /api/financeiro/plano-contas', err);
+    res.status(500).json({ error: 'Falha ao carregar plano de contas' });
+  }
+});
+
+app.post('/api/financeiro/plano-contas', requireEvento, async (req, res) => {
+  try {
+    const conta = await createFinanceiroPlanoConta(pool, req.eventoId, req.body);
+    res.status(201).json({ conta });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/plano-contas', err);
+    res.status(500).json({ error: 'Falha ao criar conta contábil' });
+  }
+});
+
+app.get('/api/financeiro/contas-pagar', requireEvento, async (req, res) => {
+  try {
+    const contas = await listContasPagar(pool, req.eventoId);
+    res.json({ contas });
+  } catch (err) {
+    console.error('GET /api/financeiro/contas-pagar', err);
+    res.status(500).json({ error: 'Falha ao carregar contas a pagar' });
+  }
+});
+
+app.post('/api/financeiro/contas-pagar', requireEvento, async (req, res) => {
+  try {
+    const conta = await createContaPagar(pool, req.eventoId, req.body);
+    res.status(201).json({ conta });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/contas-pagar', err);
+    res.status(500).json({ error: 'Falha ao criar conta a pagar' });
+  }
+});
+
+app.put('/api/financeiro/contas-pagar/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const conta = await updateContaPagar(pool, id, req.eventoId, req.body);
+    if (!conta) return res.status(404).json({ error: 'Conta não encontrada' });
+    res.json({ conta });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/financeiro/contas-pagar/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar conta a pagar' });
+  }
+});
+
+app.delete('/api/financeiro/contas-pagar/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteContaPagar(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Conta não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/financeiro/contas-pagar/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir conta a pagar' });
+  }
+});
+
+app.get('/api/financeiro/painel', requireEvento, async (req, res) => {
+  try {
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    res.json({ painel });
+  } catch (err) {
+    console.error('GET /api/financeiro/painel', err);
+    res.status(500).json({ error: 'Falha ao carregar painel financeiro' });
+  }
+});
+
 app.get('/api/financeiro/resultado', requireEvento, async (req, res) => {
   try {
     const linhas = await listFinanceiroResultado(pool, req.eventoId);
@@ -1409,6 +1510,16 @@ app.put('/api/financeiro/resultado/linhas/:id', requireEvento, async (req, res) 
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PUT /api/financeiro/resultado/linhas/:id', err);
     res.status(500).json({ error: 'Falha ao atualizar linha' });
+  }
+});
+
+app.post('/api/financeiro/resultado/limpar', requireEvento, async (req, res) => {
+  try {
+    const removidas = await clearFinanceiroResultado(pool, req.eventoId);
+    res.json({ ok: true, removidas });
+  } catch (err) {
+    console.error('POST /api/financeiro/resultado/limpar', err);
+    res.status(500).json({ error: 'Falha ao limpar custos do evento' });
   }
 });
 
@@ -1678,6 +1789,7 @@ async function start() {
   await migrateProducaoCronologia(pool);
   await migrateProducaoPremiacoes(pool);
   await migrateFinanceiroResultado(pool);
+  await migrateFinanceiroContasPagar(pool);
   await migrateWhatsapp(pool);
   await migrateSeguidoresHistorico(pool);
   await migrateTiposComercio(pool);

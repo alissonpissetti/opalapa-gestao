@@ -15,6 +15,7 @@ import { initMarketingModule } from './modules/marketing.js';
 import { initProducaoCronologiaModule } from './modules/producao-cronologia.js';
 import { initProducaoPremiacoesModule } from './modules/producao-premiacoes.js';
 import { initFinanceiroGestaoModule } from './modules/financeiro-gestao.js';
+import { initContasPagarModule } from './modules/contas-pagar.js';
 import { initPermissoesModule } from './modules/permissoes.js';
 import { initWhatsappConnect } from './modules/whatsapp-connect.js';
 import { initWhatsappInbox } from './modules/whatsapp-inbox.js';
@@ -32,6 +33,7 @@ let marketingModule = null;
 let cronologiaModule = null;
 let premiacoesModule = null;
 let financeiroGestaoModule = null;
+let contasPagarModule = null;
 let permissoesModule = null;
 let usersModule = null;
 let eventosModule = null;
@@ -70,6 +72,7 @@ function showLoginOnly() {
   cronologiaModule = null;
   premiacoesModule = null;
   financeiroGestaoModule = null;
+  contasPagarModule = null;
   permissoesModule = null;
   usersModule = null;
   eventosModule = null;
@@ -134,6 +137,9 @@ async function reloadEventoData() {
   }
   if (navigation?.getCurrentView() === 'financeiro-gestao') {
     financeiroGestaoModule?.loadFinanceiroGestao();
+  }
+  if (navigation?.getCurrentView() === 'financeiro-contas-pagar') {
+    contasPagarModule?.loadContasPagar();
   }
   if (navigation?.getCurrentView() === 'permissoes') {
     permissoesModule?.loadPermissoes();
@@ -211,6 +217,7 @@ async function initApp(user) {
     onSaved: () => syncParticipantesList(),
   });
   financeiroGestaoModule = initFinanceiroGestaoModule();
+  contasPagarModule = initContasPagarModule();
   permissoesModule = initPermissoesModule();
   usersModule = initUsersModule(user);
 
@@ -240,6 +247,7 @@ async function initApp(user) {
       if (view === 'cronologia') cronologiaModule.loadCronologia();
       if (view === 'premiacoes') premiacoesModule.loadPremiacoes();
       if (view === 'financeiro-gestao') financeiroGestaoModule.loadFinanceiroGestao();
+      if (view === 'financeiro-contas-pagar') contasPagarModule.loadContasPagar();
       if (view === 'permissoes') permissoesModule.loadPermissoes();
       if (view === 'usuarios') usersModule.loadUsers();
     },

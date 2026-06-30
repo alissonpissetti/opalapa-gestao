@@ -388,6 +388,14 @@ export async function deleteFinanceiroLinha(pool, id, eventoId) {
   return result.affectedRows > 0;
 }
 
+export async function clearFinanceiroResultado(pool, eventoId) {
+  const [result] = await pool.query(
+    'DELETE FROM financeiro_resultado_linhas WHERE evento_id = ?',
+    [eventoId],
+  );
+  return result.affectedRows;
+}
+
 export async function carregarModeloFinanceiroResultado(pool, eventoId, { substituir = false } = {}) {
   let csvText = '';
   try {

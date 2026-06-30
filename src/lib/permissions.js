@@ -8,6 +8,7 @@ const VIEW_ORDER = [
   'cronologia',
   'premiacoes',
   'financeiro-gestao',
+  'financeiro-contas-pagar',
   'usuarios',
   'permissoes',
 ];
