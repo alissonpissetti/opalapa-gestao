@@ -7,6 +7,129 @@ const TEMPLATE_CSV_PATH = path.join(__dirname, 'data', 'financeiro-resultado.csv
 
 const TIPOS = ['categoria', 'linha', 'secao', 'resumo'];
 
+export const SUMARIO_ARRECADACAO_DEFS = [
+  { chave: 'reserva-pre', item: 'RESERVA PRÉ - SALDO', pattern: /^RESERVA PRÉ\s*-/i },
+  {
+    chave: 'bonificado-prefeitura',
+    item: 'ARRECADAÇÃO BONIFICADO - PREFEITURA',
+    pattern: /^ARRECADAÇÃO BONIFICADO/i,
+    previstoEditavel: false,
+  },
+  {
+    chave: 'ingressos-digitais',
+    item: 'ARRECADAÇÃO INGRESSOS DIGITAIS',
+    pattern: /^ARRECADAÇÃO INGRESSOS DIGITAIS/i,
+  },
+  {
+    chave: 'patrocinios-espacos',
+    item: 'ARRECADAÇÃO PATROCÍNIOS E ESPAÇOS',
+    pattern: /^ARRECADAÇÃO PATROCÍNIOS E ESPAÇOS/i,
+    previstoEditavel: false,
+  },
+  { chave: 'produtos', item: 'ARRECADAÇÃO PRODUTOS', pattern: /^ARRECADAÇÃO PRODUTOS/i },
+  {
+    chave: 'pre-alimentacao',
+    item: 'ARRECADAÇÃO PRÉ ALIMENTAÇÃO',
+    pattern: /^ARRECADAÇÃO PRÉ ALIMENTAÇÃO/i,
+  },
+  {
+    chave: 'vendas-hora',
+    item: 'ARRECADAÇÃO PRODUTOS NA HORA',
+    pattern: /^ARRECADAÇÃO PRODUTOS NA HORA|^ARRECADAÇÃO VENDAS NA HORA|^VENDAS NA HORA/i,
+    previstoEditavel: false,
+    posEvento: true,
+  },
+  {
+    chave: 'bebidas',
+    item: 'ARRECADAÇÃO BEBIDAS NA HORA',
+    pattern: /^ARRECADAÇÃO BEBIDAS(?:\s+NA\s+HORA)?/i,
+    previstoEditavel: false,
+    posEvento: true,
+  },
+];
+
+export function findSumarioArrecadacaoLinha(linhas, chave) {
+  const def = SUMARIO_ARRECADACAO_DEFS.find((d) => d.chave === chave);
+  if (!def) return null;
+  return linhas.find((l) => def.pattern.test(String(l.item || '').trim())) || null;
+}
+
+export const FATURAMENTO_PRACA_ALIMENTACAO_ITEM = 'FATURAMENTO PRAÇA ALIMENTAÇÃO';
+
+export function findFaturamentoPracaLinha(linhas) {
+  return (
+    linhas.find((l) =>
+      /^FATURAMENTO\s+PRA[CÇ]A\s+ALIMENTA[CÇ][AÃ]O/i.test(String(l.item || '').trim()),
+    ) || null
+  );
+}
+
+export async function patchFaturamentoPracaAlimentacao(pool, eventoId, { previsto, realizado } = {}) {
+  if (previsto === undefined && realizado === undefined) {
+    throw Object.assign(new Error('Informe o faturamento previsto ou realizado'), { status: 400 });
+  }
+
+  const linhas = await listFinanceiroResultado(pool, eventoId);
+  const existente = findFaturamentoPracaLinha(linhas);
+
+  let preVal = existente?.preEvento ?? null;
+  let posVal = existente?.posEvento ?? null;
+
+  if (previsto !== undefined) {
+    if (previsto == null || previsto === '') {
+      preVal = null;
+    } else {
+      const v = moneyToDb(previsto);
+      if (v == null) {
+        throw Object.assign(new Error('Informe um faturamento previsto válido'), { status: 400 });
+      }
+      preVal = v;
+    }
+  }
+  if (realizado !== undefined) {
+    if (realizado == null || realizado === '') {
+      posVal = null;
+    } else {
+      const v = moneyToDb(realizado);
+      if (v == null) {
+        throw Object.assign(new Error('Informe um faturamento realizado válido'), { status: 400 });
+      }
+      posVal = v;
+    }
+  }
+
+  if (existente) {
+    await pool.query(
+      `UPDATE financeiro_resultado_linhas
+       SET pre_evento = ?, pos_evento = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND evento_id = ?`,
+      [preVal, posVal, existente.id, eventoId],
+    );
+    const [rows] = await pool.query(
+      'SELECT id, evento_id, ordem, tipo, item, orcamento_categoria, sub_item, previsto_qtde, diaria, orcamento, valor_unit, valor_bonificado, valor_total, pre_evento, pos_evento, realizado_pago, status, dt_prevista, dt_realiz, quem, reembolso FROM financeiro_resultado_linhas WHERE id = ?',
+      [existente.id],
+    );
+    const linha = rows[0] ? rowToLinha(rows[0]) : null;
+    return {
+      previsto: linha?.preEvento ?? 0,
+      realizado: linha?.posEvento ?? 0,
+      linha,
+    };
+  }
+
+  const linha = await createFinanceiroLinha(pool, eventoId, {
+    item: FATURAMENTO_PRACA_ALIMENTACAO_ITEM,
+    tipo: 'resumo',
+    preEvento: preVal,
+    posEvento: posVal,
+  });
+  return {
+    previsto: linha?.preEvento ?? 0,
+    realizado: linha?.posEvento ?? 0,
+    linha,
+  };
+}
+
 function parseMoneyBr(value) {
   if (value == null) return null;
   const raw = String(value).trim();
@@ -321,7 +444,7 @@ export async function listFinanceiroResultado(pool, eventoId) {
   return rows.map(rowToLinha);
 }
 
-async function nextOrdem(pool, eventoId) {
+export async function nextOrdem(pool, eventoId) {
   const [rows] = await pool.query(
     'SELECT COALESCE(MAX(ordem), -1) + 1 AS next_ordem FROM financeiro_resultado_linhas WHERE evento_id = ?',
     [eventoId],
@@ -386,6 +509,64 @@ export async function deleteFinanceiroLinha(pool, id, eventoId) {
     [id, eventoId],
   );
   return result.affectedRows > 0;
+}
+
+export async function clearSumarioArrecadacaoOverridesNaoEditaveis(pool, eventoId, linhas) {
+  const rows = linhas ?? (await listFinanceiroResultado(pool, eventoId));
+  for (const def of SUMARIO_ARRECADACAO_DEFS) {
+    if (def.previstoEditavel !== false) continue;
+    const linha = findSumarioArrecadacaoLinha(rows, def.chave);
+    if (linha?.realizadoPago == null) continue;
+    await pool.query(
+      `UPDATE financeiro_resultado_linhas
+       SET realizado_pago = NULL, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND evento_id = ?`,
+      [linha.id, eventoId],
+    );
+    linha.realizadoPago = null;
+  }
+}
+
+export async function patchSumarioArrecadacaoPrevisto(pool, eventoId, chave, previsto) {
+  const def = SUMARIO_ARRECADACAO_DEFS.find((d) => d.chave === chave);
+  if (!def) {
+    throw Object.assign(new Error('Categoria do sumário inválida'), { status: 400 });
+  }
+  if (def.previstoEditavel === false) {
+    throw Object.assign(
+      new Error('O previsto desta categoria é calculado automaticamente e não pode ser editado'),
+      { status: 403 },
+    );
+  }
+
+  const previstoVal = moneyToDb(previsto);
+  if (previstoVal == null) {
+    throw Object.assign(new Error('Informe um valor previsto válido'), { status: 400 });
+  }
+
+  const linhas = await listFinanceiroResultado(pool, eventoId);
+  const existente = findSumarioArrecadacaoLinha(linhas, chave);
+
+  if (existente) {
+    await pool.query(
+      `UPDATE financeiro_resultado_linhas
+       SET realizado_pago = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND evento_id = ?`,
+      [previstoVal, existente.id, eventoId],
+    );
+    const [rows] = await pool.query(
+      'SELECT id, evento_id, ordem, tipo, item, orcamento_categoria, sub_item, previsto_qtde, diaria, orcamento, valor_unit, valor_bonificado, valor_total, pre_evento, pos_evento, realizado_pago, status, dt_prevista, dt_realiz, quem, reembolso FROM financeiro_resultado_linhas WHERE id = ?',
+      [existente.id],
+    );
+    return { chave, previsto: previstoVal, linha: rows[0] ? rowToLinha(rows[0]) : null };
+  }
+
+  const linha = await createFinanceiroLinha(pool, eventoId, {
+    item: def.item,
+    tipo: 'resumo',
+    realizadoPago: previstoVal,
+  });
+  return { chave, previsto: previstoVal, linha };
 }
 
 export async function clearFinanceiroResultado(pool, eventoId) {

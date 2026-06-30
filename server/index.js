@@ -102,8 +102,16 @@ import {
   deleteFinanceiroLinha,
   clearFinanceiroResultado,
   carregarModeloFinanceiroResultado,
+  patchSumarioArrecadacaoPrevisto,
+  patchFaturamentoPracaAlimentacao,
 } from './financeiro-resultado.js';
 import { buildFinanceiroPainel } from './financeiro-painel.js';
+import {
+  listVendasHora,
+  patchVendaHora,
+  carregarModeloVendasHora,
+} from './financeiro-vendas-hora.js';
+import { listBebidas, patchBebida, carregarModeloBebidas } from './financeiro-bebidas.js';
 import {
   migrateFinanceiroContasPagar,
   listFinanceiroCategorias,
@@ -1560,6 +1568,109 @@ app.get('/api/financeiro/painel', requireEvento, async (req, res) => {
   } catch (err) {
     console.error('GET /api/financeiro/painel', err);
     res.status(500).json({ error: 'Falha ao carregar painel financeiro' });
+  }
+});
+
+app.patch('/api/financeiro/sumario-arrecadacao', requireEvento, async (req, res) => {
+  try {
+    const chave = String(req.body?.chave || '').trim();
+    const { previsto } = req.body ?? {};
+    if (!chave) return res.status(400).json({ error: 'Informe a categoria do sumário' });
+    const result = await patchSumarioArrecadacaoPrevisto(pool, req.eventoId, chave, previsto);
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    const sumarioLinha = painel.sumarioArrecadacao?.linhas?.find((l) => l.id === chave) || null;
+    res.json({ ...result, sumarioLinha, sumarioArrecadacao: painel.sumarioArrecadacao, resultadoFinal: painel.resultadoFinal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/financeiro/sumario-arrecadacao', err);
+    res.status(500).json({ error: 'Falha ao salvar previsto do sumário' });
+  }
+});
+
+app.get('/api/financeiro/vendas-hora', requireEvento, async (req, res) => {
+  try {
+    const vendasHora = await listVendasHora(pool, req.eventoId);
+    res.json({ vendasHora });
+  } catch (err) {
+    console.error('GET /api/financeiro/vendas-hora', err);
+    res.status(500).json({ error: 'Falha ao carregar vendas na hora' });
+  }
+});
+
+app.patch('/api/financeiro/vendas-hora/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const item = await patchVendaHora(pool, id, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Item não encontrado' });
+    const vendasHora = await listVendasHora(pool, req.eventoId);
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    res.json({ item, vendasHora, sumarioArrecadacao: painel.sumarioArrecadacao, resultadoFinal: painel.resultadoFinal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/financeiro/vendas-hora/:id', err);
+    res.status(500).json({ error: 'Falha ao salvar item de venda' });
+  }
+});
+
+app.post('/api/financeiro/vendas-hora/carregar-modelo', requireEvento, async (req, res) => {
+  try {
+    const vendasHora = await carregarModeloVendasHora(pool, req.eventoId);
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    res.json({ vendasHora, sumarioArrecadacao: painel.sumarioArrecadacao, resultadoFinal: painel.resultadoFinal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/vendas-hora/carregar-modelo', err);
+    res.status(500).json({ error: 'Falha ao carregar modelo de vendas na hora' });
+  }
+});
+
+app.get('/api/financeiro/bebidas', requireEvento, async (req, res) => {
+  try {
+    const bebidas = await listBebidas(pool, req.eventoId);
+    res.json({ bebidas });
+  } catch (err) {
+    console.error('GET /api/financeiro/bebidas', err);
+    res.status(500).json({ error: 'Falha ao carregar arrecadação de bebidas' });
+  }
+});
+
+app.patch('/api/financeiro/bebidas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const item = await patchBebida(pool, id, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Item não encontrado' });
+    const bebidas = await listBebidas(pool, req.eventoId);
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    res.json({ item, bebidas, sumarioArrecadacao: painel.sumarioArrecadacao, resultadoFinal: painel.resultadoFinal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/financeiro/bebidas/:id', err);
+    res.status(500).json({ error: 'Falha ao salvar item de bebida' });
+  }
+});
+
+app.post('/api/financeiro/bebidas/carregar-modelo', requireEvento, async (req, res) => {
+  try {
+    const bebidas = await carregarModeloBebidas(pool, req.eventoId);
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    res.json({ bebidas, sumarioArrecadacao: painel.sumarioArrecadacao, resultadoFinal: painel.resultadoFinal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/bebidas/carregar-modelo', err);
+    res.status(500).json({ error: 'Falha ao carregar modelo de bebidas' });
+  }
+});
+
+app.patch('/api/financeiro/resultado-final/faturamento-praca', requireEvento, async (req, res) => {
+  try {
+    const { previsto, realizado } = req.body ?? {};
+    const result = await patchFaturamentoPracaAlimentacao(pool, req.eventoId, { previsto, realizado });
+    const painel = await buildFinanceiroPainel(pool, req.eventoId);
+    res.json({ ...result, resultadoFinal: painel.resultadoFinal });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/financeiro/resultado-final/faturamento-praca', err);
+    res.status(500).json({ error: 'Falha ao salvar faturamento da praça de alimentação' });
   }
 });
 

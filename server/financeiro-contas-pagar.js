@@ -796,6 +796,54 @@ export async function bulkUpdateContasPagarFase(pool, eventoId, raw) {
   return bulkUpdateContasPagar(pool, eventoId, { ids: raw?.ids, fase: raw?.fase });
 }
 
+function newCategoriaResumoBucket(categoriaId, categoriaNome) {
+  return {
+    categoriaId: categoriaId || null,
+    categoriaNome: categoriaNome || 'Outros',
+    bonificado: 0,
+    pre: 0,
+    pos: 0,
+    realizado: 0,
+    quantidade: 0,
+  };
+}
+
+function finalizeCategoriaResumo(bucket) {
+  const { categoriaId, categoriaNome, bonificado, pre, pos, realizado, quantidade } = bucket;
+  const faltaPre = pre - realizado;
+  const custoTotal = pre + pos;
+  const faltaPagar = custoTotal - realizado;
+  return {
+    categoriaId,
+    categoriaNome,
+    bonificado,
+    pre,
+    pos,
+    realizado,
+    faltaPre,
+    custoTotal,
+    faltaPagar,
+    quantidade,
+    valorPrevisto: custoTotal,
+  };
+}
+
+function sumCategoriaResumos(items) {
+  const acc = { bonificado: 0, pre: 0, pos: 0, realizado: 0, quantidade: 0 };
+  for (const item of items) {
+    acc.bonificado += item.bonificado;
+    acc.pre += item.pre;
+    acc.pos += item.pos;
+    acc.realizado += item.realizado;
+    acc.quantidade += item.quantidade;
+  }
+  return finalizeCategoriaResumo({
+    categoriaId: null,
+    categoriaNome: 'Total',
+    ...acc,
+  });
+}
+
 export function summarizeContasPagar(contas) {
   const ativas = contas.filter((c) => c.status !== 'cancelado');
   const byCategoria = new Map();
@@ -819,22 +867,44 @@ export function summarizeContasPagar(contas) {
       previstoPre += prev;
       realizadoPre += pago;
     }
-    const key = c.categoriaNome || 'Outros';
+    const key = c.categoriaId || 0;
     if (!byCategoria.has(key)) {
-      byCategoria.set(key, { nome: key, previsto: 0, realizado: 0, itens: 0 });
+      byCategoria.set(key, newCategoriaResumoBucket(c.categoriaId, c.categoriaNome));
     }
     const bucket = byCategoria.get(key);
-    bucket.previsto += prev;
+    if (c.bonificado) bucket.bonificado += prev;
+    if (c.fase === 'pos') bucket.pos += prev;
+    else bucket.pre += prev;
     bucket.realizado += pago;
-    bucket.itens += 1;
+    bucket.quantidade += 1;
   }
 
-  const categorias = [...byCategoria.values()]
-    .map((c) => ({ ...c, falta: Math.max(0, c.previsto - c.realizado) }))
-    .sort((a, b) => b.previsto - a.previsto);
+  const porCategoria = [...byCategoria.values()]
+    .map(finalizeCategoriaResumo)
+    .sort((a, b) => b.custoTotal - a.custoTotal);
+
+  const totaisContasPagar = {
+    ...sumCategoriaResumos(porCategoria),
+    realizadoPre,
+    realizadoPos,
+    // Falta pós: previsto da fase pós menos pagamentos já alocados a contas pós.
+    faltaPos: Math.max(0, previstoPos - realizadoPos),
+  };
+
+  const categorias = porCategoria.map((c) => ({
+    categoriaId: c.categoriaId,
+    categoriaNome: c.categoriaNome,
+    nome: c.categoriaNome,
+    previsto: c.custoTotal,
+    realizado: c.realizado,
+    falta: Math.max(0, c.faltaPagar),
+    itens: c.quantidade,
+  }));
 
   return {
     categorias,
+    porCategoria,
+    totaisContasPagar,
     totais: {
       previsto: totalPrevisto,
       realizado: totalPago,
@@ -845,6 +915,9 @@ export function summarizeContasPagar(contas) {
       realizadoPre,
       realizadoPos,
       realizadoGeral: totalPago,
+      // Falta pré (planilha): previsto pré menos total pago (todas as fases).
+      faltaPre: previstoPre - totalPago,
+      faltaPos: Math.max(0, previstoPos - realizadoPos),
     },
   };
 }

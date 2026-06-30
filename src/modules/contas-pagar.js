@@ -38,6 +38,109 @@ const FASE_LABEL = {
 };
 
 const DRAFT_SAVE_DEBOUNCE_MS = 400;
+const SORT_STORAGE_KEY = 'contas-pagar-sort';
+
+const STATUS_SORT_ORDER = {
+  pendente: 0,
+  parcial: 1,
+  pago: 2,
+  cancelado: 3,
+};
+
+const FASE_SORT_ORDER = {
+  pre: 0,
+  pos: 1,
+};
+
+function compareText(a, b) {
+  const sa = String(a ?? '').trim().toLowerCase();
+  const sb = String(b ?? '').trim().toLowerCase();
+  if (!sa && !sb) return 0;
+  if (!sa) return 1;
+  if (!sb) return -1;
+  return sa.localeCompare(sb, 'pt-BR');
+}
+
+function compareNumber(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  const fa = Number.isFinite(na) ? na : 0;
+  const fb = Number.isFinite(nb) ? nb : 0;
+  return fa - fb;
+}
+
+function compareDateOnly(a, b) {
+  const sa = String(a ?? '').trim();
+  const sb = String(b ?? '').trim();
+  if (!sa && !sb) return 0;
+  if (!sa) return 1;
+  if (!sb) return -1;
+  return sa.localeCompare(sb);
+}
+
+function planoDisplayKey(c) {
+  return [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
+}
+
+function faltaValor(c) {
+  const prev = Number(c.valorPrevisto) || 0;
+  const pago = Number(c.valorPago) || 0;
+  return Math.max(0, prev - pago);
+}
+
+function unitarioValor(c) {
+  const prev = Number(c.valorPrevisto) || 0;
+  const qtd = Number(c.quantidadePrevista) || 1;
+  return c.valorUnitario ?? calcValorUnitario(prev, qtd) ?? 0;
+}
+
+const SORT_COLUMNS = {
+  categoria: (a, b) => compareText(a.categoriaNome, b.categoriaNome),
+  plano: (a, b) => compareText(planoDisplayKey(a), planoDisplayKey(b)),
+  fornecedor: (a, b) => compareText(a.fornecedor, b.fornecedor),
+  descricao: (a, b) => compareText(a.descricao, b.descricao),
+  fase: (a, b) =>
+    (FASE_SORT_ORDER[a.fase === 'pos' ? 'pos' : 'pre'] ?? 0) -
+    (FASE_SORT_ORDER[b.fase === 'pos' ? 'pos' : 'pre'] ?? 0),
+  quantidade: (a, b) => compareNumber(a.quantidadePrevista, b.quantidadePrevista),
+  previsto: (a, b) => compareNumber(a.valorPrevisto, b.valorPrevisto),
+  unitario: (a, b) => compareNumber(unitarioValor(a), unitarioValor(b)),
+  pago: (a, b) => compareNumber(a.valorPago, b.valorPago),
+  falta: (a, b) => compareNumber(faltaValor(a), faltaValor(b)),
+  status: (a, b) =>
+    (STATUS_SORT_ORDER[a.status] ?? 99) - (STATUS_SORT_ORDER[b.status] ?? 99),
+  bonificado: (a, b) => {
+    const ba = Boolean(a.bonificado);
+    const bb = Boolean(b.bonificado);
+    if (ba !== bb) return ba ? 1 : -1;
+    return compareText(a.bonificadoRef, b.bonificadoRef);
+  },
+  vencimento: (a, b) => compareDateOnly(a.dtVencimento, b.dtVencimento),
+};
+
+function readSortState() {
+  try {
+    const raw = sessionStorage.getItem(SORT_STORAGE_KEY);
+    if (!raw) return { key: null, dir: 'asc' };
+    const parsed = JSON.parse(raw);
+    if (!parsed?.key || !SORT_COLUMNS[parsed.key]) return { key: null, dir: 'asc' };
+    return { key: parsed.key, dir: parsed.dir === 'desc' ? 'desc' : 'asc' };
+  } catch {
+    return { key: null, dir: 'asc' };
+  }
+}
+
+function writeSortState(state) {
+  try {
+    if (state.key) {
+      sessionStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(state));
+    } else {
+      sessionStorage.removeItem(SORT_STORAGE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 function summarizeFromContas(contas) {
   const ativas = contas.filter((c) => c.status !== 'cancelado');
@@ -252,6 +355,40 @@ export function initContasPagarModule() {
   let duplicating = false;
   let bulkUpdating = false;
   const selectedIds = new Set();
+  let sortState = readSortState();
+
+  function getSortedContas() {
+    const compare = sortState.key ? SORT_COLUMNS[sortState.key] : null;
+    if (!compare) return contas;
+    const dir = sortState.dir === 'desc' ? -1 : 1;
+    return [...contas].sort((a, b) => compare(a, b) * dir);
+  }
+
+  function updateSortHeaders() {
+    const thead = els.table?.closest('table')?.querySelector('thead');
+    if (!thead) return;
+    thead.querySelectorAll('th[data-sort]').forEach((th) => {
+      const key = th.dataset.sort;
+      th.classList.remove('th-sort--asc', 'th-sort--desc');
+      if (sortState.key === key) {
+        th.classList.add(sortState.dir === 'asc' ? 'th-sort--asc' : 'th-sort--desc');
+        th.setAttribute('aria-sort', sortState.dir === 'asc' ? 'ascending' : 'descending');
+      } else {
+        th.setAttribute('aria-sort', 'none');
+      }
+    });
+  }
+
+  function toggleSort(key) {
+    if (!SORT_COLUMNS[key]) return;
+    if (sortState.key === key) {
+      sortState = { key, dir: sortState.dir === 'asc' ? 'desc' : 'asc' };
+    } else {
+      sortState = { key, dir: 'asc' };
+    }
+    writeSortState(sortState);
+    renderTable();
+  }
 
   function isSelectable(conta) {
     return conta.status !== 'cancelado';
@@ -602,9 +739,11 @@ export function initContasPagarModule() {
       }
     });
 
-    els.table.innerHTML = contas
+    els.table.innerHTML = getSortedContas()
       .map((c) => (c.id === inlineEditId ? renderInlineRow(c) : renderNormalRow(c)))
       .join('');
+
+    updateSortHeaders();
 
     bindInlineMoneyMasks();
     if (inlineEditId) focusInlineEdit(inlineEditId);
@@ -1252,6 +1391,13 @@ export function initContasPagarModule() {
     if (e.target.matches('.row-chk')) {
       toggleSelect(Number(e.target.dataset.id), e.target.checked);
     }
+  });
+
+  els.table?.closest('table')?.querySelector('thead')?.addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-sort]');
+    if (!th || e.target.closest('.chk-cell')) return;
+    e.stopPropagation();
+    toggleSort(th.dataset.sort);
   });
 
   els.table?.addEventListener('click', (e) => {

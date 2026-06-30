@@ -395,6 +395,43 @@ export function fetchFinanceiroPainel() {
   return apiRequest('/api/financeiro/painel');
 }
 
+export function patchSumarioArrecadacaoPrevisto(chave, previsto) {
+  return apiRequest('/api/financeiro/sumario-arrecadacao', {
+    method: 'PATCH',
+    body: JSON.stringify({ chave, previsto }),
+  });
+}
+
+export function fetchVendasHora() {
+  return apiRequest('/api/financeiro/vendas-hora');
+}
+
+export function patchVendaHora(id, data) {
+  return apiRequest(`/api/financeiro/vendas-hora/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function carregarModeloVendasHora() {
+  return apiRequest('/api/financeiro/vendas-hora/carregar-modelo', { method: 'POST' });
+}
+
+export function fetchBebidas() {
+  return apiRequest('/api/financeiro/bebidas');
+}
+
+export function patchBebida(id, data) {
+  return apiRequest(`/api/financeiro/bebidas/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function carregarModeloBebidas() {
+  return apiRequest('/api/financeiro/bebidas/carregar-modelo', { method: 'POST' });
+}
+
 export function fetchFinanceiroResultado() {
   return apiRequest('/api/financeiro/resultado');
 }
@@ -422,6 +459,16 @@ export function updateFinanceiroLinha(id, data) {
 
 export function deleteFinanceiroLinha(id) {
   return apiRequest(`/api/financeiro/resultado/linhas/${id}`, { method: 'DELETE' });
+}
+
+export function patchFaturamentoPracaAlimentacao(previsto, realizado) {
+  const body = {};
+  if (previsto !== undefined) body.previsto = previsto;
+  if (realizado !== undefined) body.realizado = realizado;
+  return apiRequest('/api/financeiro/resultado-final/faturamento-praca', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }
 
 export function fetchFinanceiroCategorias({ gestao = false } = {}) {
