@@ -1422,11 +1422,13 @@
         <div class="field-row">
           <div class="field">
             <label for="contas-pagar-modal-categoria">Categoria <span class="req">*</span></label>
-            <select id="contas-pagar-modal-categoria" required></select>
+            <input id="contas-pagar-modal-categoria" type="text" list="contas-pagar-categorias-list" placeholder="Digite ou escolha — ex.: RH, MKT…" required autocomplete="off" />
+            <datalist id="contas-pagar-categorias-list"></datalist>
           </div>
           <div class="field">
             <label for="contas-pagar-modal-plano">Plano de contas <span class="req">*</span></label>
-            <select id="contas-pagar-modal-plano" required disabled></select>
+            <input id="contas-pagar-modal-plano" type="text" list="contas-pagar-plano-list" placeholder="Digite ou escolha — ex.: Som, Palco…" required autocomplete="off" />
+            <datalist id="contas-pagar-plano-list"></datalist>
           </div>
         </div>
         <div class="field-row">

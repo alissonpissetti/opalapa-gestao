@@ -433,6 +433,13 @@ export function fetchFinanceiroPlanoContas({ categoriaId } = {}) {
   return apiRequest(`/api/financeiro/plano-contas${qs}`);
 }
 
+export function createFinanceiroCategoria(data) {
+  return apiRequest('/api/financeiro/categorias', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export function createFinanceiroPlanoConta(data) {
   return apiRequest('/api/financeiro/plano-contas', {
     method: 'POST',

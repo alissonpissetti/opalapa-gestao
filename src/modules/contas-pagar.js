@@ -2,6 +2,8 @@ import {
   fetchFinanceiroCategorias,
   fetchFinanceiroPlanoContas,
   fetchContasPagar,
+  createFinanceiroCategoria,
+  createFinanceiroPlanoConta,
   createContaPagar,
   updateContaPagar,
   deleteContaPagar,
@@ -31,6 +33,14 @@ function planoLabel(p) {
   return `${cod}${p.nome}`;
 }
 
+function normalizeNome(value) {
+  return String(value ?? '').trim();
+}
+
+function sameNome(a, b) {
+  return normalizeNome(a).toLowerCase() === normalizeNome(b).toLowerCase();
+}
+
 let contasPagarInstance = null;
 
 export function initContasPagarModule() {
@@ -48,6 +58,8 @@ export function initContasPagarModule() {
     formErrors: document.getElementById('contas-pagar-modal-errors'),
     fieldCategoria: document.getElementById('contas-pagar-modal-categoria'),
     fieldPlano: document.getElementById('contas-pagar-modal-plano'),
+    datalistCategorias: document.getElementById('contas-pagar-categorias-list'),
+    datalistPlano: document.getElementById('contas-pagar-plano-list'),
     fieldFornecedor: document.getElementById('contas-pagar-modal-fornecedor'),
     fieldDescricao: document.getElementById('contas-pagar-modal-descricao'),
     fieldValorPrevisto: document.getElementById('contas-pagar-modal-valor-previsto'),
@@ -87,38 +99,73 @@ export function initContasPagarModule() {
     els.formErrors.classList.remove('hidden');
   }
 
-  function fillCategoriaSelect(selectedId = '') {
-    if (!els.fieldCategoria) return;
-    els.fieldCategoria.innerHTML =
-      '<option value="">Selecione…</option>' +
-      categorias
-        .map(
-          (c) =>
-            `<option value="${c.id}"${Number(selectedId) === c.id ? ' selected' : ''}>${escapeHtml(c.nome)}</option>`,
-        )
-        .join('');
+  function findCategoriaByNome(nome) {
+    const n = normalizeNome(nome);
+    if (!n) return null;
+    return categorias.find((c) => sameNome(c.nome, n)) || null;
   }
 
-  function fillPlanoSelect(categoriaId, selectedId = '') {
-    if (!els.fieldPlano) return;
-    const filtered = categoriaId
-      ? planoContas.filter((p) => p.categoriaId === Number(categoriaId))
-      : [];
-    els.fieldPlano.innerHTML =
-      '<option value="">Selecione…</option>' +
-      filtered
-        .map(
-          (p) =>
-            `<option value="${p.id}"${Number(selectedId) === p.id ? ' selected' : ''}>${escapeHtml(planoLabel(p))}</option>`,
-        )
-        .join('');
-    els.fieldPlano.disabled = !categoriaId;
+  function planosDaCategoria(categoriaId) {
+    return planoContas.filter((p) => p.categoriaId === Number(categoriaId));
   }
 
-  async function loadPlanoContas(categoriaId) {
-    const res = await fetchFinanceiroPlanoContas(categoriaId ? { categoriaId } : {});
-    planoContas = res?.planoContas || [];
-    fillPlanoSelect(categoriaId, els.fieldPlano?.value);
+  function refreshCategoriaDatalist() {
+    if (!els.datalistCategorias) return;
+    els.datalistCategorias.innerHTML = categorias
+      .map((c) => `<option value="${escapeHtml(c.nome)}"></option>`)
+      .join('');
+  }
+
+  function refreshPlanoDatalist(categoriaNome = els.fieldCategoria?.value) {
+    if (!els.datalistPlano) return;
+    const cat = findCategoriaByNome(categoriaNome);
+    const list = cat ? planosDaCategoria(cat.id) : [];
+    els.datalistPlano.innerHTML = list
+      .map((p) => `<option value="${escapeHtml(planoLabel(p))}"></option>`)
+      .join('');
+  }
+
+  function parsePlanoNomeInput(raw, categoriaId) {
+    const text = normalizeNome(raw);
+    if (!text) return '';
+    const list = planosDaCategoria(categoriaId);
+    const byLabel = list.find((p) => sameNome(planoLabel(p), text));
+    if (byLabel) return byLabel.nome;
+    const byNome = list.find((p) => sameNome(p.nome, text));
+    if (byNome) return byNome.nome;
+    if (text.includes(' — ')) {
+      const parts = text.split(' — ');
+      return normalizeNome(parts[parts.length - 1]);
+    }
+    return text;
+  }
+
+  async function resolveCategoriaId(nome) {
+    const trimmed = normalizeNome(nome);
+    if (!trimmed) return null;
+    const found = findCategoriaByNome(trimmed);
+    if (found) return found.id;
+    const { categoria } = await createFinanceiroCategoria({ nome: trimmed });
+    if (categoria) {
+      categorias.push(categoria);
+      categorias.sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR'));
+      refreshCategoriaDatalist();
+    }
+    return categoria?.id || null;
+  }
+
+  async function resolvePlanoContaId(categoriaId, nomeInput) {
+    const nome = parsePlanoNomeInput(nomeInput, categoriaId);
+    if (!nome) return null;
+    const list = planosDaCategoria(categoriaId);
+    const found = list.find((p) => sameNome(p.nome, nome) || sameNome(planoLabel(p), nomeInput));
+    if (found) return found.id;
+    const { conta } = await createFinanceiroPlanoConta({ categoriaId, nome });
+    if (conta) {
+      planoContas.push(conta);
+      refreshPlanoDatalist(els.fieldCategoria?.value);
+    }
+    return conta?.id || null;
   }
 
   function statusBadge(status) {
@@ -195,14 +242,21 @@ export function initContasPagarModule() {
       const catRes = await fetchFinanceiroCategorias();
       categorias = catRes?.categorias || [];
     }
-    await loadPlanoContas(conta?.categoriaId || '');
+    const planoRes = await fetchFinanceiroPlanoContas();
+    planoContas = planoRes?.planoContas || [];
 
-    fillCategoriaSelect(conta?.categoriaId || '');
-    fillPlanoSelect(conta?.categoriaId || '', conta?.planoContaId || '');
+    refreshCategoriaDatalist();
 
     if (els.modalTitle) {
       els.modalTitle.textContent = editId ? 'Editar conta a pagar' : 'Nova conta a pagar';
     }
+    if (els.fieldCategoria) els.fieldCategoria.value = conta?.categoriaNome || '';
+    if (els.fieldPlano) {
+      els.fieldPlano.value = conta
+        ? conta.planoContaNome || planoLabel({ codigo: conta.planoContaCodigo, nome: conta.planoContaNome })
+        : '';
+    }
+    refreshPlanoDatalist(conta?.categoriaNome || '');
     if (els.fieldFornecedor) els.fieldFornecedor.value = conta?.fornecedor || '';
     if (els.fieldDescricao) els.fieldDescricao.value = conta?.descricao || '';
     if (els.fieldValorPrevisto) {
@@ -228,10 +282,10 @@ export function initContasPagarModule() {
     els.modalBg?.classList.remove('open');
   }
 
-  function readForm() {
+  function readFormFields() {
     return {
-      categoriaId: Number(els.fieldCategoria?.value) || null,
-      planoContaId: Number(els.fieldPlano?.value) || null,
+      categoriaNome: normalizeNome(els.fieldCategoria?.value),
+      planoNome: normalizeNome(els.fieldPlano?.value),
       fornecedor: els.fieldFornecedor?.value?.trim() || '',
       descricao: els.fieldDescricao?.value?.trim() || '',
       valorPrevisto: readMoneyInput(els.fieldValorPrevisto),
@@ -247,13 +301,13 @@ export function initContasPagarModule() {
     if (loading) return;
     loading = true;
     try {
-      const [catRes, contasRes] = await Promise.all([
+      const [catRes, contasRes, planoRes] = await Promise.all([
         fetchFinanceiroCategorias(),
         fetchContasPagar(),
+        fetchFinanceiroPlanoContas(),
       ]);
       categorias = catRes?.categorias || [];
       contas = contasRes?.contas || [];
-      const planoRes = await fetchFinanceiroPlanoContas();
       planoContas = planoRes?.planoContas || [];
       renderTable();
     } catch (err) {
@@ -264,23 +318,23 @@ export function initContasPagarModule() {
   }
 
   async function saveConta() {
-    const data = readForm();
-    if (!data.categoriaId) {
-      showFormErrors('Selecione a categoria.');
+    const fields = readFormFields();
+    if (!fields.categoriaNome) {
+      showFormErrors('Informe a categoria.');
       els.fieldCategoria?.focus();
       return;
     }
-    if (!data.planoContaId) {
-      showFormErrors('Selecione o plano de contas.');
+    if (!fields.planoNome) {
+      showFormErrors('Informe o plano de contas.');
       els.fieldPlano?.focus();
       return;
     }
-    if (!data.descricao) {
+    if (!fields.descricao) {
       showFormErrors('Informe a descrição.');
       els.fieldDescricao?.focus();
       return;
     }
-    if (!data.valorPrevisto) {
+    if (!fields.valorPrevisto) {
       showFormErrors('Informe o valor previsto.');
       els.fieldValorPrevisto?.focus();
       return;
@@ -289,6 +343,30 @@ export function initContasPagarModule() {
     showFormErrors(null);
     els.btnSave.disabled = true;
     try {
+      const categoriaId = await resolveCategoriaId(fields.categoriaNome);
+      if (!categoriaId) {
+        showFormErrors('Não foi possível salvar a categoria.');
+        return;
+      }
+      const planoContaId = await resolvePlanoContaId(categoriaId, fields.planoNome);
+      if (!planoContaId) {
+        showFormErrors('Não foi possível salvar o plano de contas.');
+        return;
+      }
+
+      const data = {
+        categoriaId,
+        planoContaId,
+        fornecedor: fields.fornecedor,
+        descricao: fields.descricao,
+        valorPrevisto: fields.valorPrevisto,
+        valorPago: fields.valorPago,
+        dtVencimento: fields.dtVencimento,
+        dtPagamento: fields.dtPagamento,
+        status: fields.status,
+        obs: fields.obs,
+      };
+
       if (editId) {
         const { conta } = await updateContaPagar(editId, data);
         const idx = contas.findIndex((c) => c.id === editId);
@@ -322,10 +400,8 @@ export function initContasPagarModule() {
     }
   }
 
-  els.fieldCategoria?.addEventListener('change', async () => {
-    const catId = els.fieldCategoria.value;
-    await loadPlanoContas(catId);
-    fillPlanoSelect(catId);
+  els.fieldCategoria?.addEventListener('input', () => {
+    refreshPlanoDatalist(els.fieldCategoria.value);
   });
 
   els.btnNew?.addEventListener('click', () => void openModal());

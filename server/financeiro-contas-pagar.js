@@ -182,6 +182,31 @@ export async function listFinanceiroCategorias(pool, eventoId) {
   return rows.map(rowToCategoria);
 }
 
+export async function createFinanceiroCategoria(pool, eventoId, raw) {
+  await ensureDefaultCategorias(pool, eventoId);
+  const nome = String(raw.nome ?? '').trim();
+  if (!nome) throw Object.assign(new Error('Informe a categoria'), { status: 400 });
+
+  const [existing] = await pool.query(
+    `SELECT id, evento_id, nome, ordem FROM financeiro_categorias
+     WHERE evento_id = ? AND LOWER(nome) = LOWER(?)
+     LIMIT 1`,
+    [eventoId, nome],
+  );
+  if (existing[0]) return rowToCategoria(existing[0]);
+
+  const [maxOrd] = await pool.query(
+    'SELECT COALESCE(MAX(ordem), -1) + 1 AS next_ordem FROM financeiro_categorias WHERE evento_id = ?',
+    [eventoId],
+  );
+  const ordem = Number(maxOrd[0]?.next_ordem) || 0;
+  const [result] = await pool.query(
+    'INSERT INTO financeiro_categorias (evento_id, nome, ordem) VALUES (?, ?, ?)',
+    [eventoId, nome, ordem],
+  );
+  return rowToCategoria({ id: result.insertId, evento_id: eventoId, nome, ordem });
+}
+
 export async function listFinanceiroPlanoContas(pool, eventoId, { categoriaId } = {}) {
   await ensureDefaultCategorias(pool, eventoId);
   const params = [eventoId];
@@ -214,6 +239,16 @@ export async function createFinanceiroPlanoConta(pool, eventoId, raw) {
     [categoriaId, eventoId],
   );
   if (!cat.length) throw Object.assign(new Error('Categoria não encontrada'), { status: 404 });
+
+  const [existing] = await pool.query(
+    `SELECT pc.id, pc.evento_id, pc.categoria_id, pc.codigo, pc.nome, pc.ordem, cat.nome AS categoria_nome
+     FROM financeiro_plano_contas pc
+     JOIN financeiro_categorias cat ON cat.id = pc.categoria_id
+     WHERE pc.evento_id = ? AND pc.categoria_id = ? AND LOWER(pc.nome) = LOWER(?)
+     LIMIT 1`,
+    [eventoId, categoriaId, nome],
+  );
+  if (existing[0]) return rowToPlanoConta(existing[0]);
 
   const [result] = await pool.query(
     `INSERT INTO financeiro_plano_contas (evento_id, categoria_id, codigo, nome, ordem)

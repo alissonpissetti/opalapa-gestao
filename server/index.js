@@ -107,6 +107,7 @@ import { buildFinanceiroPainel } from './financeiro-painel.js';
 import {
   migrateFinanceiroContasPagar,
   listFinanceiroCategorias,
+  createFinanceiroCategoria,
   listFinanceiroPlanoContas,
   createFinanceiroPlanoConta,
   listContasPagar,
@@ -1386,6 +1387,17 @@ app.get('/api/financeiro/categorias', requireEvento, async (req, res) => {
   } catch (err) {
     console.error('GET /api/financeiro/categorias', err);
     res.status(500).json({ error: 'Falha ao carregar categorias' });
+  }
+});
+
+app.post('/api/financeiro/categorias', requireEvento, async (req, res) => {
+  try {
+    const categoria = await createFinanceiroCategoria(pool, req.eventoId, req.body);
+    res.status(201).json({ categoria });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/categorias', err);
+    res.status(500).json({ error: 'Falha ao criar categoria' });
   }
 });
 
