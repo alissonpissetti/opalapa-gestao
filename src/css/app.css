@@ -8208,6 +8208,89 @@ body.wa-inbox-open {
   font-size: 0.85em;
 }
 
+.fin-plano-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0 1.25rem;
+  border-bottom: 1px solid var(--content-border, #e5e7eb);
+  padding-bottom: 0;
+}
+
+.fin-plano-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--content-text-muted, #6b7280);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.fin-plano-tab:hover {
+  color: var(--content-text, #111827);
+}
+
+.fin-plano-tab.active {
+  color: var(--accent, #1d9e75);
+  border-bottom-color: var(--accent, #1d9e75);
+}
+
+.fin-plano-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.fin-plano-panel-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.fin-catalog-table .row-actions {
+  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.fin-catalog-row--inativo {
+  opacity: 0.72;
+}
+
+.fin-catalog-badge {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fin-catalog-badge--ativo {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.fin-catalog-badge--inativo {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.field--checkbox .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
 .tbtn.danger-outline {
   color: #dc2626;
   border-color: #fca5a5;

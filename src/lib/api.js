@@ -424,12 +424,16 @@ export function deleteFinanceiroLinha(id) {
   return apiRequest(`/api/financeiro/resultado/linhas/${id}`, { method: 'DELETE' });
 }
 
-export function fetchFinanceiroCategorias() {
-  return apiRequest('/api/financeiro/categorias');
+export function fetchFinanceiroCategorias({ gestao = false } = {}) {
+  const qs = gestao ? '?gestao=1' : '';
+  return apiRequest(`/api/financeiro/categorias${qs}`);
 }
 
-export function fetchFinanceiroPlanoContas({ categoriaId } = {}) {
-  const qs = categoriaId ? `?categoriaId=${encodeURIComponent(categoriaId)}` : '';
+export function fetchFinanceiroPlanoContas({ categoriaId, gestao = false } = {}) {
+  const params = new URLSearchParams();
+  if (categoriaId) params.set('categoriaId', String(categoriaId));
+  if (gestao) params.set('gestao', '1');
+  const qs = params.toString() ? `?${params}` : '';
   return apiRequest(`/api/financeiro/plano-contas${qs}`);
 }
 
@@ -440,11 +444,33 @@ export function createFinanceiroCategoria(data) {
   });
 }
 
+export function updateFinanceiroCategoria(id, data) {
+  return apiRequest(`/api/financeiro/categorias/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteFinanceiroCategoria(id) {
+  return apiRequest(`/api/financeiro/categorias/${id}`, { method: 'DELETE' });
+}
+
 export function createFinanceiroPlanoConta(data) {
   return apiRequest('/api/financeiro/plano-contas', {
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export function updateFinanceiroPlanoConta(id, data) {
+  return apiRequest(`/api/financeiro/plano-contas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteFinanceiroPlanoConta(id) {
+  return apiRequest(`/api/financeiro/plano-contas/${id}`, { method: 'DELETE' });
 }
 
 export function fetchContasPagar() {

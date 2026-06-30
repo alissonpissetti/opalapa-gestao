@@ -44,6 +44,9 @@ function rowToCategoria(row) {
     eventoId: Number(row.evento_id),
     nome: row.nome,
     ordem: Number(row.ordem),
+    ativo: row.ativo == null ? true : Boolean(Number(row.ativo)),
+    usoContas: Number(row.uso_contas) || 0,
+    usoPlanos: Number(row.uso_planos) || 0,
   };
 }
 
@@ -56,6 +59,8 @@ function rowToPlanoConta(row) {
     codigo: row.codigo || '',
     nome: row.nome,
     ordem: Number(row.ordem),
+    ativo: row.ativo == null ? true : Boolean(Number(row.ativo)),
+    usoContas: Number(row.uso_contas) || 0,
   };
 }
 
@@ -148,6 +153,17 @@ export async function migrateFinanceiroContasPagar(pool) {
       CONSTRAINT fk_fin_cp_plano FOREIGN KEY (plano_conta_id) REFERENCES financeiro_plano_contas(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  for (const table of ['financeiro_categorias', 'financeiro_plano_contas']) {
+    const [cols] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'ativo'`,
+      [table],
+    );
+    if (!cols.length) {
+      await pool.query(`ALTER TABLE ${table} ADD COLUMN ativo TINYINT(1) NOT NULL DEFAULT 1`);
+    }
+  }
 }
 
 async function ensureDefaultCategorias(pool, eventoId) {
@@ -172,11 +188,16 @@ async function ensureDefaultCategorias(pool, eventoId) {
   }
 }
 
-export async function listFinanceiroCategorias(pool, eventoId) {
+export async function listFinanceiroCategorias(pool, eventoId, { gestao = false } = {}) {
   await ensureDefaultCategorias(pool, eventoId);
+  const ativoClause = gestao ? '' : ' AND c.ativo = 1';
   const [rows] = await pool.query(
-    `SELECT id, evento_id, nome, ordem FROM financeiro_categorias
-     WHERE evento_id = ? ORDER BY ordem ASC, nome ASC`,
+    `SELECT c.id, c.evento_id, c.nome, c.ordem, c.ativo,
+            (SELECT COUNT(*) FROM financeiro_contas_pagar cp WHERE cp.categoria_id = c.id) AS uso_contas,
+            (SELECT COUNT(*) FROM financeiro_plano_contas pc WHERE pc.categoria_id = c.id) AS uso_planos
+     FROM financeiro_categorias c
+     WHERE c.evento_id = ?${ativoClause}
+     ORDER BY c.ordem ASC, c.nome ASC`,
     [eventoId],
   );
   return rows.map(rowToCategoria);
@@ -188,35 +209,45 @@ export async function createFinanceiroCategoria(pool, eventoId, raw) {
   if (!nome) throw Object.assign(new Error('Informe a categoria'), { status: 400 });
 
   const [existing] = await pool.query(
-    `SELECT id, evento_id, nome, ordem FROM financeiro_categorias
+    `SELECT id, evento_id, nome, ordem, ativo FROM financeiro_categorias
      WHERE evento_id = ? AND LOWER(nome) = LOWER(?)
      LIMIT 1`,
     [eventoId, nome],
   );
-  if (existing[0]) return rowToCategoria(existing[0]);
+  if (existing[0]) {
+    if (!Number(existing[0].ativo)) {
+      await pool.query('UPDATE financeiro_categorias SET ativo = 1 WHERE id = ?', [existing[0].id]);
+      existing[0].ativo = 1;
+    }
+    return rowToCategoria(existing[0]);
+  }
 
   const [maxOrd] = await pool.query(
     'SELECT COALESCE(MAX(ordem), -1) + 1 AS next_ordem FROM financeiro_categorias WHERE evento_id = ?',
     [eventoId],
   );
   const ordem = Number(maxOrd[0]?.next_ordem) || 0;
+  const ativo = raw.ativo === false || raw.ativo === 0 ? 0 : 1;
   const [result] = await pool.query(
-    'INSERT INTO financeiro_categorias (evento_id, nome, ordem) VALUES (?, ?, ?)',
-    [eventoId, nome, ordem],
+    'INSERT INTO financeiro_categorias (evento_id, nome, ordem, ativo) VALUES (?, ?, ?, ?)',
+    [eventoId, nome, ordem, ativo],
   );
-  return rowToCategoria({ id: result.insertId, evento_id: eventoId, nome, ordem });
+  return rowToCategoria({ id: result.insertId, evento_id: eventoId, nome, ordem, ativo });
 }
 
-export async function listFinanceiroPlanoContas(pool, eventoId, { categoriaId } = {}) {
+export async function listFinanceiroPlanoContas(pool, eventoId, { categoriaId, gestao = false } = {}) {
   await ensureDefaultCategorias(pool, eventoId);
   const params = [eventoId];
   let where = 'pc.evento_id = ?';
+  if (!gestao) where += ' AND pc.ativo = 1 AND cat.ativo = 1';
   if (categoriaId) {
     where += ' AND pc.categoria_id = ?';
     params.push(Number(categoriaId));
   }
   const [rows] = await pool.query(
-    `SELECT pc.id, pc.evento_id, pc.categoria_id, pc.codigo, pc.nome, pc.ordem, cat.nome AS categoria_nome
+    `SELECT pc.id, pc.evento_id, pc.categoria_id, pc.codigo, pc.nome, pc.ordem, pc.ativo,
+            cat.nome AS categoria_nome,
+            (SELECT COUNT(*) FROM financeiro_contas_pagar cp WHERE cp.plano_conta_id = pc.id) AS uso_contas
      FROM financeiro_plano_contas pc
      JOIN financeiro_categorias cat ON cat.id = pc.categoria_id
      WHERE ${where}
@@ -241,22 +272,148 @@ export async function createFinanceiroPlanoConta(pool, eventoId, raw) {
   if (!cat.length) throw Object.assign(new Error('Categoria não encontrada'), { status: 404 });
 
   const [existing] = await pool.query(
-    `SELECT pc.id, pc.evento_id, pc.categoria_id, pc.codigo, pc.nome, pc.ordem, cat.nome AS categoria_nome
+    `SELECT pc.id, pc.evento_id, pc.categoria_id, pc.codigo, pc.nome, pc.ordem, pc.ativo, cat.nome AS categoria_nome
      FROM financeiro_plano_contas pc
      JOIN financeiro_categorias cat ON cat.id = pc.categoria_id
      WHERE pc.evento_id = ? AND pc.categoria_id = ? AND LOWER(pc.nome) = LOWER(?)
      LIMIT 1`,
     [eventoId, categoriaId, nome],
   );
-  if (existing[0]) return rowToPlanoConta(existing[0]);
+  if (existing[0]) {
+    if (!Number(existing[0].ativo)) {
+      await pool.query('UPDATE financeiro_plano_contas SET ativo = 1 WHERE id = ?', [existing[0].id]);
+      existing[0].ativo = 1;
+    }
+    return rowToPlanoConta(existing[0]);
+  }
 
   const [result] = await pool.query(
-    `INSERT INTO financeiro_plano_contas (evento_id, categoria_id, codigo, nome, ordem)
-     VALUES (?, ?, ?, ?, ?)`,
-    [eventoId, categoriaId, codigo, nome, Number(raw.ordem) || 0],
+    `INSERT INTO financeiro_plano_contas (evento_id, categoria_id, codigo, nome, ordem, ativo)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [eventoId, categoriaId, codigo, nome, Number(raw.ordem) || 0, raw.ativo === false || raw.ativo === 0 ? 0 : 1],
   );
   const items = await listFinanceiroPlanoContas(pool, eventoId);
   return items.find((p) => p.id === result.insertId) || null;
+}
+
+async function findCategoriaById(pool, id, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT c.id, c.evento_id, c.nome, c.ordem, c.ativo,
+            (SELECT COUNT(*) FROM financeiro_contas_pagar cp WHERE cp.categoria_id = c.id) AS uso_contas,
+            (SELECT COUNT(*) FROM financeiro_plano_contas pc WHERE pc.categoria_id = c.id) AS uso_planos
+     FROM financeiro_categorias c
+     WHERE c.id = ? AND c.evento_id = ? LIMIT 1`,
+    [id, eventoId],
+  );
+  return rows[0] ? rowToCategoria(rows[0]) : null;
+}
+
+async function findPlanoContaById(pool, id, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT pc.id, pc.evento_id, pc.categoria_id, pc.codigo, pc.nome, pc.ordem, pc.ativo,
+            cat.nome AS categoria_nome,
+            (SELECT COUNT(*) FROM financeiro_contas_pagar cp WHERE cp.plano_conta_id = pc.id) AS uso_contas
+     FROM financeiro_plano_contas pc
+     JOIN financeiro_categorias cat ON cat.id = pc.categoria_id
+     WHERE pc.id = ? AND pc.evento_id = ? LIMIT 1`,
+    [id, eventoId],
+  );
+  return rows[0] ? rowToPlanoConta(rows[0]) : null;
+}
+
+export async function updateFinanceiroCategoria(pool, id, eventoId, raw) {
+  const current = await findCategoriaById(pool, id, eventoId);
+  if (!current) return null;
+
+  const nome = raw.nome !== undefined ? String(raw.nome).trim() : current.nome;
+  if (!nome) throw Object.assign(new Error('Informe o nome da categoria'), { status: 400 });
+
+  const [dup] = await pool.query(
+    `SELECT id FROM financeiro_categorias
+     WHERE evento_id = ? AND LOWER(nome) = LOWER(?) AND id <> ? LIMIT 1`,
+    [eventoId, nome, id],
+  );
+  if (dup.length) {
+    throw Object.assign(new Error('Já existe outra categoria com este nome'), { status: 400 });
+  }
+
+  const ativo = raw.ativo !== undefined ? (raw.ativo ? 1 : 0) : current.ativo ? 1 : 0;
+  const ordem = raw.ordem !== undefined ? Number(raw.ordem) : current.ordem;
+
+  await pool.query(
+    'UPDATE financeiro_categorias SET nome = ?, ativo = ?, ordem = ? WHERE id = ? AND evento_id = ?',
+    [nome, ativo, ordem, id, eventoId],
+  );
+  return findCategoriaById(pool, id, eventoId);
+}
+
+export async function deleteFinanceiroCategoria(pool, id, eventoId) {
+  const current = await findCategoriaById(pool, id, eventoId);
+  if (!current) return false;
+  if (current.usoContas > 0) {
+    throw Object.assign(
+      new Error(`Não é possível excluir: ${current.usoContas} conta(s) a pagar vinculada(s). Inative a categoria.`),
+      { status: 400 },
+    );
+  }
+  const [result] = await pool.query(
+    'DELETE FROM financeiro_categorias WHERE id = ? AND evento_id = ?',
+    [id, eventoId],
+  );
+  return result.affectedRows > 0;
+}
+
+export async function updateFinanceiroPlanoConta(pool, id, eventoId, raw) {
+  const current = await findPlanoContaById(pool, id, eventoId);
+  if (!current) return null;
+
+  const nome = raw.nome !== undefined ? String(raw.nome).trim() : current.nome;
+  if (!nome) throw Object.assign(new Error('Informe o nome da conta'), { status: 400 });
+  const codigo = raw.codigo !== undefined ? String(raw.codigo).trim() : current.codigo;
+  const categoriaId =
+    raw.categoriaId !== undefined ? Number(raw.categoriaId ?? raw.categoria_id) : current.categoriaId;
+  const ativo = raw.ativo !== undefined ? (raw.ativo ? 1 : 0) : current.ativo ? 1 : 0;
+  const ordem = raw.ordem !== undefined ? Number(raw.ordem) : current.ordem;
+
+  const [cat] = await pool.query(
+    'SELECT id FROM financeiro_categorias WHERE id = ? AND evento_id = ?',
+    [categoriaId, eventoId],
+  );
+  if (!cat.length) throw Object.assign(new Error('Categoria não encontrada'), { status: 404 });
+
+  const [dup] = await pool.query(
+    `SELECT id FROM financeiro_plano_contas
+     WHERE evento_id = ? AND categoria_id = ? AND LOWER(nome) = LOWER(?) AND id <> ? LIMIT 1`,
+    [eventoId, categoriaId, nome, id],
+  );
+  if (dup.length) {
+    throw Object.assign(new Error('Já existe outro plano de contas com este nome nesta categoria'), {
+      status: 400,
+    });
+  }
+
+  await pool.query(
+    `UPDATE financeiro_plano_contas SET categoria_id = ?, codigo = ?, nome = ?, ativo = ?, ordem = ?
+     WHERE id = ? AND evento_id = ?`,
+    [categoriaId, codigo, nome, ativo, ordem, id, eventoId],
+  );
+  return findPlanoContaById(pool, id, eventoId);
+}
+
+export async function deleteFinanceiroPlanoConta(pool, id, eventoId) {
+  const current = await findPlanoContaById(pool, id, eventoId);
+  if (!current) return false;
+  if (current.usoContas > 0) {
+    throw Object.assign(
+      new Error(`Não é possível excluir: ${current.usoContas} conta(s) a pagar vinculada(s). Inative o plano.`),
+      { status: 400 },
+    );
+  }
+  const [result] = await pool.query(
+    'DELETE FROM financeiro_plano_contas WHERE id = ? AND evento_id = ?',
+    [id, eventoId],
+  );
+  return result.affectedRows > 0;
 }
 
 function normalizeContaInput(raw, { forInsert = false } = {}) {
@@ -295,21 +452,27 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
 
 async function validateContaRefs(pool, eventoId, data) {
   const [pc] = await pool.query(
-    `SELECT pc.id, pc.categoria_id FROM financeiro_plano_contas pc
+    `SELECT pc.id, pc.categoria_id, pc.ativo FROM financeiro_plano_contas pc
      WHERE pc.id = ? AND pc.evento_id = ?`,
     [data.planoContaId, eventoId],
   );
   if (!pc.length) throw Object.assign(new Error('Plano de contas não encontrado'), { status: 404 });
+  if (!Number(pc[0].ativo)) {
+    throw Object.assign(new Error('Plano de contas inativo'), { status: 400 });
+  }
   if (Number(pc[0].categoria_id) !== data.categoriaId) {
     throw Object.assign(new Error('O plano de contas não pertence à categoria selecionada'), {
       status: 400,
     });
   }
   const [cat] = await pool.query(
-    'SELECT id FROM financeiro_categorias WHERE id = ? AND evento_id = ?',
+    'SELECT id, ativo FROM financeiro_categorias WHERE id = ? AND evento_id = ?',
     [data.categoriaId, eventoId],
   );
   if (!cat.length) throw Object.assign(new Error('Categoria não encontrada'), { status: 404 });
+  if (!Number(cat[0].ativo)) {
+    throw Object.assign(new Error('Categoria inativa'), { status: 400 });
+  }
 }
 
 export async function listContasPagar(pool, eventoId) {

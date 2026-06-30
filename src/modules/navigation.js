@@ -19,6 +19,11 @@ const VIEWS = {
     navId: 'nav-financeiro-contas-pagar',
     parentId: 'nav-financeiro',
   },
+  'financeiro-plano-contas': {
+    viewId: 'view-financeiro-plano-contas',
+    navId: 'nav-financeiro-plano-contas',
+    parentId: 'nav-financeiro',
+  },
   usuarios: { viewId: 'view-usuarios', navId: 'nav-usuarios', parentId: 'nav-acessos' },
   permissoes: { viewId: 'view-permissoes', navId: 'nav-permissoes', parentId: 'nav-acessos' },
 };

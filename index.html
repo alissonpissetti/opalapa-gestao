@@ -166,6 +166,7 @@
             <div class="nav-dropdown-menu" role="menu">
               <a href="#financeiro-gestao" class="nav-link" data-view="financeiro-gestao" id="nav-financeiro-gestao" role="menuitem">Gestão</a>
               <a href="#financeiro-contas-pagar" class="nav-link" data-view="financeiro-contas-pagar" id="nav-financeiro-contas-pagar" role="menuitem">Contas a pagar</a>
+              <a href="#financeiro-plano-contas" class="nav-link" data-view="financeiro-plano-contas" id="nav-financeiro-plano-contas" role="menuitem">Plano de contas</a>
             </div>
           </div>
           <div class="nav-dropdown" id="nav-acessos">
@@ -727,6 +728,65 @@
           <tfoot id="contas-pagar-table-foot"></tfoot>
         </table>
       </div>
+    </main>
+
+    <main id="view-financeiro-plano-contas" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Plano de contas</h1>
+          <p class="subtitle">Gerencie categorias e planos de contas do evento. Itens inativos não aparecem em novos lançamentos.</p>
+        </div>
+      </div>
+
+      <p class="report-summary" id="fin-plano-summary"></p>
+
+      <div class="fin-plano-tabs" id="fin-plano-tabs" role="tablist">
+        <button type="button" class="fin-plano-tab active" data-fin-plano-tab="categorias" role="tab">Categorias</button>
+        <button type="button" class="fin-plano-tab" data-fin-plano-tab="planos" role="tab">Planos de contas</button>
+      </div>
+
+      <section id="fin-plano-panel-categorias" class="fin-plano-panel">
+        <div class="fin-plano-panel-head">
+          <h2>Categorias de custo</h2>
+          <button class="tbtn primary" type="button" id="btn-fin-plano-categoria-new">Nova categoria</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table-financeiro-custos fin-catalog-table">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Planos</th>
+                <th>Contas vinculadas</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="fin-plano-table-categorias"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="fin-plano-panel-planos" class="fin-plano-panel hidden">
+        <div class="fin-plano-panel-head">
+          <h2>Planos de contas</h2>
+          <button class="tbtn primary" type="button" id="btn-fin-plano-conta-new">Novo plano</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table-financeiro-custos fin-catalog-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Nome</th>
+                <th>Categoria</th>
+                <th>Contas vinculadas</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="fin-plano-table-planos"></tbody>
+          </table>
+        </div>
+      </section>
     </main>
 
     <main id="view-usuarios" class="page view hidden">
@@ -1411,6 +1471,36 @@
           <button class="btn" type="button" id="premiacoes-modal-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="premiacoes-modal-delete">Excluir</button>
           <button class="btn primary" type="button" id="premiacoes-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="fin-plano-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fin-plano-modal-title">
+        <h2 id="fin-plano-modal-title">Categoria</h2>
+        <p class="form-errors hidden" id="fin-plano-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="fin-plano-modal-nome">Nome <span class="req">*</span></label>
+          <input id="fin-plano-modal-nome" type="text" required autocomplete="off" />
+        </div>
+        <div class="field hidden" id="fin-plano-modal-codigo-wrap">
+          <label for="fin-plano-modal-codigo">Código</label>
+          <input id="fin-plano-modal-codigo" type="text" placeholder="Ex.: 1.1" autocomplete="off" />
+        </div>
+        <div class="field hidden" id="fin-plano-modal-categoria-wrap">
+          <label for="fin-plano-modal-categoria">Categoria <span class="req">*</span></label>
+          <select id="fin-plano-modal-categoria"></select>
+        </div>
+        <div class="field field--checkbox">
+          <label class="checkbox-label">
+            <input id="fin-plano-modal-ativo" type="checkbox" checked />
+            Ativo (disponível para novos lançamentos)
+          </label>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="fin-plano-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="fin-plano-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="fin-plano-modal-save">Salvar</button>
         </div>
       </div>
     </div>

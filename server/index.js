@@ -110,6 +110,10 @@ import {
   createFinanceiroCategoria,
   listFinanceiroPlanoContas,
   createFinanceiroPlanoConta,
+  updateFinanceiroCategoria,
+  deleteFinanceiroCategoria,
+  updateFinanceiroPlanoConta,
+  deleteFinanceiroPlanoConta,
   listContasPagar,
   findContaPagarById,
   createContaPagar,
@@ -1382,7 +1386,8 @@ app.delete('/api/producao/premiacoes/:id', requireEvento, async (req, res) => {
 
 app.get('/api/financeiro/categorias', requireEvento, async (req, res) => {
   try {
-    const categorias = await listFinanceiroCategorias(pool, req.eventoId);
+    const gestao = req.query.gestao === '1' || req.query.gestao === 'true';
+    const categorias = await listFinanceiroCategorias(pool, req.eventoId, { gestao });
     res.json({ categorias });
   } catch (err) {
     console.error('GET /api/financeiro/categorias', err);
@@ -1401,10 +1406,37 @@ app.post('/api/financeiro/categorias', requireEvento, async (req, res) => {
   }
 });
 
+app.put('/api/financeiro/categorias/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const categoria = await updateFinanceiroCategoria(pool, id, req.eventoId, req.body);
+    if (!categoria) return res.status(404).json({ error: 'Categoria não encontrada' });
+    res.json({ categoria });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/financeiro/categorias/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar categoria' });
+  }
+});
+
+app.delete('/api/financeiro/categorias/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteFinanceiroCategoria(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Categoria não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/financeiro/categorias/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir categoria' });
+  }
+});
+
 app.get('/api/financeiro/plano-contas', requireEvento, async (req, res) => {
   try {
     const categoriaId = req.query.categoriaId ? Number(req.query.categoriaId) : undefined;
-    const planoContas = await listFinanceiroPlanoContas(pool, req.eventoId, { categoriaId });
+    const gestao = req.query.gestao === '1' || req.query.gestao === 'true';
+    const planoContas = await listFinanceiroPlanoContas(pool, req.eventoId, { categoriaId, gestao });
     res.json({ planoContas });
   } catch (err) {
     console.error('GET /api/financeiro/plano-contas', err);
@@ -1420,6 +1452,32 @@ app.post('/api/financeiro/plano-contas', requireEvento, async (req, res) => {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/financeiro/plano-contas', err);
     res.status(500).json({ error: 'Falha ao criar conta contábil' });
+  }
+});
+
+app.put('/api/financeiro/plano-contas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const conta = await updateFinanceiroPlanoConta(pool, id, req.eventoId, req.body);
+    if (!conta) return res.status(404).json({ error: 'Plano de contas não encontrado' });
+    res.json({ conta });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/financeiro/plano-contas/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar plano de contas' });
+  }
+});
+
+app.delete('/api/financeiro/plano-contas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteFinanceiroPlanoConta(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Plano de contas não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/financeiro/plano-contas/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir plano de contas' });
   }
 });
 

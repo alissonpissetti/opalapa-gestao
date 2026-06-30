@@ -112,6 +112,7 @@ export function initContasPagarModule() {
   function refreshCategoriaDatalist() {
     if (!els.datalistCategorias) return;
     els.datalistCategorias.innerHTML = categorias
+      .filter((c) => c.ativo !== false)
       .map((c) => `<option value="${escapeHtml(c.nome)}"></option>`)
       .join('');
   }
@@ -119,7 +120,7 @@ export function initContasPagarModule() {
   function refreshPlanoDatalist(categoriaNome = els.fieldCategoria?.value) {
     if (!els.datalistPlano) return;
     const cat = findCategoriaByNome(categoriaNome);
-    const list = cat ? planosDaCategoria(cat.id) : [];
+    const list = cat ? planosDaCategoria(cat.id).filter((p) => p.ativo !== false) : [];
     els.datalistPlano.innerHTML = list
       .map((p) => `<option value="${escapeHtml(planoLabel(p))}"></option>`)
       .join('');

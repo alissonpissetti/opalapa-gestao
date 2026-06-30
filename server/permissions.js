@@ -9,6 +9,7 @@ export const PERMISSION_CATALOG = [
   { key: 'premiacoes', label: 'Premiações', area: 'Produção' },
   { key: 'financeiro-gestao', label: 'Gestão financeira', area: 'Financeiro' },
   { key: 'financeiro-contas-pagar', label: 'Contas a pagar', area: 'Financeiro' },
+  { key: 'financeiro-plano-contas', label: 'Plano de contas', area: 'Financeiro' },
   { key: 'usuarios', label: 'Usuários', area: 'Acessos' },
   { key: 'permissoes', label: 'Grupos de permissão', area: 'Acessos' },
 ];
@@ -326,14 +327,19 @@ function resolveApiPermission(path, method) {
   if (p.startsWith('/api/producao/cronologia')) return { type: 'view', view: 'cronologia' };
   if (p.startsWith('/api/producao/premiacoes')) return { type: 'view', view: 'premiacoes' };
   if (p === '/api/financeiro/painel') {
-    return { type: 'anyOf', views: ['financeiro-gestao', 'financeiro-contas-pagar'] };
+    return {
+      type: 'anyOf',
+      views: ['financeiro-gestao', 'financeiro-contas-pagar', 'financeiro-plano-contas'],
+    };
+  }
+  if (p.startsWith('/api/financeiro/contas-pagar')) {
+    return { type: 'view', view: 'financeiro-contas-pagar' };
   }
   if (
-    p.startsWith('/api/financeiro/contas-pagar') ||
     p.startsWith('/api/financeiro/categorias') ||
     p.startsWith('/api/financeiro/plano-contas')
   ) {
-    return { type: 'view', view: 'financeiro-contas-pagar' };
+    return { type: 'anyOf', views: ['financeiro-contas-pagar', 'financeiro-plano-contas'] };
   }
   if (p.startsWith('/api/financeiro/')) return { type: 'view', view: 'financeiro-gestao' };
 
