@@ -1582,14 +1582,6 @@
               <input id="contas-pagar-modal-plano" type="text" list="contas-pagar-plano-list" placeholder="Digite ou escolha — ex.: Som, Palco, Alimentação…" required autocomplete="off" />
               <datalist id="contas-pagar-plano-list"></datalist>
             </div>
-            <div class="field">
-              <label for="contas-pagar-modal-fase">Fase <span class="req">*</span></label>
-              <select id="contas-pagar-modal-fase" required>
-                <option value="pre">Pré-evento</option>
-                <option value="pos">Pós-evento</option>
-              </select>
-              <p class="field-hint">Definido automaticamente pela data de vencimento e datas do evento.</p>
-            </div>
           </div>
         </section>
 
@@ -1638,6 +1630,7 @@
             <div class="field">
               <label for="contas-pagar-modal-dt-vencimento">Vencimento</label>
               <input id="contas-pagar-modal-dt-vencimento" type="date" />
+              <p class="field-hint">Pré/pós evento será definido automaticamente ao salvar, conforme a data de vencimento.</p>
             </div>
             <div class="field">
               <label for="contas-pagar-modal-dt-pagamento">Data pagamento</label>

@@ -553,8 +553,7 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
   };
 }
 
-async function applyAutoFase(pool, eventoId, data, raw) {
-  if (raw?.autoFase === false) return;
+async function inferFaseOnSave(pool, eventoId, data) {
   const evento = await findEventoById(pool, eventoId);
   const inferred = inferFaseContaPagar({
     evento,
@@ -609,7 +608,7 @@ export async function findContaPagarById(pool, id, eventoId) {
 export async function createContaPagar(pool, eventoId, raw) {
   const data = normalizeContaInput(raw, { forInsert: true });
   await validateContaRefs(pool, eventoId, data);
-  await applyAutoFase(pool, eventoId, data, raw);
+  await inferFaseOnSave(pool, eventoId, data);
 
   const [result] = await pool.query(
     `INSERT INTO financeiro_contas_pagar (
@@ -638,7 +637,7 @@ export async function createContaPagar(pool, eventoId, raw) {
 export async function updateContaPagar(pool, id, eventoId, raw) {
   const data = normalizeContaInput(raw);
   await validateContaRefs(pool, eventoId, data);
-  await applyAutoFase(pool, eventoId, data, raw);
+  await inferFaseOnSave(pool, eventoId, data);
 
   const [result] = await pool.query(
     `UPDATE financeiro_contas_pagar SET

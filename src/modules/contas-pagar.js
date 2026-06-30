@@ -19,13 +19,11 @@ import {
   parseValor,
   toDateInputValue,
 } from '../lib/format.js';
-import { getActiveEvento } from '../lib/evento.js';
 import {
   readContasPagarDraft,
   writeContasPagarDraft,
   clearContasPagarDraft,
 } from '../lib/contas-pagar-draft.js';
-import { inferFaseContaPagar } from '../../shared/financeiro-fase.js';
 
 const STATUS_LABEL = {
   pendente: 'Pendente',
@@ -154,7 +152,6 @@ export function initContasPagarModule() {
     formErrors: document.getElementById('contas-pagar-modal-errors'),
     fieldCategoria: document.getElementById('contas-pagar-modal-categoria'),
     fieldPlano: document.getElementById('contas-pagar-modal-plano'),
-    fieldFase: document.getElementById('contas-pagar-modal-fase'),
     datalistCategorias: document.getElementById('contas-pagar-categorias-list'),
     datalistPlano: document.getElementById('contas-pagar-plano-list'),
     fieldFornecedor: document.getElementById('contas-pagar-modal-fornecedor'),
@@ -250,7 +247,6 @@ export function initContasPagarModule() {
   let inlineEditId = null;
   let loading = false;
   let duplicating = false;
-  let faseManualOverride = false;
   let bulkUpdating = false;
   const selectedIds = new Set();
 
@@ -323,17 +319,6 @@ export function initContasPagarModule() {
       return '<td class="chk-cell"><input class="chk row-chk" type="checkbox" disabled title="Conta cancelada"></td>';
     }
     return `<td class="chk-cell"><input class="chk row-chk" type="checkbox" data-id="${c.id}" ${checked ? 'checked' : ''}></td>`;
-  }
-
-  function applyAutoFase() {
-    if (faseManualOverride || !els.fieldFase) return;
-    const evento = getActiveEvento();
-    const inferred = inferFaseContaPagar({
-      evento,
-      dtVencimento: els.fieldDtVencimento?.value?.trim() || '',
-      dtPagamento: els.fieldDtPagamento?.value?.trim() || '',
-    });
-    if (inferred) els.fieldFase.value = inferred;
   }
 
   function showFormErrors(messages) {
@@ -434,24 +419,18 @@ export function initContasPagarModule() {
   }
 
   function contaToPayload(conta, overrides = {}) {
-    const evento = getActiveEvento();
-    const dtVencimento = conta.dtVencimento || '';
-    const dtPagamento = overrides.dtPagamento ?? conta.dtPagamento ?? '';
-    const inferred = inferFaseContaPagar({ evento, dtVencimento, dtPagamento });
     return {
       categoriaId: conta.categoriaId,
       planoContaId: conta.planoContaId,
       fornecedor: overrides.fornecedor ?? conta.fornecedor ?? '',
       descricao: conta.descricao,
-      fase: overrides.fase ?? inferred ?? (conta.fase === 'pos' ? 'pos' : 'pre'),
       quantidadePrevista: overrides.quantidadePrevista ?? conta.quantidadePrevista ?? 1,
       valorPrevisto: overrides.valorPrevisto ?? conta.valorPrevisto,
       valorPago: overrides.valorPago ?? conta.valorPago ?? 0,
-      dtVencimento,
-      dtPagamento,
+      dtVencimento: conta.dtVencimento || '',
+      dtPagamento: overrides.dtPagamento ?? conta.dtPagamento ?? '',
       status: overrides.status ?? conta.status ?? 'pendente',
       obs: conta.obs || '',
-      autoFase: true,
     };
   }
 
@@ -628,7 +607,6 @@ export function initContasPagarModule() {
 
   async function openModal(conta = null) {
     editId = conta?.id ?? null;
-    faseManualOverride = false;
     showFormErrors(null);
 
     if (!categorias.length) {
@@ -657,7 +635,6 @@ export function initContasPagarModule() {
     refreshPlanoDatalist(conta?.categoriaNome || '');
     if (els.fieldFornecedor) els.fieldFornecedor.value = conta?.fornecedor || '';
     if (els.fieldDescricao) els.fieldDescricao.value = conta?.descricao || '';
-    if (els.fieldFase) els.fieldFase.value = conta?.fase === 'pos' ? 'pos' : 'pre';
     const qtd =
       conta?.quantidadePrevista != null ? Number(conta.quantidadePrevista) : 1;
     if (els.fieldQuantidadePrevista) {
@@ -684,8 +661,6 @@ export function initContasPagarModule() {
     }
     if (els.fieldStatus) els.fieldStatus.value = conta?.status || 'pendente';
     if (els.fieldObs) els.fieldObs.value = conta?.obs || '';
-
-    applyAutoFase();
 
     els.btnDelete?.classList.toggle('hidden', !editId);
     hideDraftUi();
@@ -715,7 +690,6 @@ export function initContasPagarModule() {
       planoNome: normalizeNome(els.fieldPlano?.value),
       fornecedor: els.fieldFornecedor?.value?.trim() || '',
       descricao: els.fieldDescricao?.value?.trim() || '',
-      fase: els.fieldFase?.value === 'pos' ? 'pos' : 'pre',
       quantidadePrevista: readQtyInput(els.fieldQuantidadePrevista),
       valorPrevisto: readMoneyInput(els.fieldValorPrevisto),
       valorPago: readMoneyInput(els.fieldValorPago),
@@ -732,7 +706,6 @@ export function initContasPagarModule() {
       planoNome: els.fieldPlano?.value ?? '',
       fornecedor: els.fieldFornecedor?.value ?? '',
       descricao: els.fieldDescricao?.value ?? '',
-      fase: els.fieldFase?.value === 'pos' ? 'pos' : 'pre',
       quantidadePrevista: els.fieldQuantidadePrevista?.value ?? '',
       valorUnitario: els.fieldValorUnitario?.value ?? '',
       valorPrevisto: els.fieldValorPrevisto?.value ?? '',
@@ -741,7 +714,6 @@ export function initContasPagarModule() {
       dtPagamento: els.fieldDtPagamento?.value ?? '',
       status: els.fieldStatus?.value || 'pendente',
       obs: els.fieldObs?.value ?? '',
-      faseManualOverride,
       lastEditedValor,
     };
   }
@@ -760,8 +732,7 @@ export function initContasPagarModule() {
       !String(snapshot.dtPagamento ?? '').trim() &&
       !String(snapshot.obs ?? '').trim() &&
       (!qtd || qtd === '1') &&
-      (snapshot.status || 'pendente') === 'pendente' &&
-      (snapshot.fase || 'pre') === 'pre'
+      (snapshot.status || 'pendente') === 'pendente'
     );
   }
 
@@ -773,7 +744,6 @@ export function initContasPagarModule() {
       refreshPlanoDatalist(draft.categoriaNome ?? '');
       if (els.fieldFornecedor) els.fieldFornecedor.value = draft.fornecedor ?? '';
       if (els.fieldDescricao) els.fieldDescricao.value = draft.descricao ?? '';
-      if (els.fieldFase) els.fieldFase.value = draft.fase === 'pos' ? 'pos' : 'pre';
       if (els.fieldQuantidadePrevista) {
         els.fieldQuantidadePrevista.value =
           draft.quantidadePrevista != null && String(draft.quantidadePrevista).trim()
@@ -787,9 +757,7 @@ export function initContasPagarModule() {
       if (els.fieldDtPagamento) els.fieldDtPagamento.value = draft.dtPagamento ?? '';
       if (els.fieldStatus) els.fieldStatus.value = draft.status || 'pendente';
       if (els.fieldObs) els.fieldObs.value = draft.obs ?? '';
-      faseManualOverride = Boolean(draft.faseManualOverride);
       lastEditedValor = draft.lastEditedValor ?? null;
-      if (!faseManualOverride) applyAutoFase();
     } finally {
       draftRestoring = false;
     }
@@ -803,7 +771,6 @@ export function initContasPagarModule() {
       refreshPlanoDatalist('');
       if (els.fieldFornecedor) els.fieldFornecedor.value = '';
       if (els.fieldDescricao) els.fieldDescricao.value = '';
-      if (els.fieldFase) els.fieldFase.value = 'pre';
       if (els.fieldQuantidadePrevista) els.fieldQuantidadePrevista.value = '1';
       if (els.fieldValorUnitario) els.fieldValorUnitario.value = '';
       if (els.fieldValorPrevisto) els.fieldValorPrevisto.value = '';
@@ -812,9 +779,7 @@ export function initContasPagarModule() {
       if (els.fieldDtPagamento) els.fieldDtPagamento.value = '';
       if (els.fieldStatus) els.fieldStatus.value = 'pendente';
       if (els.fieldObs) els.fieldObs.value = '';
-      faseManualOverride = false;
       lastEditedValor = null;
-      applyAutoFase();
     } finally {
       draftRestoring = false;
     }
@@ -934,7 +899,6 @@ export function initContasPagarModule() {
         planoContaId,
         fornecedor: fields.fornecedor,
         descricao: fields.descricao,
-        fase: fields.fase,
         quantidadePrevista: fields.quantidadePrevista,
         valorPrevisto: fields.valorPrevisto,
         valorPago: fields.valorPago,
@@ -942,7 +906,6 @@ export function initContasPagarModule() {
         dtPagamento: fields.dtPagamento,
         status: fields.status,
         obs: fields.obs,
-        autoFase: !faseManualOverride,
       };
 
       if (editId) {
@@ -1191,22 +1154,8 @@ export function initContasPagarModule() {
     refreshPlanoDatalist(els.fieldCategoria.value);
   });
 
-  els.fieldDtVencimento?.addEventListener('change', () => {
-    faseManualOverride = false;
-    applyAutoFase();
-    scheduleDraftSave();
-  });
-  els.fieldDtPagamento?.addEventListener('change', () => {
-    if (!els.fieldDtVencimento?.value?.trim()) {
-      faseManualOverride = false;
-      applyAutoFase();
-    }
-    scheduleDraftSave();
-  });
-  els.fieldFase?.addEventListener('change', () => {
-    faseManualOverride = true;
-    scheduleDraftSave();
-  });
+  els.fieldDtVencimento?.addEventListener('change', scheduleDraftSave);
+  els.fieldDtPagamento?.addEventListener('change', scheduleDraftSave);
 
   const draftFieldEls = [
     els.fieldCategoria,
