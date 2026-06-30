@@ -151,6 +151,8 @@ function rowToConta(row) {
     dtPagamento: formatDateOnlyIso(row.dt_pagamento),
     status: row.status || inferStatus(valorPrevisto, valorPago),
     obs: row.obs || '',
+    bonificado: row.bonificado == null ? false : Boolean(Number(row.bonificado)),
+    bonificadoRef: row.bonificado_ref || '',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
@@ -159,6 +161,7 @@ function rowToConta(row) {
 const CONTA_SELECT = `
   SELECT cp.id, cp.evento_id, cp.categoria_id, cp.plano_conta_id, cp.fornecedor, cp.descricao, cp.fase,
          cp.quantidade_prevista, cp.valor_previsto, cp.valor_pago, cp.dt_vencimento, cp.dt_pagamento, cp.status, cp.obs,
+         cp.bonificado, cp.bonificado_ref,
          cp.created_at, cp.updated_at,
          cat.nome AS categoria_nome,
          pc.codigo AS plano_codigo, pc.nome AS plano_nome
@@ -213,6 +216,8 @@ export async function migrateFinanceiroContasPagar(pool) {
       dt_pagamento VARCHAR(20) NULL,
       status ENUM('pendente', 'parcial', 'pago', 'cancelado') NOT NULL DEFAULT 'pendente',
       obs TEXT NULL,
+      bonificado TINYINT(1) NOT NULL DEFAULT 0,
+      bonificado_ref VARCHAR(120) NULL,
       created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
       updated_at DATETIME(3) NULL,
       INDEX idx_fin_cp_evento (evento_id),
@@ -253,6 +258,28 @@ export async function migrateFinanceiroContasPagar(pool) {
     await pool.query(
       `ALTER TABLE financeiro_contas_pagar
        ADD COLUMN quantidade_prevista DECIMAL(12,3) NOT NULL DEFAULT 1 AFTER fase`,
+    );
+  }
+
+  const [bonificadoCols] = await pool.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'financeiro_contas_pagar' AND COLUMN_NAME = 'bonificado'`,
+  );
+  if (!bonificadoCols.length) {
+    await pool.query(
+      `ALTER TABLE financeiro_contas_pagar
+       ADD COLUMN bonificado TINYINT(1) NOT NULL DEFAULT 0 AFTER obs`,
+    );
+  }
+
+  const [bonificadoRefCols] = await pool.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'financeiro_contas_pagar' AND COLUMN_NAME = 'bonificado_ref'`,
+  );
+  if (!bonificadoRefCols.length) {
+    await pool.query(
+      `ALTER TABLE financeiro_contas_pagar
+       ADD COLUMN bonificado_ref VARCHAR(120) NULL AFTER bonificado`,
     );
   }
 }
@@ -526,6 +553,15 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
     label: 'Data de pagamento',
   });
   const obs = String(raw.obs ?? '').trim() || null;
+  const bonificado =
+    raw.bonificado === true ||
+    raw.bonificado === 1 ||
+    raw.bonificado === '1' ||
+    String(raw.bonificado ?? '').toLowerCase() === 'true';
+  let bonificadoRef = bonificado ? String(raw.bonificadoRef ?? raw.bonificado_ref ?? '').trim() || null : null;
+  if (bonificadoRef && bonificadoRef.length > 120) {
+    throw Object.assign(new Error('Referência do voucher deve ter no máximo 120 caracteres'), { status: 400 });
+  }
   const fase = normalizeFase(raw.fase ?? raw.preEvento ?? raw.pre_evento);
   let status = String(raw.status ?? '').toLowerCase();
   if (!STATUS.includes(status)) status = inferStatus(valorPrevisto, valorPago);
@@ -550,6 +586,8 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
     dtPagamento,
     status,
     obs,
+    bonificado: bonificado ? 1 : 0,
+    bonificadoRef,
   };
 }
 
@@ -613,8 +651,9 @@ export async function createContaPagar(pool, eventoId, raw) {
   const [result] = await pool.query(
     `INSERT INTO financeiro_contas_pagar (
        evento_id, categoria_id, plano_conta_id, fornecedor, descricao, fase,
-       quantidade_prevista, valor_previsto, valor_pago, dt_vencimento, dt_pagamento, status, obs, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+       quantidade_prevista, valor_previsto, valor_pago, dt_vencimento, dt_pagamento, status, obs,
+       bonificado, bonificado_ref, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [
       eventoId,
       data.categoriaId,
@@ -629,6 +668,8 @@ export async function createContaPagar(pool, eventoId, raw) {
       data.dtPagamento,
       data.status,
       data.obs,
+      data.bonificado,
+      data.bonificadoRef,
     ],
   );
   return findContaPagarById(pool, result.insertId, eventoId);
@@ -643,7 +684,7 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
     `UPDATE financeiro_contas_pagar SET
        categoria_id = ?, plano_conta_id = ?, fornecedor = ?, descricao = ?, fase = ?,
        quantidade_prevista = ?, valor_previsto = ?, valor_pago = ?, dt_vencimento = ?, dt_pagamento = ?,
-       status = ?, obs = ?, updated_at = CURRENT_TIMESTAMP(3)
+       status = ?, obs = ?, bonificado = ?, bonificado_ref = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ? AND evento_id = ?`,
     [
       data.categoriaId,
@@ -658,6 +699,8 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
       data.dtPagamento,
       data.status,
       data.obs,
+      data.bonificado,
+      data.bonificadoRef,
       id,
       eventoId,
     ],

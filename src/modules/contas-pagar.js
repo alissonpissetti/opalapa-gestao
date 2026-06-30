@@ -164,6 +164,9 @@ export function initContasPagarModule() {
     fieldDtPagamento: document.getElementById('contas-pagar-modal-dt-pagamento'),
     fieldStatus: document.getElementById('contas-pagar-modal-status'),
     fieldObs: document.getElementById('contas-pagar-modal-obs'),
+    fieldBonificado: document.getElementById('contas-pagar-modal-bonificado'),
+    fieldBonificadoRefWrap: document.getElementById('contas-pagar-modal-bonificado-ref-wrap'),
+    fieldBonificadoRef: document.getElementById('contas-pagar-modal-bonificado-ref'),
     btnCancel: document.getElementById('contas-pagar-modal-cancel'),
     btnSave: document.getElementById('contas-pagar-modal-save'),
     btnDelete: document.getElementById('contas-pagar-modal-delete'),
@@ -418,6 +421,27 @@ export function initContasPagarModule() {
     return `<span class="fin-fase fin-fase--${escapeHtml(key)}">${escapeHtml(label)}</span>`;
   }
 
+  function truncateRef(ref, max = 18) {
+    const s = String(ref ?? '').trim();
+    if (!s) return '';
+    return s.length > max ? `${s.slice(0, max)}…` : s;
+  }
+
+  function bonificadoCell(c) {
+    if (!c.bonificado) return '—';
+    const ref = truncateRef(c.bonificadoRef);
+    const refHtml = ref
+      ? `<span class="fin-bonificado-ref" title="${escapeHtml(c.bonificadoRef || '')}">${escapeHtml(ref)}</span>`
+      : '';
+    return `<span class="fin-bonificado">Bonificado</span>${refHtml}`;
+  }
+
+  function updateBonificadoRefVisibility() {
+    const on = Boolean(els.fieldBonificado?.checked);
+    els.fieldBonificadoRefWrap?.classList.toggle('hidden', !on);
+    if (!on && els.fieldBonificadoRef) els.fieldBonificadoRef.value = '';
+  }
+
   function contaToPayload(conta, overrides = {}) {
     return {
       categoriaId: conta.categoriaId,
@@ -431,6 +455,8 @@ export function initContasPagarModule() {
       dtPagamento: overrides.dtPagamento ?? conta.dtPagamento ?? '',
       status: overrides.status ?? conta.status ?? 'pendente',
       obs: conta.obs || '',
+      bonificado: overrides.bonificado ?? conta.bonificado ?? false,
+      bonificadoRef: overrides.bonificadoRef ?? conta.bonificadoRef ?? '',
     };
   }
 
@@ -455,6 +481,7 @@ export function initContasPagarModule() {
         <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money fin-val--pos" data-field="valorPago" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(pago))}" /></td>
         <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
         <td>${statusBadge(c.status)}</td>
+        <td class="fin-col-bonificado">${bonificadoCell(c)}</td>
         <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
         <td class="fin-col-actions">
           <div class="fin-inline-actions">
@@ -486,6 +513,7 @@ export function initContasPagarModule() {
         <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
         <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
         <td>${statusBadge(c.status)}</td>
+        <td class="fin-col-bonificado">${bonificadoCell(c)}</td>
         <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
         <td class="fin-col-actions">
           <button type="button" class="tbtn" data-action="duplicate" title="Duplicar conta">Duplicar</button>
@@ -589,7 +617,7 @@ export function initContasPagarModule() {
           <td></td>
           <td class="fin-col-money fin-val--pos">${cellMoney(totalPago)}</td>
           <td class="fin-col-money fin-val--warn">${cellMoney(Math.max(0, totalPrev - totalPago))}</td>
-          <td colspan="3"></td>
+          <td colspan="4"></td>
         </tr>`;
     }
 
@@ -661,6 +689,9 @@ export function initContasPagarModule() {
     }
     if (els.fieldStatus) els.fieldStatus.value = conta?.status || 'pendente';
     if (els.fieldObs) els.fieldObs.value = conta?.obs || '';
+    if (els.fieldBonificado) els.fieldBonificado.checked = Boolean(conta?.bonificado);
+    if (els.fieldBonificadoRef) els.fieldBonificadoRef.value = conta?.bonificadoRef || '';
+    updateBonificadoRefVisibility();
 
     els.btnDelete?.classList.toggle('hidden', !editId);
     hideDraftUi();
@@ -697,6 +728,8 @@ export function initContasPagarModule() {
       dtPagamento: els.fieldDtPagamento?.value?.trim() || '',
       status: els.fieldStatus?.value || 'pendente',
       obs: els.fieldObs?.value?.trim() || '',
+      bonificado: Boolean(els.fieldBonificado?.checked),
+      bonificadoRef: els.fieldBonificadoRef?.value?.trim() || '',
     };
   }
 
@@ -714,6 +747,8 @@ export function initContasPagarModule() {
       dtPagamento: els.fieldDtPagamento?.value ?? '',
       status: els.fieldStatus?.value || 'pendente',
       obs: els.fieldObs?.value ?? '',
+      bonificado: Boolean(els.fieldBonificado?.checked),
+      bonificadoRef: els.fieldBonificadoRef?.value ?? '',
       lastEditedValor,
     };
   }
@@ -731,6 +766,8 @@ export function initContasPagarModule() {
       !String(snapshot.dtVencimento ?? '').trim() &&
       !String(snapshot.dtPagamento ?? '').trim() &&
       !String(snapshot.obs ?? '').trim() &&
+      !snapshot.bonificado &&
+      !String(snapshot.bonificadoRef ?? '').trim() &&
       (!qtd || qtd === '1') &&
       (snapshot.status || 'pendente') === 'pendente'
     );
@@ -757,6 +794,9 @@ export function initContasPagarModule() {
       if (els.fieldDtPagamento) els.fieldDtPagamento.value = draft.dtPagamento ?? '';
       if (els.fieldStatus) els.fieldStatus.value = draft.status || 'pendente';
       if (els.fieldObs) els.fieldObs.value = draft.obs ?? '';
+      if (els.fieldBonificado) els.fieldBonificado.checked = Boolean(draft.bonificado);
+      if (els.fieldBonificadoRef) els.fieldBonificadoRef.value = draft.bonificadoRef ?? '';
+      updateBonificadoRefVisibility();
       lastEditedValor = draft.lastEditedValor ?? null;
     } finally {
       draftRestoring = false;
@@ -779,6 +819,9 @@ export function initContasPagarModule() {
       if (els.fieldDtPagamento) els.fieldDtPagamento.value = '';
       if (els.fieldStatus) els.fieldStatus.value = 'pendente';
       if (els.fieldObs) els.fieldObs.value = '';
+      if (els.fieldBonificado) els.fieldBonificado.checked = false;
+      if (els.fieldBonificadoRef) els.fieldBonificadoRef.value = '';
+      updateBonificadoRefVisibility();
       lastEditedValor = null;
     } finally {
       draftRestoring = false;
@@ -906,6 +949,8 @@ export function initContasPagarModule() {
         dtPagamento: fields.dtPagamento,
         status: fields.status,
         obs: fields.obs,
+        bonificado: fields.bonificado,
+        bonificadoRef: fields.bonificado ? fields.bonificadoRef : '',
       };
 
       if (editId) {
@@ -1154,6 +1199,11 @@ export function initContasPagarModule() {
     refreshPlanoDatalist(els.fieldCategoria.value);
   });
 
+  els.fieldBonificado?.addEventListener('change', () => {
+    updateBonificadoRefVisibility();
+    scheduleDraftSave();
+  });
+
   els.fieldDtVencimento?.addEventListener('change', scheduleDraftSave);
   els.fieldDtPagamento?.addEventListener('change', scheduleDraftSave);
 
@@ -1170,6 +1220,7 @@ export function initContasPagarModule() {
     els.fieldDtPagamento,
     els.fieldStatus,
     els.fieldObs,
+    els.fieldBonificadoRef,
   ];
   draftFieldEls.filter(Boolean).forEach((el) => {
     el.addEventListener('input', scheduleDraftSave);

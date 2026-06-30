@@ -738,6 +738,7 @@
               <th class="fin-col-money">Pago</th>
               <th class="fin-col-money">Falta</th>
               <th>Status</th>
+              <th class="fin-col-bonificado">Bonificado</th>
               <th class="fin-col-date">Vencimento</th>
               <th class="fin-col-actions">Ações</th>
             </tr>
@@ -1645,6 +1646,20 @@
                 <option value="cancelado">Cancelado</option>
               </select>
             </div>
+          </div>
+        </section>
+
+        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-bonificado">
+          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-bonificado">Bonificação</h3>
+          <div class="field field--checkbox">
+            <label class="checkbox-label">
+              <input id="contas-pagar-modal-bonificado" type="checkbox" />
+              Bonificado (voucher prefeitura)
+            </label>
+          </div>
+          <div class="field hidden" id="contas-pagar-modal-bonificado-ref-wrap">
+            <label for="contas-pagar-modal-bonificado-ref">Referência do voucher <span class="opt">(opcional)</span></label>
+            <input id="contas-pagar-modal-bonificado-ref" type="text" maxlength="120" placeholder="Número ou código do voucher" autocomplete="off" />
           </div>
         </section>
 

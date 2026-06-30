@@ -8396,6 +8396,33 @@ body.wa-inbox-open {
   color: #6b7280;
 }
 
+.fin-bonificado {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.fin-bonificado-ref {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #6b7280;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-contas-pagar .fin-col-bonificado {
+  min-width: 5.5rem;
+  max-width: 7rem;
+}
+
 .field label .req {
   color: #dc2626;
 }
