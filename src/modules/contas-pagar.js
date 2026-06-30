@@ -8,7 +8,15 @@ import {
   updateContaPagar,
   deleteContaPagar,
 } from '../lib/api.js';
-import { escapeHtml, fmtMoney, formatValorInput, maskValorInput, parseValor } from '../lib/format.js';
+import {
+  escapeHtml,
+  fmtDateOnly,
+  fmtMoney,
+  formatValorInput,
+  maskValorInput,
+  parseValor,
+  toDateInputValue,
+} from '../lib/format.js';
 
 const STATUS_LABEL = {
   pendente: 'Pendente',
@@ -213,7 +221,7 @@ export function initContasPagarModule() {
         <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
         <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
         <td>${statusBadge(c.status)}</td>
-        <td>${escapeHtml(c.dtVencimento || '—')}</td>
+        <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
       </tr>`;
       })
       .join('');
@@ -267,8 +275,12 @@ export function initContasPagarModule() {
     if (els.fieldValorPago) {
       els.fieldValorPago.value = conta?.valorPago != null ? formatValorInput(conta.valorPago) : '';
     }
-    if (els.fieldDtVencimento) els.fieldDtVencimento.value = conta?.dtVencimento || '';
-    if (els.fieldDtPagamento) els.fieldDtPagamento.value = conta?.dtPagamento || '';
+    if (els.fieldDtVencimento) {
+      els.fieldDtVencimento.value = toDateInputValue(conta?.dtVencimento);
+    }
+    if (els.fieldDtPagamento) {
+      els.fieldDtPagamento.value = toDateInputValue(conta?.dtPagamento);
+    }
     if (els.fieldStatus) els.fieldStatus.value = conta?.status || 'pendente';
     if (els.fieldObs) els.fieldObs.value = conta?.obs || '';
 

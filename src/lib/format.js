@@ -3,6 +3,34 @@ export function fmtDate(iso) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/** Interpreta data sem hora (YYYY-MM-DD ou DD/MM/YYYY). */
+export function parseDateOnly(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return { y: Number(m[3]), mo: Number(m[2]), d: Number(m[1]) };
+  return null;
+}
+
+/** Exibe data (somente dia) em pt-BR — ex.: 24/04/2025 */
+export function fmtDateOnly(value) {
+  const p = parseDateOnly(value);
+  if (!p) return value ? String(value).trim() || '—' : '—';
+  const d = new Date(p.y, p.mo - 1, p.d);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/** Valor para input type="date" (YYYY-MM-DD). */
+export function toDateInputValue(value) {
+  const p = parseDateOnly(value);
+  if (!p) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${p.y}-${pad(p.mo)}-${pad(p.d)}`;
+}
+
 export function formatPhoneDisplay(phone) {
   if (!phone) return '';
   const digits = String(phone).replace(/\D/g, '');

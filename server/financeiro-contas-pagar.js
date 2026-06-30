@@ -29,6 +29,32 @@ function parseMoney(raw, label) {
   return negative ? -n : n;
 }
 
+function parseDateOnlyParts(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return { y: m[1], mo: m[2], d: m[3] };
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return { y: m[3], mo: m[2], d: m[1] };
+  return null;
+}
+
+function formatDateOnlyIso(raw) {
+  const p = parseDateOnlyParts(raw);
+  if (!p) return String(raw ?? '').trim();
+  return `${p.y}-${p.mo}-${p.d}`;
+}
+
+function normalizeDateOnly(raw, { label = 'Data' } = {}) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const p = parseDateOnlyParts(s);
+  if (!p) {
+    throw Object.assign(new Error(`${label} inválida (use AAAA-MM-DD ou DD/MM/AAAA)`), { status: 400 });
+  }
+  return `${p.y}-${p.mo}-${p.d}`;
+}
+
 function inferStatus(valorPrevisto, valorPago, explicit) {
   if (explicit === 'cancelado') return 'cancelado';
   const prev = Number(valorPrevisto) || 0;
@@ -80,8 +106,8 @@ function rowToConta(row) {
     valorPrevisto,
     valorPago,
     valorFalta: Math.max(0, valorPrevisto - valorPago),
-    dtVencimento: row.dt_vencimento || '',
-    dtPagamento: row.dt_pagamento || '',
+    dtVencimento: formatDateOnlyIso(row.dt_vencimento),
+    dtPagamento: formatDateOnlyIso(row.dt_pagamento),
     status: row.status || inferStatus(valorPrevisto, valorPago),
     obs: row.obs || '',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -423,8 +449,12 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
   const fornecedor = String(raw.fornecedor ?? '').trim() || null;
   const valorPrevisto = parseMoney(raw.valorPrevisto ?? raw.valor_previsto, 'Valor previsto');
   const valorPago = parseMoney(raw.valorPago ?? raw.valor_pago ?? 0, 'Valor pago');
-  const dtVencimento = String(raw.dtVencimento ?? raw.dt_vencimento ?? '').trim() || null;
-  const dtPagamento = String(raw.dtPagamento ?? raw.dt_pagamento ?? '').trim() || null;
+  const dtVencimento = normalizeDateOnly(raw.dtVencimento ?? raw.dt_vencimento, {
+    label: 'Data de vencimento',
+  });
+  const dtPagamento = normalizeDateOnly(raw.dtPagamento ?? raw.dt_pagamento, {
+    label: 'Data de pagamento',
+  });
   const obs = String(raw.obs ?? '').trim() || null;
   let status = String(raw.status ?? '').toLowerCase();
   if (!STATUS.includes(status)) status = inferStatus(valorPrevisto, valorPago);
