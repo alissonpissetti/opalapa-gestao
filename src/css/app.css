@@ -3554,6 +3554,57 @@ body.lead-workspace-open .lead-workspace {
   overflow-y: auto;
 }
 
+#contas-pagar-modal-bg.modal-bg.open {
+  align-items: flex-start;
+  padding: 1.5rem 0;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.modal.modal--contas-pagar {
+  width: min(880px, 96vw);
+  max-height: min(92vh, 920px);
+  overflow-y: auto;
+  padding: 2rem 2.25rem;
+  margin: auto;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
+}
+
+.modal--contas-pagar h2 {
+  font-size: 20px;
+  margin-bottom: 0.35rem;
+}
+
+.modal--contas-pagar .field-row {
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1rem 1.25rem;
+}
+
+.modal--contas-pagar .field-row .field {
+  margin-bottom: 0;
+}
+
+.modal--contas-pagar .field-row + .field-row,
+.modal--contas-pagar .field-row + .field {
+  margin-top: 1rem;
+}
+
+.modal--contas-pagar .field label {
+  font-size: 12px;
+  margin-bottom: 7px;
+}
+
+.modal--contas-pagar .field textarea {
+  min-height: 80px;
+}
+
+.modal--contas-pagar .btns {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--content-border);
+  gap: 10px;
+}
+
 .modal-form-xl .permissoes-views {
   max-height: min(50vh, 480px);
 }
@@ -8168,6 +8219,40 @@ body.wa-inbox-open {
   color: #4b5563;
 }
 
+.table-contas-pagar .fin-col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.table-contas-pagar tr.fin-custo-row--editing {
+  background: #eff6ff;
+}
+
+.table-contas-pagar tr.fin-custo-row--editing:hover {
+  background: #eff6ff;
+}
+
+.table-contas-pagar .fin-inline-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  font: inherit;
+  background: #fff;
+}
+
+.table-contas-pagar .fin-inline-input.fin-inline-money {
+  max-width: 6.5rem;
+  text-align: right;
+}
+
+.table-contas-pagar .fin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .table-contas-pagar .fin-col-date {
   white-space: nowrap;
 }
@@ -8427,6 +8512,14 @@ body.wa-inbox-open {
 
   #financeiro-modal-bg .field-row {
     grid-template-columns: 1fr;
+  }
+
+  #contas-pagar-modal-bg .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .modal--contas-pagar {
+    padding: 1.5rem;
   }
 
   .financeiro-kpis {
