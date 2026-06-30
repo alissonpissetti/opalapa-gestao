@@ -153,6 +153,7 @@ export function initContasPagarModule() {
     fieldFornecedor: document.getElementById('contas-pagar-modal-fornecedor'),
     fieldDescricao: document.getElementById('contas-pagar-modal-descricao'),
     fieldQuantidadePrevista: document.getElementById('contas-pagar-modal-quantidade-prevista'),
+    fieldValorUnitario: document.getElementById('contas-pagar-modal-valor-unitario'),
     fieldValorPrevisto: document.getElementById('contas-pagar-modal-valor-previsto'),
     fieldValorPago: document.getElementById('contas-pagar-modal-valor-pago'),
     fieldDtVencimento: document.getElementById('contas-pagar-modal-dt-vencimento'),
@@ -164,9 +165,67 @@ export function initContasPagarModule() {
     btnDelete: document.getElementById('contas-pagar-modal-delete'),
   };
 
-  [els.fieldValorPrevisto, els.fieldValorPago, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
+  [els.fieldValorPago, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
     input.addEventListener('input', () => maskValorInput(input));
   });
+
+  let valorRecalcLock = false;
+
+  function readModalQty() {
+    const q = readQtyInput(els.fieldQuantidadePrevista);
+    return q != null && q > 0 ? q : null;
+  }
+
+  function setMoneyField(el, value) {
+    if (!el) return;
+    valorRecalcLock = true;
+    try {
+      if (value == null || !Number.isFinite(value)) {
+        el.value = '';
+      } else {
+        el.value = formatValorInput(value);
+      }
+    } finally {
+      valorRecalcLock = false;
+    }
+  }
+
+  function onValorUnitarioInput() {
+    if (valorRecalcLock) return;
+    maskValorInput(els.fieldValorUnitario);
+    const unit = readMoneyInput(els.fieldValorUnitario);
+    const qty = readModalQty();
+    if (unit > 0 && qty) {
+      setMoneyField(els.fieldValorPrevisto, unit * qty);
+    }
+  }
+
+  function onValorPrevistoInput() {
+    if (valorRecalcLock) return;
+    maskValorInput(els.fieldValorPrevisto);
+    const total = readMoneyInput(els.fieldValorPrevisto);
+    const qty = readModalQty();
+    if (total > 0 && qty) {
+      setMoneyField(els.fieldValorUnitario, total / qty);
+    }
+  }
+
+  function onQuantidadeInput() {
+    if (valorRecalcLock) return;
+    const qty = readModalQty();
+    if (!qty) return;
+    const unit = readMoneyInput(els.fieldValorUnitario);
+    const total = readMoneyInput(els.fieldValorPrevisto);
+    if (unit > 0) {
+      setMoneyField(els.fieldValorPrevisto, unit * qty);
+    } else if (total > 0) {
+      setMoneyField(els.fieldValorUnitario, total / qty);
+    }
+  }
+
+  els.fieldValorUnitario?.addEventListener('input', onValorUnitarioInput);
+  els.fieldValorPrevisto?.addEventListener('input', onValorPrevistoInput);
+  els.fieldQuantidadePrevista?.addEventListener('input', onQuantidadeInput);
 
   let contas = [];
   let categorias = [];
@@ -584,13 +643,20 @@ export function initContasPagarModule() {
     if (els.fieldFornecedor) els.fieldFornecedor.value = conta?.fornecedor || '';
     if (els.fieldDescricao) els.fieldDescricao.value = conta?.descricao || '';
     if (els.fieldFase) els.fieldFase.value = conta?.fase === 'pos' ? 'pos' : 'pre';
+    const qtd =
+      conta?.quantidadePrevista != null ? Number(conta.quantidadePrevista) : 1;
     if (els.fieldQuantidadePrevista) {
-      els.fieldQuantidadePrevista.value =
-        conta?.quantidadePrevista != null ? String(conta.quantidadePrevista) : '1';
+      els.fieldQuantidadePrevista.value = String(qtd);
     }
     if (els.fieldValorPrevisto) {
       els.fieldValorPrevisto.value =
         conta?.valorPrevisto != null ? formatValorInput(conta.valorPrevisto) : '';
+    }
+    if (els.fieldValorUnitario) {
+      const prev = conta?.valorPrevisto;
+      const unit =
+        conta?.valorUnitario ?? (prev != null && qtd > 0 ? calcValorUnitario(prev, qtd) : null);
+      els.fieldValorUnitario.value = unit != null ? formatValorInput(unit) : '';
     }
     if (els.fieldValorPago) {
       els.fieldValorPago.value = conta?.valorPago != null ? formatValorInput(conta.valorPago) : '';
@@ -679,7 +745,7 @@ export function initContasPagarModule() {
       return;
     }
     if (!fields.valorPrevisto) {
-      showFormErrors('Informe o valor previsto.');
+      showFormErrors('Informe o valor previsto total.');
       els.fieldValorPrevisto?.focus();
       return;
     }
