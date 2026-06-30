@@ -20,6 +20,11 @@ import {
   toDateInputValue,
 } from '../lib/format.js';
 import { getActiveEvento } from '../lib/evento.js';
+import {
+  readContasPagarDraft,
+  writeContasPagarDraft,
+  clearContasPagarDraft,
+} from '../lib/contas-pagar-draft.js';
 import { inferFaseContaPagar } from '../../shared/financeiro-fase.js';
 
 const STATUS_LABEL = {
@@ -33,6 +38,8 @@ const FASE_LABEL = {
   pre: 'Pré-evento',
   pos: 'Pós-evento',
 };
+
+const DRAFT_SAVE_DEBOUNCE_MS = 400;
 
 function summarizeFromContas(contas) {
   const ativas = contas.filter((c) => c.status !== 'cancelado');
@@ -163,6 +170,8 @@ export function initContasPagarModule() {
     btnCancel: document.getElementById('contas-pagar-modal-cancel'),
     btnSave: document.getElementById('contas-pagar-modal-save'),
     btnDelete: document.getElementById('contas-pagar-modal-delete'),
+    draftHint: document.getElementById('contas-pagar-modal-draft-hint'),
+    draftDiscard: document.getElementById('contas-pagar-modal-draft-discard'),
   };
 
   [els.fieldValorPago, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
@@ -170,6 +179,9 @@ export function initContasPagarModule() {
   });
 
   let valorRecalcLock = false;
+  let draftSaveTimer = null;
+  let draftRestoring = false;
+  let lastEditedValor = null;
 
   function readModalQty() {
     const q = readQtyInput(els.fieldQuantidadePrevista);
@@ -192,6 +204,7 @@ export function initContasPagarModule() {
 
   function onValorUnitarioInput() {
     if (valorRecalcLock) return;
+    if (!draftRestoring && editId == null) lastEditedValor = 'unit';
     maskValorInput(els.fieldValorUnitario);
     const unit = readMoneyInput(els.fieldValorUnitario);
     const qty = readModalQty();
@@ -202,6 +215,7 @@ export function initContasPagarModule() {
 
   function onValorPrevistoInput() {
     if (valorRecalcLock) return;
+    if (!draftRestoring && editId == null) lastEditedValor = 'total';
     maskValorInput(els.fieldValorPrevisto);
     const total = readMoneyInput(els.fieldValorPrevisto);
     const qty = readModalQty();
@@ -212,6 +226,7 @@ export function initContasPagarModule() {
 
   function onQuantidadeInput() {
     if (valorRecalcLock) return;
+    if (!draftRestoring && editId == null) lastEditedValor = 'qty';
     const qty = readModalQty();
     if (!qty) return;
     const unit = readMoneyInput(els.fieldValorUnitario);
@@ -673,12 +688,23 @@ export function initContasPagarModule() {
     applyAutoFase();
 
     els.btnDelete?.classList.toggle('hidden', !editId);
+    hideDraftUi();
+    if (!editId) {
+      const draft = readContasPagarDraft();
+      if (draft) {
+        applyDraftSnapshot(draft);
+        showDraftRestoredUi();
+      }
+    }
     els.modalBg?.classList.add('open');
     els.fieldCategoria?.focus();
   }
 
   function closeModal() {
+    flushDraftSave();
+    cancelDraftSaveTimer();
     editId = null;
+    hideDraftUi();
     showFormErrors(null);
     els.modalBg?.classList.remove('open');
   }
@@ -698,6 +724,145 @@ export function initContasPagarModule() {
       status: els.fieldStatus?.value || 'pendente',
       obs: els.fieldObs?.value?.trim() || '',
     };
+  }
+
+  function collectDraftSnapshot() {
+    return {
+      categoriaNome: els.fieldCategoria?.value ?? '',
+      planoNome: els.fieldPlano?.value ?? '',
+      fornecedor: els.fieldFornecedor?.value ?? '',
+      descricao: els.fieldDescricao?.value ?? '',
+      fase: els.fieldFase?.value === 'pos' ? 'pos' : 'pre',
+      quantidadePrevista: els.fieldQuantidadePrevista?.value ?? '',
+      valorUnitario: els.fieldValorUnitario?.value ?? '',
+      valorPrevisto: els.fieldValorPrevisto?.value ?? '',
+      valorPago: els.fieldValorPago?.value ?? '',
+      dtVencimento: els.fieldDtVencimento?.value ?? '',
+      dtPagamento: els.fieldDtPagamento?.value ?? '',
+      status: els.fieldStatus?.value || 'pendente',
+      obs: els.fieldObs?.value ?? '',
+      faseManualOverride,
+      lastEditedValor,
+    };
+  }
+
+  function isDraftSnapshotEmpty(snapshot) {
+    const qtd = String(snapshot.quantidadePrevista ?? '').trim();
+    return (
+      !normalizeNome(snapshot.categoriaNome) &&
+      !normalizeNome(snapshot.planoNome) &&
+      !String(snapshot.fornecedor ?? '').trim() &&
+      !String(snapshot.descricao ?? '').trim() &&
+      !String(snapshot.valorUnitario ?? '').trim() &&
+      !String(snapshot.valorPrevisto ?? '').trim() &&
+      !String(snapshot.valorPago ?? '').trim() &&
+      !String(snapshot.dtVencimento ?? '').trim() &&
+      !String(snapshot.dtPagamento ?? '').trim() &&
+      !String(snapshot.obs ?? '').trim() &&
+      (!qtd || qtd === '1') &&
+      (snapshot.status || 'pendente') === 'pendente' &&
+      (snapshot.fase || 'pre') === 'pre'
+    );
+  }
+
+  function applyDraftSnapshot(draft) {
+    draftRestoring = true;
+    try {
+      if (els.fieldCategoria) els.fieldCategoria.value = draft.categoriaNome ?? '';
+      if (els.fieldPlano) els.fieldPlano.value = draft.planoNome ?? '';
+      refreshPlanoDatalist(draft.categoriaNome ?? '');
+      if (els.fieldFornecedor) els.fieldFornecedor.value = draft.fornecedor ?? '';
+      if (els.fieldDescricao) els.fieldDescricao.value = draft.descricao ?? '';
+      if (els.fieldFase) els.fieldFase.value = draft.fase === 'pos' ? 'pos' : 'pre';
+      if (els.fieldQuantidadePrevista) {
+        els.fieldQuantidadePrevista.value =
+          draft.quantidadePrevista != null && String(draft.quantidadePrevista).trim()
+            ? String(draft.quantidadePrevista)
+            : '1';
+      }
+      if (els.fieldValorUnitario) els.fieldValorUnitario.value = draft.valorUnitario ?? '';
+      if (els.fieldValorPrevisto) els.fieldValorPrevisto.value = draft.valorPrevisto ?? '';
+      if (els.fieldValorPago) els.fieldValorPago.value = draft.valorPago ?? '';
+      if (els.fieldDtVencimento) els.fieldDtVencimento.value = draft.dtVencimento ?? '';
+      if (els.fieldDtPagamento) els.fieldDtPagamento.value = draft.dtPagamento ?? '';
+      if (els.fieldStatus) els.fieldStatus.value = draft.status || 'pendente';
+      if (els.fieldObs) els.fieldObs.value = draft.obs ?? '';
+      faseManualOverride = Boolean(draft.faseManualOverride);
+      lastEditedValor = draft.lastEditedValor ?? null;
+      if (!faseManualOverride) applyAutoFase();
+    } finally {
+      draftRestoring = false;
+    }
+  }
+
+  function resetNewFormDefaults() {
+    draftRestoring = true;
+    try {
+      if (els.fieldCategoria) els.fieldCategoria.value = '';
+      if (els.fieldPlano) els.fieldPlano.value = '';
+      refreshPlanoDatalist('');
+      if (els.fieldFornecedor) els.fieldFornecedor.value = '';
+      if (els.fieldDescricao) els.fieldDescricao.value = '';
+      if (els.fieldFase) els.fieldFase.value = 'pre';
+      if (els.fieldQuantidadePrevista) els.fieldQuantidadePrevista.value = '1';
+      if (els.fieldValorUnitario) els.fieldValorUnitario.value = '';
+      if (els.fieldValorPrevisto) els.fieldValorPrevisto.value = '';
+      if (els.fieldValorPago) els.fieldValorPago.value = '';
+      if (els.fieldDtVencimento) els.fieldDtVencimento.value = '';
+      if (els.fieldDtPagamento) els.fieldDtPagamento.value = '';
+      if (els.fieldStatus) els.fieldStatus.value = 'pendente';
+      if (els.fieldObs) els.fieldObs.value = '';
+      faseManualOverride = false;
+      lastEditedValor = null;
+      applyAutoFase();
+    } finally {
+      draftRestoring = false;
+    }
+  }
+
+  function hideDraftUi() {
+    els.draftHint?.classList.add('hidden');
+    els.draftDiscard?.classList.add('hidden');
+  }
+
+  function showDraftRestoredUi() {
+    if (els.draftHint) {
+      els.draftHint.textContent = 'Continuando preenchimento anterior';
+      els.draftHint.classList.remove('hidden');
+    }
+    els.draftDiscard?.classList.remove('hidden');
+  }
+
+  function cancelDraftSaveTimer() {
+    if (draftSaveTimer != null) {
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+  }
+
+  function flushDraftSave() {
+    if (editId != null || draftRestoring || !els.modalBg?.classList.contains('open')) return;
+    const snapshot = collectDraftSnapshot();
+    if (isDraftSnapshotEmpty(snapshot)) {
+      clearContasPagarDraft();
+      return;
+    }
+    writeContasPagarDraft(snapshot);
+  }
+
+  function scheduleDraftSave() {
+    if (editId != null || draftRestoring || !els.modalBg?.classList.contains('open')) return;
+    cancelDraftSaveTimer();
+    draftSaveTimer = setTimeout(() => {
+      draftSaveTimer = null;
+      flushDraftSave();
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+  }
+
+  function discardDraft() {
+    clearContasPagarDraft();
+    hideDraftUi();
+    if (editId == null) resetNewFormDefaults();
   }
 
   async function loadContasPagar() {
@@ -787,6 +952,8 @@ export function initContasPagarModule() {
       } else {
         const { conta } = await createContaPagar(data);
         if (conta) contas.push(conta);
+        cancelDraftSaveTimer();
+        clearContasPagarDraft();
       }
       closeModal();
       renderTable();
@@ -1027,16 +1194,40 @@ export function initContasPagarModule() {
   els.fieldDtVencimento?.addEventListener('change', () => {
     faseManualOverride = false;
     applyAutoFase();
+    scheduleDraftSave();
   });
   els.fieldDtPagamento?.addEventListener('change', () => {
     if (!els.fieldDtVencimento?.value?.trim()) {
       faseManualOverride = false;
       applyAutoFase();
     }
+    scheduleDraftSave();
   });
   els.fieldFase?.addEventListener('change', () => {
     faseManualOverride = true;
+    scheduleDraftSave();
   });
+
+  const draftFieldEls = [
+    els.fieldCategoria,
+    els.fieldPlano,
+    els.fieldFornecedor,
+    els.fieldDescricao,
+    els.fieldQuantidadePrevista,
+    els.fieldValorUnitario,
+    els.fieldValorPrevisto,
+    els.fieldValorPago,
+    els.fieldDtVencimento,
+    els.fieldDtPagamento,
+    els.fieldStatus,
+    els.fieldObs,
+  ];
+  draftFieldEls.filter(Boolean).forEach((el) => {
+    el.addEventListener('input', scheduleDraftSave);
+    el.addEventListener('change', scheduleDraftSave);
+  });
+
+  els.draftDiscard?.addEventListener('click', discardDraft);
 
   els.btnNew?.addEventListener('click', () => void openModal());
   els.chkAll?.addEventListener('change', (e) => toggleSelectAll(e.target.checked));

@@ -3599,6 +3599,28 @@ body.lead-workspace-open .lead-workspace {
   margin: 1rem 2.25rem 0;
 }
 
+.modal--contas-pagar .modal-draft-hint {
+  margin: 0.5rem 2.25rem 0;
+  font-size: 12px;
+  color: var(--accent, #3b82f6);
+}
+
+.modal--contas-pagar .modal-draft-discard {
+  display: block;
+  margin: 0.25rem 2.25rem 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  color: var(--content-text-muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.modal--contas-pagar .modal-draft-discard:hover {
+  color: var(--content-text);
+}
+
 .modal-contas-pagar-block {
   padding: 1.25rem 2.25rem 0;
 }
@@ -8617,6 +8639,12 @@ body.wa-inbox-open {
   .modal--contas-pagar .form-errors {
     padding-left: 1.25rem;
     padding-right: 1.25rem;
+  }
+
+  .modal--contas-pagar .modal-draft-hint,
+  .modal--contas-pagar .modal-draft-discard {
+    margin-left: 1.25rem;
+    margin-right: 1.25rem;
   }
 
   .modal-contas-pagar-head {
