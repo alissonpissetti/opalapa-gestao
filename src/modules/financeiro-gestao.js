@@ -141,7 +141,7 @@ function renderSumarioArrecadacao(sumario) {
             </tfoot>
           </table>
         </div>
-        <div class="financeiro-pie-wrap" data-sumario-pie>${pieArrecadacao}</div>
+        <div class="financeiro-pie-wrap" aria-label="Gráfico de participação na arrecadação">${pieArrecadacao}</div>
         </div>
       </section>`;
 }
@@ -1117,7 +1117,7 @@ export function initFinanceiroGestaoModule() {
             </tfoot>
           </table>
         </div>
-        ${pieCustos}
+        <div class="financeiro-pie-wrap" aria-label="Gráfico de participação no custo">${pieCustos}</div>
         </div>
       </section>`;
             })()
