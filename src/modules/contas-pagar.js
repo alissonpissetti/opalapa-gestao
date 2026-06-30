@@ -133,7 +133,9 @@ export function initContasPagarModule() {
   let planoContas = [];
   let totais = summarizeFromContas([]);
   let editId = null;
+  let inlineEditId = null;
   let loading = false;
+  let duplicating = false;
 
   function showFormErrors(messages) {
     if (!els.formErrors) return;
@@ -232,6 +234,85 @@ export function initContasPagarModule() {
     return `<span class="fin-fase fin-fase--${escapeHtml(key)}">${escapeHtml(label)}</span>`;
   }
 
+  function contaToPayload(conta, overrides = {}) {
+    return {
+      categoriaId: conta.categoriaId,
+      planoContaId: conta.planoContaId,
+      fornecedor: overrides.fornecedor ?? conta.fornecedor ?? '',
+      descricao: conta.descricao,
+      fase: overrides.fase ?? (conta.fase === 'pos' ? 'pos' : 'pre'),
+      valorPrevisto: overrides.valorPrevisto ?? conta.valorPrevisto,
+      valorPago: overrides.valorPago ?? conta.valorPago ?? 0,
+      dtVencimento: conta.dtVencimento || '',
+      dtPagamento: overrides.dtPagamento ?? conta.dtPagamento ?? '',
+      status: overrides.status ?? conta.status ?? 'pendente',
+      obs: conta.obs || '',
+    };
+  }
+
+  function renderInlineRow(c) {
+    const prev = Number(c.valorPrevisto) || 0;
+    const pago = Number(c.valorPago) || 0;
+    const falta = Math.max(0, prev - pago);
+    const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
+    return `
+      <tr class="fin-custo-row fin-custo-row--editing" data-id="${c.id}">
+        <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
+        <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
+        <td><input type="text" class="fin-inline-input" data-field="fornecedor" value="${escapeHtml(c.fornecedor || '')}" placeholder="Fornecedor" autocomplete="off" /></td>
+        <td>${escapeHtml(c.descricao || '—')}</td>
+        <td>${faseBadge(c.fase)}</td>
+        <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money" data-field="valorPrevisto" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(prev))}" /></td>
+        <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money fin-val--pos" data-field="valorPago" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(pago))}" /></td>
+        <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
+        <td>${statusBadge(c.status)}</td>
+        <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
+        <td class="fin-col-actions">
+          <div class="fin-inline-actions">
+            <button type="button" class="tbtn primary" data-action="inline-save">Salvar</button>
+            <button type="button" class="tbtn" data-action="inline-cancel">Cancelar</button>
+          </div>
+        </td>
+      </tr>`;
+  }
+
+  function renderNormalRow(c) {
+    const prev = Number(c.valorPrevisto) || 0;
+    const pago = Number(c.valorPago) || 0;
+    const falta = Math.max(0, prev - pago);
+    const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
+    return `
+      <tr class="fin-custo-row" data-id="${c.id}" tabindex="0" role="button" title="Clique para editar">
+        <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
+        <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
+        <td>${escapeHtml(c.fornecedor || '—')}</td>
+        <td>${escapeHtml(c.descricao || '—')}</td>
+        <td>${faseBadge(c.fase)}</td>
+        <td class="fin-col-money">${cellMoney(prev)}</td>
+        <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
+        <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
+        <td>${statusBadge(c.status)}</td>
+        <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
+        <td class="fin-col-actions">
+          <button type="button" class="tbtn" data-action="duplicate" title="Duplicar conta">Duplicar</button>
+        </td>
+      </tr>`;
+  }
+
+  function bindInlineMoneyMasks() {
+    els.table?.querySelectorAll('.fin-inline-money').forEach((input) => {
+      input.addEventListener('input', () => maskValorInput(input));
+    });
+  }
+
+  function focusInlineEdit(id) {
+    requestAnimationFrame(() => {
+      const input = els.table?.querySelector(`tr[data-id="${id}"] [data-field="fornecedor"]`);
+      input?.focus();
+      input?.select();
+    });
+  }
+
   function renderKpis() {
     if (!els.kpis) return;
     const t = totais;
@@ -282,39 +363,26 @@ export function initContasPagarModule() {
       els.table.innerHTML = '';
       if (els.tableFoot) els.tableFoot.innerHTML = '';
       if (els.summary) els.summary.textContent = '';
+      totais = summarizeFromContas([]);
       renderKpis();
       return;
     }
 
     let totalPrev = 0;
     let totalPago = 0;
+    contas.forEach((c) => {
+      if (c.status !== 'cancelado') {
+        totalPrev += Number(c.valorPrevisto) || 0;
+        totalPago += Number(c.valorPago) || 0;
+      }
+    });
 
     els.table.innerHTML = contas
-      .map((c) => {
-        const prev = Number(c.valorPrevisto) || 0;
-        const pago = Number(c.valorPago) || 0;
-        const falta = Math.max(0, prev - pago);
-        if (c.status !== 'cancelado') {
-          totalPrev += prev;
-          totalPago += pago;
-        }
-        const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
-        return `
-      <tr class="fin-custo-row" data-id="${c.id}" tabindex="0" role="button" title="Clique para editar">
-        <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
-        <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
-        <td>${escapeHtml(c.fornecedor || '—')}</td>
-        <td>${escapeHtml(c.descricao || '—')}</td>
-        <td>${faseBadge(c.fase)}</td>
-        <td class="fin-col-money">${cellMoney(prev)}</td>
-        <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
-        <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
-        <td>${statusBadge(c.status)}</td>
-        <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
-        <td class="fin-col-actions"></td>
-      </tr>`;
-      })
+      .map((c) => (c.id === inlineEditId ? renderInlineRow(c) : renderNormalRow(c)))
       .join('');
+
+    bindInlineMoneyMasks();
+    if (inlineEditId) focusInlineEdit(inlineEditId);
 
     if (els.tableFoot) {
       els.tableFoot.innerHTML = `
@@ -323,14 +391,17 @@ export function initContasPagarModule() {
           <td class="fin-col-money">${cellMoney(totalPrev)}</td>
           <td class="fin-col-money fin-val--pos">${cellMoney(totalPago)}</td>
           <td class="fin-col-money fin-val--warn">${cellMoney(Math.max(0, totalPrev - totalPago))}</td>
-          <td colspan="3"></td>
+          <td colspan="4"></td>
         </tr>`;
     }
 
     const n = ativas.length;
     if (els.summary) {
-      els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} ativa${n === 1 ? '' : 's'} — clique na linha para editar`;
+      const editHint = inlineEditId ? ' — ajuste fornecedor e valores na linha destacada' : '';
+      els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} ativa${n === 1 ? '' : 's'} — clique na linha para editar ou use Duplicar${editHint}`;
     }
+
+    totais = summarizeFromContas(contas);
     renderKpis();
   }
 
@@ -421,6 +492,7 @@ export function initContasPagarModule() {
       contas = contasRes?.contas || [];
       totais = contasRes?.totais || summarizeFromContas(contas);
       planoContas = planoRes?.planoContas || [];
+      inlineEditId = null;
       renderTable();
     } catch (err) {
       if (els.summary) els.summary.textContent = err.message || 'Falha ao carregar.';
@@ -488,7 +560,6 @@ export function initContasPagarModule() {
         const { conta } = await createContaPagar(data);
         if (conta) contas.push(conta);
       }
-      totais = summarizeFromContas(contas);
       closeModal();
       renderTable();
     } catch (err) {
@@ -496,6 +567,69 @@ export function initContasPagarModule() {
     } finally {
       els.btnSave.disabled = false;
     }
+  }
+
+  async function duplicateConta(source) {
+    if (duplicating) return;
+    duplicating = true;
+    try {
+      const data = contaToPayload(source, {
+        valorPago: 0,
+        dtPagamento: '',
+        status: 'pendente',
+      });
+      const { conta } = await createContaPagar(data);
+      if (conta) {
+        contas.push(conta);
+        inlineEditId = conta.id;
+        renderTable();
+      }
+    } catch (err) {
+      if (els.summary) els.summary.textContent = err.message || 'Não foi possível duplicar.';
+    } finally {
+      duplicating = false;
+    }
+  }
+
+  function readInlineFields(tr) {
+    return {
+      fornecedor: tr.querySelector('[data-field="fornecedor"]')?.value.trim() || '',
+      valorPrevisto: readMoneyInput(tr.querySelector('[data-field="valorPrevisto"]')),
+      valorPago: readMoneyInput(tr.querySelector('[data-field="valorPago"]')),
+    };
+  }
+
+  async function saveInlineEdit(id) {
+    const tr = els.table?.querySelector(`tr[data-id="${id}"]`);
+    const conta = contas.find((c) => c.id === id);
+    if (!tr || !conta) return;
+
+    const fields = readInlineFields(tr);
+    if (!fields.valorPrevisto) {
+      if (els.summary) els.summary.textContent = 'Informe o valor previsto na linha em edição.';
+      tr.querySelector('[data-field="valorPrevisto"]')?.focus();
+      return;
+    }
+
+    try {
+      const data = contaToPayload(conta, {
+        fornecedor: fields.fornecedor,
+        valorPrevisto: fields.valorPrevisto,
+        valorPago: fields.valorPago,
+      });
+      const { conta: updated } = await updateContaPagar(id, data);
+      const idx = contas.findIndex((c) => c.id === id);
+      if (idx >= 0 && updated) contas[idx] = updated;
+      inlineEditId = null;
+      renderTable();
+    } catch (err) {
+      if (els.summary) els.summary.textContent = err.message || 'Não foi possível salvar.';
+    }
+  }
+
+  function cancelInlineEdit() {
+    inlineEditId = null;
+    renderTable();
   }
 
   async function removeConta() {
@@ -507,7 +641,6 @@ export function initContasPagarModule() {
     try {
       await deleteContaPagar(editId);
       contas = contas.filter((c) => c.id !== editId);
-      totais = summarizeFromContas(contas);
       closeModal();
       renderTable();
     } catch (err) {
@@ -529,19 +662,59 @@ export function initContasPagarModule() {
   });
 
   els.table?.addEventListener('click', (e) => {
+    const actionBtn = e.target.closest('[data-action]');
+    if (actionBtn) {
+      e.stopPropagation();
+      const tr = actionBtn.closest('tr[data-id]');
+      if (!tr) return;
+      const id = Number(tr.dataset.id);
+      const action = actionBtn.dataset.action;
+      if (action === 'duplicate') {
+        const conta = contas.find((c) => c.id === id);
+        if (conta) void duplicateConta(conta);
+        return;
+      }
+      if (action === 'inline-save') {
+        void saveInlineEdit(id);
+        return;
+      }
+      if (action === 'inline-cancel') {
+        cancelInlineEdit();
+      }
+      return;
+    }
+
+    if (e.target.closest('.fin-inline-input')) return;
+
     const tr = e.target.closest('tr[data-id]');
-    if (!tr) return;
+    if (!tr || tr.classList.contains('fin-custo-row--editing')) return;
     const conta = contas.find((c) => c.id === Number(tr.dataset.id));
     if (conta) void openModal(conta);
   });
 
   els.table?.addEventListener('keydown', (e) => {
+    if (e.target.matches('.fin-inline-input') && e.key === 'Enter') {
+      e.preventDefault();
+      const tr = e.target.closest('tr[data-id]');
+      if (tr) void saveInlineEdit(Number(tr.dataset.id));
+      return;
+    }
+
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const tr = e.target.closest('tr[data-id]');
-    if (!tr) return;
+    if (!tr || tr.classList.contains('fin-custo-row--editing')) return;
     e.preventDefault();
     const conta = contas.find((c) => c.id === Number(tr.dataset.id));
     if (conta) void openModal(conta);
+  });
+
+  els.table?.addEventListener('focusout', (e) => {
+    const tr = e.target.closest('tr.fin-custo-row--editing');
+    if (!tr || !e.target.matches('.fin-inline-input')) return;
+    requestAnimationFrame(() => {
+      if (tr.contains(document.activeElement)) return;
+      void saveInlineEdit(Number(tr.dataset.id));
+    });
   });
 
   contasPagarInstance = { loadContasPagar };

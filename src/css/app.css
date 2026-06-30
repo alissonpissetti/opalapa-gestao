@@ -8305,6 +8305,41 @@ body.wa-inbox-open {
   color: #4b5563;
 }
 
+.table-contas-pagar .fin-col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.table-contas-pagar tr.fin-custo-row--editing {
+  background: #eff6ff;
+  cursor: default;
+}
+
+.table-contas-pagar tr.fin-custo-row--editing:hover {
+  background: #eff6ff;
+}
+
+.table-contas-pagar .fin-inline-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  font: inherit;
+  background: #fff;
+}
+
+.table-contas-pagar .fin-inline-input.fin-inline-money {
+  max-width: 6.5rem;
+  text-align: right;
+}
+
+.table-contas-pagar .fin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .table-contas-pagar .fin-col-date {
   white-space: nowrap;
 }
