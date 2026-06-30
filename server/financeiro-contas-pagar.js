@@ -33,6 +33,22 @@ function parseMoney(raw, label) {
   return negative ? -n : n;
 }
 
+function parseQuantidade(raw, label = 'Quantidade prevista') {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw)) {
+      throw Object.assign(new Error(`${label} inválida`), { status: 400 });
+    }
+    return raw;
+  }
+  const s = String(raw).trim().replace(/\s/g, '').replace(',', '.');
+  const n = Number(s);
+  if (!Number.isFinite(n)) {
+    throw Object.assign(new Error(`${label} inválida`), { status: 400 });
+  }
+  return n;
+}
+
 function parseDateOnlyParts(raw) {
   const s = String(raw ?? '').trim();
   if (!s) return null;
@@ -112,6 +128,8 @@ function normalizeFase(raw) {
 function rowToConta(row) {
   const valorPrevisto = Number(row.valor_previsto);
   const valorPago = Number(row.valor_pago);
+  const rawQtd = Number(row.quantidade_prevista);
+  const quantidadePrevista = Number.isFinite(rawQtd) && rawQtd > 0 ? rawQtd : 1;
   const fase = FASE.includes(row.fase) ? row.fase : 'pre';
   return {
     id: Number(row.id),
@@ -124,8 +142,10 @@ function rowToConta(row) {
     fornecedor: row.fornecedor || '',
     descricao: row.descricao || '',
     fase,
+    quantidadePrevista,
     valorPrevisto,
     valorPago,
+    valorUnitario: quantidadePrevista > 0 ? valorPrevisto / quantidadePrevista : null,
     valorFalta: Math.max(0, valorPrevisto - valorPago),
     dtVencimento: formatDateOnlyIso(row.dt_vencimento),
     dtPagamento: formatDateOnlyIso(row.dt_pagamento),
@@ -138,7 +158,7 @@ function rowToConta(row) {
 
 const CONTA_SELECT = `
   SELECT cp.id, cp.evento_id, cp.categoria_id, cp.plano_conta_id, cp.fornecedor, cp.descricao, cp.fase,
-         cp.valor_previsto, cp.valor_pago, cp.dt_vencimento, cp.dt_pagamento, cp.status, cp.obs,
+         cp.quantidade_prevista, cp.valor_previsto, cp.valor_pago, cp.dt_vencimento, cp.dt_pagamento, cp.status, cp.obs,
          cp.created_at, cp.updated_at,
          cat.nome AS categoria_nome,
          pc.codigo AS plano_codigo, pc.nome AS plano_nome
@@ -186,6 +206,7 @@ export async function migrateFinanceiroContasPagar(pool) {
       fornecedor VARCHAR(160) NULL,
       descricao VARCHAR(255) NOT NULL,
       fase ENUM('pre', 'pos') NOT NULL DEFAULT 'pre',
+      quantidade_prevista DECIMAL(12,3) NOT NULL DEFAULT 1,
       valor_previsto DECIMAL(14,2) NOT NULL DEFAULT 0,
       valor_pago DECIMAL(14,2) NOT NULL DEFAULT 0,
       dt_vencimento VARCHAR(20) NULL,
@@ -221,6 +242,17 @@ export async function migrateFinanceiroContasPagar(pool) {
     await pool.query(
       `ALTER TABLE financeiro_contas_pagar
        ADD COLUMN fase ENUM('pre', 'pos') NOT NULL DEFAULT 'pre' AFTER descricao`,
+    );
+  }
+
+  const [qtdCols] = await pool.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'financeiro_contas_pagar' AND COLUMN_NAME = 'quantidade_prevista'`,
+  );
+  if (!qtdCols.length) {
+    await pool.query(
+      `ALTER TABLE financeiro_contas_pagar
+       ADD COLUMN quantidade_prevista DECIMAL(12,3) NOT NULL DEFAULT 1 AFTER fase`,
     );
   }
 }
@@ -480,6 +512,11 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
   const planoContaId = Number(raw.planoContaId ?? raw.plano_conta_id);
   const descricao = String(raw.descricao ?? '').trim();
   const fornecedor = String(raw.fornecedor ?? '').trim() || null;
+  let quantidadePrevista = parseQuantidade(raw.quantidadePrevista ?? raw.quantidade_prevista);
+  if (quantidadePrevista == null) quantidadePrevista = 1;
+  if (quantidadePrevista <= 0) {
+    throw Object.assign(new Error('Quantidade prevista deve ser maior que zero'), { status: 400 });
+  }
   const valorPrevisto = parseMoney(raw.valorPrevisto ?? raw.valor_previsto, 'Valor previsto');
   const valorPago = parseMoney(raw.valorPago ?? raw.valor_pago ?? 0, 'Valor pago');
   const dtVencimento = normalizeDateOnly(raw.dtVencimento ?? raw.dt_vencimento, {
@@ -506,6 +543,7 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
     fornecedor,
     descricao,
     fase,
+    quantidadePrevista,
     valorPrevisto,
     valorPago,
     dtVencimento,
@@ -576,8 +614,8 @@ export async function createContaPagar(pool, eventoId, raw) {
   const [result] = await pool.query(
     `INSERT INTO financeiro_contas_pagar (
        evento_id, categoria_id, plano_conta_id, fornecedor, descricao, fase,
-       valor_previsto, valor_pago, dt_vencimento, dt_pagamento, status, obs, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+       quantidade_prevista, valor_previsto, valor_pago, dt_vencimento, dt_pagamento, status, obs, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [
       eventoId,
       data.categoriaId,
@@ -585,6 +623,7 @@ export async function createContaPagar(pool, eventoId, raw) {
       data.fornecedor,
       data.descricao,
       data.fase,
+      data.quantidadePrevista,
       data.valorPrevisto,
       data.valorPago,
       data.dtVencimento,
@@ -604,7 +643,7 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
   const [result] = await pool.query(
     `UPDATE financeiro_contas_pagar SET
        categoria_id = ?, plano_conta_id = ?, fornecedor = ?, descricao = ?, fase = ?,
-       valor_previsto = ?, valor_pago = ?, dt_vencimento = ?, dt_pagamento = ?,
+       quantidade_prevista = ?, valor_previsto = ?, valor_pago = ?, dt_vencimento = ?, dt_pagamento = ?,
        status = ?, obs = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ? AND evento_id = ?`,
     [
@@ -613,6 +652,7 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
       data.fornecedor,
       data.descricao,
       data.fase,
+      data.quantidadePrevista,
       data.valorPrevisto,
       data.valorPago,
       data.dtVencimento,

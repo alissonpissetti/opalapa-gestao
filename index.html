@@ -731,7 +731,9 @@
               <th>Fornecedor</th>
               <th>Descrição</th>
               <th>Fase</th>
+              <th class="fin-col-qty">Qtd</th>
               <th class="fin-col-money">Previsto</th>
+              <th class="fin-col-money">Valor unit.</th>
               <th class="fin-col-money">Pago</th>
               <th class="fin-col-money">Falta</th>
               <th>Status</th>
@@ -1571,6 +1573,11 @@
         <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-valores">
           <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-valores">Valores</h3>
           <div class="field-row">
+            <div class="field">
+              <label for="contas-pagar-modal-quantidade-prevista">Quantidade prevista <span class="req">*</span></label>
+              <input id="contas-pagar-modal-quantidade-prevista" type="number" step="0.001" min="0.001" inputmode="decimal" autocomplete="off" placeholder="1" required />
+              <p class="field-hint">Usado para calcular valor unitário e planejar quantidades do evento.</p>
+            </div>
             <div class="field">
               <label for="contas-pagar-modal-valor-previsto">Valor previsto (R$) <span class="req">*</span></label>
               <input id="contas-pagar-modal-valor-previsto" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" required />

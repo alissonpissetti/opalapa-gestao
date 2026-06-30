@@ -72,6 +72,27 @@ function cellMoney(val) {
   return fmtMoney(val);
 }
 
+function cellQty(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+}
+
+function calcValorUnitario(previsto, qtd) {
+  const p = Number(previsto) || 0;
+  const q = Number(qtd) || 0;
+  if (q <= 0) return null;
+  return p / q;
+}
+
+function readQtyInput(el) {
+  if (!el) return null;
+  const raw = el.value.trim();
+  if (!raw) return null;
+  const n = Number(raw.replace(',', '.'));
+  return Number.isFinite(n) ? n : NaN;
+}
+
 function readMoneyInput(el) {
   if (!el) return 0;
   const raw = el.value.trim();
@@ -122,6 +143,7 @@ export function initContasPagarModule() {
     datalistPlano: document.getElementById('contas-pagar-plano-list'),
     fieldFornecedor: document.getElementById('contas-pagar-modal-fornecedor'),
     fieldDescricao: document.getElementById('contas-pagar-modal-descricao'),
+    fieldQuantidadePrevista: document.getElementById('contas-pagar-modal-quantidade-prevista'),
     fieldValorPrevisto: document.getElementById('contas-pagar-modal-valor-previsto'),
     fieldValorPago: document.getElementById('contas-pagar-modal-valor-pago'),
     fieldDtVencimento: document.getElementById('contas-pagar-modal-dt-vencimento'),
@@ -338,6 +360,7 @@ export function initContasPagarModule() {
       fornecedor: overrides.fornecedor ?? conta.fornecedor ?? '',
       descricao: conta.descricao,
       fase: overrides.fase ?? inferred ?? (conta.fase === 'pos' ? 'pos' : 'pre'),
+      quantidadePrevista: overrides.quantidadePrevista ?? conta.quantidadePrevista ?? 1,
       valorPrevisto: overrides.valorPrevisto ?? conta.valorPrevisto,
       valorPago: overrides.valorPago ?? conta.valorPago ?? 0,
       dtVencimento,
@@ -351,7 +374,9 @@ export function initContasPagarModule() {
   function renderInlineRow(c) {
     const prev = Number(c.valorPrevisto) || 0;
     const pago = Number(c.valorPago) || 0;
+    const qtd = Number(c.quantidadePrevista) || 1;
     const falta = Math.max(0, prev - pago);
+    const unit = calcValorUnitario(prev, qtd);
     const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
     return `
       <tr class="fin-custo-row fin-custo-row--editing" data-id="${c.id}">
@@ -361,7 +386,9 @@ export function initContasPagarModule() {
         <td><input type="text" class="fin-inline-input" data-field="fornecedor" value="${escapeHtml(c.fornecedor || '')}" placeholder="Fornecedor" autocomplete="off" /></td>
         <td>${escapeHtml(c.descricao || '—')}</td>
         <td>${faseBadge(c.fase)}</td>
+        <td class="fin-col-qty"><input type="number" class="fin-inline-input fin-inline-qty" data-field="quantidadePrevista" step="0.001" min="0.001" inputmode="decimal" value="${escapeHtml(String(qtd))}" /></td>
         <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money" data-field="valorPrevisto" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(prev))}" /></td>
+        <td class="fin-col-money">${unit != null ? cellMoney(unit) : '—'}</td>
         <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money fin-val--pos" data-field="valorPago" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(pago))}" /></td>
         <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
         <td>${statusBadge(c.status)}</td>
@@ -378,7 +405,9 @@ export function initContasPagarModule() {
   function renderNormalRow(c) {
     const prev = Number(c.valorPrevisto) || 0;
     const pago = Number(c.valorPago) || 0;
+    const qtd = Number(c.quantidadePrevista) || 1;
     const falta = Math.max(0, prev - pago);
+    const unit = c.valorUnitario ?? calcValorUnitario(prev, qtd);
     const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
     return `
       <tr class="fin-custo-row${selectedIds.has(c.id) ? ' selected-row' : ''}" data-id="${c.id}" tabindex="0" role="button" title="Clique para editar">
@@ -388,7 +417,9 @@ export function initContasPagarModule() {
         <td>${escapeHtml(c.fornecedor || '—')}</td>
         <td>${escapeHtml(c.descricao || '—')}</td>
         <td>${faseBadge(c.fase)}</td>
+        <td class="fin-col-qty">${cellQty(qtd)}</td>
         <td class="fin-col-money">${cellMoney(prev)}</td>
+        <td class="fin-col-money">${unit != null ? cellMoney(unit) : '—'}</td>
         <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
         <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
         <td>${statusBadge(c.status)}</td>
@@ -490,11 +521,12 @@ export function initContasPagarModule() {
     if (els.tableFoot) {
       els.tableFoot.innerHTML = `
         <tr class="fin-custo-total">
-          <td colspan="6">Total (exc. canceladas)</td>
+          <td colspan="7">Total (exc. canceladas)</td>
           <td class="fin-col-money">${cellMoney(totalPrev)}</td>
+          <td></td>
           <td class="fin-col-money fin-val--pos">${cellMoney(totalPago)}</td>
           <td class="fin-col-money fin-val--warn">${cellMoney(Math.max(0, totalPrev - totalPago))}</td>
-          <td colspan="4"></td>
+          <td colspan="3"></td>
         </tr>`;
     }
 
@@ -542,6 +574,10 @@ export function initContasPagarModule() {
     if (els.fieldFornecedor) els.fieldFornecedor.value = conta?.fornecedor || '';
     if (els.fieldDescricao) els.fieldDescricao.value = conta?.descricao || '';
     if (els.fieldFase) els.fieldFase.value = conta?.fase === 'pos' ? 'pos' : 'pre';
+    if (els.fieldQuantidadePrevista) {
+      els.fieldQuantidadePrevista.value =
+        conta?.quantidadePrevista != null ? String(conta.quantidadePrevista) : '1';
+    }
     if (els.fieldValorPrevisto) {
       els.fieldValorPrevisto.value =
         conta?.valorPrevisto != null ? formatValorInput(conta.valorPrevisto) : '';
@@ -578,6 +614,7 @@ export function initContasPagarModule() {
       fornecedor: els.fieldFornecedor?.value?.trim() || '',
       descricao: els.fieldDescricao?.value?.trim() || '',
       fase: els.fieldFase?.value === 'pos' ? 'pos' : 'pre',
+      quantidadePrevista: readQtyInput(els.fieldQuantidadePrevista),
       valorPrevisto: readMoneyInput(els.fieldValorPrevisto),
       valorPago: readMoneyInput(els.fieldValorPago),
       dtVencimento: els.fieldDtVencimento?.value?.trim() || '',
@@ -626,6 +663,11 @@ export function initContasPagarModule() {
       els.fieldDescricao?.focus();
       return;
     }
+    if (!fields.quantidadePrevista || fields.quantidadePrevista <= 0) {
+      showFormErrors('Informe a quantidade prevista (maior que zero).');
+      els.fieldQuantidadePrevista?.focus();
+      return;
+    }
     if (!fields.valorPrevisto) {
       showFormErrors('Informe o valor previsto.');
       els.fieldValorPrevisto?.focus();
@@ -652,6 +694,7 @@ export function initContasPagarModule() {
         fornecedor: fields.fornecedor,
         descricao: fields.descricao,
         fase: fields.fase,
+        quantidadePrevista: fields.quantidadePrevista,
         valorPrevisto: fields.valorPrevisto,
         valorPago: fields.valorPago,
         dtVencimento: fields.dtVencimento,
@@ -703,6 +746,7 @@ export function initContasPagarModule() {
   function readInlineFields(tr) {
     return {
       fornecedor: tr.querySelector('[data-field="fornecedor"]')?.value.trim() || '',
+      quantidadePrevista: readQtyInput(tr.querySelector('[data-field="quantidadePrevista"]')),
       valorPrevisto: readMoneyInput(tr.querySelector('[data-field="valorPrevisto"]')),
       valorPago: readMoneyInput(tr.querySelector('[data-field="valorPago"]')),
     };
@@ -714,6 +758,11 @@ export function initContasPagarModule() {
     if (!tr || !conta) return;
 
     const fields = readInlineFields(tr);
+    if (!fields.quantidadePrevista || fields.quantidadePrevista <= 0) {
+      if (els.summary) els.summary.textContent = 'Informe a quantidade prevista na linha em edição.';
+      tr.querySelector('[data-field="quantidadePrevista"]')?.focus();
+      return;
+    }
     if (!fields.valorPrevisto) {
       if (els.summary) els.summary.textContent = 'Informe o valor previsto na linha em edição.';
       tr.querySelector('[data-field="valorPrevisto"]')?.focus();
@@ -723,6 +772,7 @@ export function initContasPagarModule() {
     try {
       const data = contaToPayload(conta, {
         fornecedor: fields.fornecedor,
+        quantidadePrevista: fields.quantidadePrevista,
         valorPrevisto: fields.valorPrevisto,
         valorPago: fields.valorPago,
       });
