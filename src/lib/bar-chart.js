@@ -79,7 +79,7 @@ export function renderBarChart(bars, { title = '', width = 280, height = 200 } =
   return `
     <div class="bar-chart-block" role="img" aria-label="${escapeHtml(ariaLabel)}">
       ${title ? `<p class="bar-chart-title">${escapeHtml(title)}</p>` : ''}
-      <svg class="bar-chart-svg" viewBox="0 0 ${viewW} ${viewH}" width="${width}" height="${height}" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+      <svg class="bar-chart-svg" viewBox="0 0 ${viewW} ${viewH}" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
         ${barEls}
       </svg>
     </div>`;

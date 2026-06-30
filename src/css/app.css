@@ -7861,10 +7861,13 @@ body.wa-inbox-open {
   font-size: 0.9rem;
 }
 
-.financeiro-painel-body {
+.financeiro-painel-body,
+#financeiro-painel-body {
   display: flex;
   flex-direction: column;
   gap: 2.5rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .financeiro-painel-heading {
@@ -8343,6 +8346,10 @@ body.wa-inbox-open {
   margin-top: 0;
 }
 
+.table-financeiro-arrecadacao {
+  min-width: 20rem;
+}
+
 .table-financeiro-arrecadacao .fin-col-realizado {
   background: #dcfce7;
 }
@@ -8638,7 +8645,7 @@ body.wa-inbox-open {
 .bar-chart-svg {
   display: block;
   width: 100%;
-  max-width: 18rem;
+  max-width: min(18rem, 100%);
   height: auto;
   margin: 0 auto;
   overflow: visible;
@@ -8856,6 +8863,10 @@ body.wa-inbox-open {
   background: #fef2f2;
 }
 
+.table-financeiro-resultado-final {
+  min-width: 22rem;
+}
+
 .table-financeiro-resultado-final .fin-col-sinal {
   width: 2.75rem;
   text-align: center;
@@ -8954,6 +8965,14 @@ body.wa-inbox-open {
   background: transparent;
   border: none;
   box-shadow: none;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#view-financeiro-gestao {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 #view-financeiro-gestao .financeiro-custos .table-wrap,
@@ -8972,6 +8991,8 @@ body.wa-inbox-open {
 #view-financeiro-gestao .table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
   background:
     linear-gradient(to right, var(--content-surface, #fff) 30%, rgba(255, 255, 255, 0)),
     linear-gradient(to left, var(--content-surface, #fff) 30%, rgba(255, 255, 255, 0)) 100% 0,
@@ -9414,6 +9435,124 @@ body.wa-inbox-open {
     flex: 1;
   }
 
+  #view-financeiro-gestao .report-head-actions {
+    width: 100%;
+  }
+
+  #view-financeiro-gestao .report-head-actions .tbtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+    box-sizing: border-box;
+  }
+
+  #view-financeiro-gestao .financeiro-kpis--hero {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #view-financeiro-gestao .financeiro-fase-charts,
+  #view-financeiro-gestao .financeiro-custos,
+  #view-financeiro-gestao .financeiro-vendas-hora,
+  #view-financeiro-gestao .financeiro-bebidas,
+  #view-financeiro-gestao .financeiro-arrecadacao,
+  #view-financeiro-gestao .financeiro-resultado-final {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #view-financeiro-gestao .financeiro-chart-row,
+  #view-financeiro-gestao .financeiro-fase-charts-grid,
+  #view-financeiro-gestao .financeiro-fase-chart-card,
+  #view-financeiro-gestao .bar-chart-block,
+  #view-financeiro-gestao .pie-chart-block {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #view-financeiro-gestao .financeiro-chart-row > .table-wrap,
+  #view-financeiro-gestao .financeiro-chart-row > .financeiro-pie-wrap {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  #view-financeiro-gestao .bar-chart-block {
+    padding: 0.85rem 0.75rem 1rem;
+  }
+
+  #view-financeiro-gestao .fin-inline-input {
+    font-size: 16px;
+  }
+
+  #view-financeiro-gestao .fin-sumario-auto-hint {
+    display: none;
+  }
+
+  #view-financeiro-gestao .financeiro-resultado-final-fat {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #view-financeiro-gestao .financeiro-resultado-final-fat-inputs {
+    width: 100%;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  #view-financeiro-gestao .financeiro-resultado-final-fat-field {
+    width: 100%;
+  }
+
+  #view-financeiro-gestao .financeiro-resultado-final-fat-field .fin-inline-input {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  #view-financeiro-gestao .fin-resultado-sinal {
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+    padding: 0.1rem 0.3rem;
+    font-size: 0.8rem;
+  }
+
+  #view-financeiro-gestao .financeiro-custos-head {
+    gap: 0.35rem;
+  }
+
+  #view-financeiro-gestao .financeiro-custos-title {
+    font-size: 1rem;
+    line-height: 1.3;
+  }
+
+  #view-financeiro-gestao .financeiro-painel-lead {
+    font-size: 0.8125rem;
+  }
+
+  #view-financeiro-gestao .financeiro-kpi-val {
+    font-size: 1.1rem;
+  }
+
+  #view-financeiro-gestao .financeiro-kpi--hero .financeiro-kpi-val {
+    font-size: 1.35rem;
+  }
+
+  #view-financeiro-gestao .financeiro-resultado-final-formulas {
+    font-size: 0.75rem;
+    word-break: break-word;
+  }
+
+  #financeiro-painel-body {
+    gap: 1.75rem;
+  }
+
+  #view-financeiro-gestao .fin-resultado-desc {
+    word-break: break-word;
+    white-space: normal;
+  }
+
   #financeiro-modal-bg .field-row {
     grid-template-columns: 1fr;
   }
@@ -9464,10 +9603,6 @@ body.wa-inbox-open {
     padding: 1.1rem 1rem;
   }
 
-  #view-financeiro-gestao .financeiro-painel-body {
-    gap: 1.75rem;
-  }
-
   .financeiro-painel-grid {
     grid-template-columns: 1fr;
   }
@@ -9498,5 +9633,56 @@ body.wa-inbox-open {
 
   #view-financeiro-gestao .financeiro-kpis--hero .financeiro-kpi--hero {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 480px) {
+  #view-financeiro-gestao {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  #view-financeiro-gestao .financeiro-kpis--hero,
+  #view-financeiro-gestao .financeiro-kpis {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  #view-financeiro-gestao .financeiro-kpis--hero .financeiro-kpi--hero {
+    grid-column: auto;
+  }
+
+  #view-financeiro-gestao .financeiro-kpi {
+    min-height: auto;
+    padding: 0.85rem 0.9rem;
+  }
+
+  #view-financeiro-gestao .financeiro-fase-charts,
+  #view-financeiro-gestao .financeiro-custos,
+  #view-financeiro-gestao .financeiro-vendas-hora,
+  #view-financeiro-gestao .financeiro-bebidas,
+  #view-financeiro-gestao .financeiro-arrecadacao,
+  #view-financeiro-gestao .financeiro-resultado-final {
+    padding: 1rem;
+  }
+
+  #view-financeiro-gestao .table-financeiro-custos th,
+  #view-financeiro-gestao .table-financeiro-custos td {
+    padding: 0.4rem 0.45rem;
+    font-size: 0.8125rem;
+  }
+
+  #view-financeiro-gestao .fin-resultado-sinal {
+    min-width: 1.5rem;
+    min-height: 1.5rem;
+    font-size: 0.75rem;
+  }
+
+  #view-financeiro-gestao .financeiro-pie-wrap {
+    max-width: 11.5rem;
+  }
+
+  #view-financeiro-gestao .bar-chart-block {
+    padding: 0.75rem 0.5rem 0.85rem;
   }
 }
