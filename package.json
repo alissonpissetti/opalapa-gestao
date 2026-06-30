@@ -9,6 +9,7 @@
     "dev:api": "node server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
+    "db:test": "node scripts/test-db-connection.js",
     "user:create": "node scripts/create-user.js",
     "import:participantes": "node scripts/import-participantes.js",
     "preview": "npm run build && npm run start"

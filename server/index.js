@@ -5,7 +5,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createPool } from './db.js';
+import { createPool, formatDatabaseStartupError } from './db.js';
 import { migrateEspacos, fetchSpacesByGrupo, upsertSpaces, moveEspacoReserva, moveEspacosReservas } from './espacos.js';
 import { fetchGrupos } from './grupos.js';
 import { migrateTiposComercio, fetchTiposComercio, ensureTiposComercio } from './tipos.js';
@@ -1930,6 +1930,11 @@ async function start() {
 }
 
 start().catch((err) => {
-  console.error('Falha ao iniciar servidor:', err);
+  const hint = formatDatabaseStartupError(err, DATABASE_URL);
+  if (hint) {
+    console.error(hint);
+  } else {
+    console.error('Falha ao iniciar servidor:', err);
+  }
   process.exit(1);
 });

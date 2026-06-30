@@ -77,6 +77,16 @@ npm run dev
 
 O Vite faz proxy de `/api` para a API local.
 
+### Banco de dados em desenvolvimento
+
+O projeto usa **MariaDB remoto** (não há `docker-compose` nem banco local no repositório). O `.env` deve apontar para um servidor acessível da sua rede.
+
+Se `npm run dev` falhar com `ETIMEDOUT` ou `ECONNREFUSED` na inicialização:
+
+1. Confirme `DATABASE_URL` no `.env` (host, porta `5433`, usuário e senha).
+2. Teste a conectividade: `npm run db:test`
+3. Verifique internet, VPN (se exigida pelo provedor) e firewall bloqueando a porta do banco.
+
 ## Produção (local)
 
 ```bash
