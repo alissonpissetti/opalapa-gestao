@@ -1,4 +1,5 @@
 const STATUS = ['pendente', 'parcial', 'pago', 'cancelado'];
+const FASE = ['pre', 'pos'];
 
 const DEFAULT_CATEGORIAS = [
   'RH',
@@ -90,9 +91,25 @@ function rowToPlanoConta(row) {
   };
 }
 
+function normalizeFase(raw) {
+  if (raw == null || raw === '') return 'pre';
+  if (typeof raw === 'boolean') return raw ? 'pre' : 'pos';
+  const s = String(raw).toLowerCase().trim();
+  if (s === 'pos' || s === 'pos_evento' || s === 'pos-evento' || s === 'pós-evento' || s === 'pós') {
+    return 'pos';
+  }
+  if (s === 'pre' || s === 'pre_evento' || s === 'pre-evento' || s === 'pré-evento' || s === 'pré') {
+    return 'pre';
+  }
+  if (raw.preEvento === false || raw.pre_evento === false || raw.pre_evento === 0) return 'pos';
+  if (raw.preEvento === true || raw.pre_evento === true || raw.pre_evento === 1) return 'pre';
+  return 'pre';
+}
+
 function rowToConta(row) {
   const valorPrevisto = Number(row.valor_previsto);
   const valorPago = Number(row.valor_pago);
+  const fase = FASE.includes(row.fase) ? row.fase : 'pre';
   return {
     id: Number(row.id),
     eventoId: Number(row.evento_id),
@@ -103,6 +120,7 @@ function rowToConta(row) {
     planoContaNome: row.plano_nome || '',
     fornecedor: row.fornecedor || '',
     descricao: row.descricao || '',
+    fase,
     valorPrevisto,
     valorPago,
     valorFalta: Math.max(0, valorPrevisto - valorPago),
@@ -116,7 +134,7 @@ function rowToConta(row) {
 }
 
 const CONTA_SELECT = `
-  SELECT cp.id, cp.evento_id, cp.categoria_id, cp.plano_conta_id, cp.fornecedor, cp.descricao,
+  SELECT cp.id, cp.evento_id, cp.categoria_id, cp.plano_conta_id, cp.fornecedor, cp.descricao, cp.fase,
          cp.valor_previsto, cp.valor_pago, cp.dt_vencimento, cp.dt_pagamento, cp.status, cp.obs,
          cp.created_at, cp.updated_at,
          cat.nome AS categoria_nome,
@@ -164,6 +182,7 @@ export async function migrateFinanceiroContasPagar(pool) {
       plano_conta_id INT UNSIGNED NOT NULL,
       fornecedor VARCHAR(160) NULL,
       descricao VARCHAR(255) NOT NULL,
+      fase ENUM('pre', 'pos') NOT NULL DEFAULT 'pre',
       valor_previsto DECIMAL(14,2) NOT NULL DEFAULT 0,
       valor_pago DECIMAL(14,2) NOT NULL DEFAULT 0,
       dt_vencimento VARCHAR(20) NULL,
@@ -189,6 +208,17 @@ export async function migrateFinanceiroContasPagar(pool) {
     if (!cols.length) {
       await pool.query(`ALTER TABLE ${table} ADD COLUMN ativo TINYINT(1) NOT NULL DEFAULT 1`);
     }
+  }
+
+  const [faseCols] = await pool.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'financeiro_contas_pagar' AND COLUMN_NAME = 'fase'`,
+  );
+  if (!faseCols.length) {
+    await pool.query(
+      `ALTER TABLE financeiro_contas_pagar
+       ADD COLUMN fase ENUM('pre', 'pos') NOT NULL DEFAULT 'pre' AFTER descricao`,
+    );
   }
 }
 
@@ -456,6 +486,7 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
     label: 'Data de pagamento',
   });
   const obs = String(raw.obs ?? '').trim() || null;
+  const fase = normalizeFase(raw.fase ?? raw.preEvento ?? raw.pre_evento);
   let status = String(raw.status ?? '').toLowerCase();
   if (!STATUS.includes(status)) status = inferStatus(valorPrevisto, valorPago);
 
@@ -471,6 +502,7 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
     planoContaId,
     fornecedor,
     descricao,
+    fase,
     valorPrevisto,
     valorPago,
     dtVencimento,
@@ -528,15 +560,16 @@ export async function createContaPagar(pool, eventoId, raw) {
 
   const [result] = await pool.query(
     `INSERT INTO financeiro_contas_pagar (
-       evento_id, categoria_id, plano_conta_id, fornecedor, descricao,
+       evento_id, categoria_id, plano_conta_id, fornecedor, descricao, fase,
        valor_previsto, valor_pago, dt_vencimento, dt_pagamento, status, obs, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [
       eventoId,
       data.categoriaId,
       data.planoContaId,
       data.fornecedor,
       data.descricao,
+      data.fase,
       data.valorPrevisto,
       data.valorPago,
       data.dtVencimento,
@@ -554,7 +587,7 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
 
   const [result] = await pool.query(
     `UPDATE financeiro_contas_pagar SET
-       categoria_id = ?, plano_conta_id = ?, fornecedor = ?, descricao = ?,
+       categoria_id = ?, plano_conta_id = ?, fornecedor = ?, descricao = ?, fase = ?,
        valor_previsto = ?, valor_pago = ?, dt_vencimento = ?, dt_pagamento = ?,
        status = ?, obs = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ? AND evento_id = ?`,
@@ -563,6 +596,7 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
       data.planoContaId,
       data.fornecedor,
       data.descricao,
+      data.fase,
       data.valorPrevisto,
       data.valorPago,
       data.dtVencimento,
@@ -591,17 +625,30 @@ export function summarizeContasPagar(contas) {
 
   let totalPrevisto = 0;
   let totalPago = 0;
+  let previstoPre = 0;
+  let previstoPos = 0;
+  let realizadoPre = 0;
+  let realizadoPos = 0;
 
   for (const c of ativas) {
-    totalPrevisto += c.valorPrevisto;
-    totalPago += c.valorPago;
+    const prev = Number(c.valorPrevisto) || 0;
+    const pago = Number(c.valorPago) || 0;
+    totalPrevisto += prev;
+    totalPago += pago;
+    if (c.fase === 'pos') {
+      previstoPos += prev;
+      realizadoPos += pago;
+    } else {
+      previstoPre += prev;
+      realizadoPre += pago;
+    }
     const key = c.categoriaNome || 'Outros';
     if (!byCategoria.has(key)) {
       byCategoria.set(key, { nome: key, previsto: 0, realizado: 0, itens: 0 });
     }
     const bucket = byCategoria.get(key);
-    bucket.previsto += c.valorPrevisto;
-    bucket.realizado += c.valorPago;
+    bucket.previsto += prev;
+    bucket.realizado += pago;
     bucket.itens += 1;
   }
 
@@ -615,6 +662,12 @@ export function summarizeContasPagar(contas) {
       previsto: totalPrevisto,
       realizado: totalPago,
       falta: Math.max(0, totalPrevisto - totalPago),
+      previstoPre,
+      previstoPos,
+      previstoGeral: totalPrevisto,
+      realizadoPre,
+      realizadoPos,
+      realizadoGeral: totalPago,
     },
   };
 }

@@ -119,6 +119,7 @@ import {
   createContaPagar,
   updateContaPagar,
   deleteContaPagar,
+  summarizeContasPagar,
 } from './financeiro-contas-pagar.js';
 import {
   migrateWhatsapp,
@@ -1484,7 +1485,8 @@ app.delete('/api/financeiro/plano-contas/:id', requireEvento, async (req, res) =
 app.get('/api/financeiro/contas-pagar', requireEvento, async (req, res) => {
   try {
     const contas = await listContasPagar(pool, req.eventoId);
-    res.json({ contas });
+    const { totais } = summarizeContasPagar(contas);
+    res.json({ contas, totais });
   } catch (err) {
     console.error('GET /api/financeiro/contas-pagar', err);
     res.status(500).json({ error: 'Falha ao carregar contas a pagar' });

@@ -705,6 +705,8 @@
         <button class="tbtn primary" type="button" id="btn-contas-pagar-new">Nova conta</button>
       </div>
 
+      <div class="financeiro-kpis financeiro-kpis--contas-pagar hidden" id="contas-pagar-kpis" aria-label="Totais por fase"></div>
+
       <p class="report-summary" id="contas-pagar-summary"></p>
       <div class="financeiro-empty hidden" id="contas-pagar-empty">
         <p>Nenhuma conta cadastrada. Use <strong>Nova conta</strong> para lançar um custo — ex.: categoria RH, plano de contas, descrição e valor previsto.</p>
@@ -717,6 +719,7 @@
               <th>Plano de contas</th>
               <th>Fornecedor</th>
               <th>Descrição</th>
+              <th>Fase</th>
               <th class="fin-col-money">Previsto</th>
               <th class="fin-col-money">Pago</th>
               <th class="fin-col-money">Falta</th>
@@ -1508,64 +1511,94 @@
 
     <div class="modal-bg" id="contas-pagar-modal-bg">
       <div class="modal modal-wide modal--contas-pagar" role="dialog" aria-modal="true" aria-labelledby="contas-pagar-modal-title">
-        <h2 id="contas-pagar-modal-title">Conta a pagar</h2>
+        <header class="modal-contas-pagar-head">
+          <h2 id="contas-pagar-modal-title">Conta a pagar</h2>
+          <p class="modal-contas-pagar-sub msub" id="contas-pagar-modal-sub">
+            Classifique o custo, informe valores e acompanhe pagamentos deste evento.
+          </p>
+        </header>
         <p class="form-errors hidden" id="contas-pagar-modal-errors" role="alert"></p>
-        <div class="field-row">
-          <div class="field">
-            <label for="contas-pagar-modal-categoria">Categoria <span class="req">*</span></label>
-            <input id="contas-pagar-modal-categoria" type="text" list="contas-pagar-categorias-list" placeholder="Digite ou escolha — ex.: RH, MKT…" required autocomplete="off" />
-            <datalist id="contas-pagar-categorias-list"></datalist>
+
+        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-classificacao">
+          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-classificacao">Classificação</h3>
+          <div class="field-row field-row--stack">
+            <div class="field">
+              <label for="contas-pagar-modal-categoria">Categoria <span class="req">*</span></label>
+              <input id="contas-pagar-modal-categoria" type="text" list="contas-pagar-categorias-list" placeholder="Digite ou escolha — ex.: RH, MKT, Produção…" required autocomplete="off" />
+              <datalist id="contas-pagar-categorias-list"></datalist>
+            </div>
+            <div class="field">
+              <label for="contas-pagar-modal-plano">Plano de contas <span class="req">*</span></label>
+              <input id="contas-pagar-modal-plano" type="text" list="contas-pagar-plano-list" placeholder="Digite ou escolha — ex.: Som, Palco, Alimentação…" required autocomplete="off" />
+              <datalist id="contas-pagar-plano-list"></datalist>
+            </div>
+            <div class="field">
+              <label for="contas-pagar-modal-fase">Fase <span class="req">*</span></label>
+              <select id="contas-pagar-modal-fase" required>
+                <option value="pre">Pré-evento</option>
+                <option value="pos">Pós-evento</option>
+              </select>
+            </div>
           </div>
-          <div class="field">
-            <label for="contas-pagar-modal-plano">Plano de contas <span class="req">*</span></label>
-            <input id="contas-pagar-modal-plano" type="text" list="contas-pagar-plano-list" placeholder="Digite ou escolha — ex.: Som, Palco…" required autocomplete="off" />
-            <datalist id="contas-pagar-plano-list"></datalist>
+        </section>
+
+        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-identificacao">
+          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-identificacao">Identificação</h3>
+          <div class="field-row field-row--stack">
+            <div class="field">
+              <label for="contas-pagar-modal-fornecedor">Fornecedor <span class="opt">(opcional)</span></label>
+              <input id="contas-pagar-modal-fornecedor" type="text" placeholder="Nome do fornecedor" />
+            </div>
+            <div class="field">
+              <label for="contas-pagar-modal-descricao">Descrição <span class="req">*</span></label>
+              <input id="contas-pagar-modal-descricao" type="text" placeholder="Ex.: Alisson, Som, Palco, aluguel de tenda…" required />
+            </div>
           </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="contas-pagar-modal-fornecedor">Fornecedor <span class="opt">(opcional)</span></label>
-            <input id="contas-pagar-modal-fornecedor" type="text" placeholder="Nome do fornecedor" />
+        </section>
+
+        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-valores">
+          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-valores">Valores</h3>
+          <div class="field-row">
+            <div class="field">
+              <label for="contas-pagar-modal-valor-previsto">Valor previsto (R$) <span class="req">*</span></label>
+              <input id="contas-pagar-modal-valor-previsto" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" required />
+            </div>
+            <div class="field">
+              <label for="contas-pagar-modal-valor-pago">Valor pago (R$)</label>
+              <input id="contas-pagar-modal-valor-pago" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+            </div>
           </div>
-          <div class="field">
-            <label for="contas-pagar-modal-descricao">Descrição <span class="req">*</span></label>
-            <input id="contas-pagar-modal-descricao" type="text" placeholder="Ex.: Alisson, Som, Palco…" required />
+        </section>
+
+        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-datas">
+          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-datas">Datas e status</h3>
+          <div class="field-row field-row--3">
+            <div class="field">
+              <label for="contas-pagar-modal-dt-vencimento">Vencimento</label>
+              <input id="contas-pagar-modal-dt-vencimento" type="date" />
+            </div>
+            <div class="field">
+              <label for="contas-pagar-modal-dt-pagamento">Data pagamento</label>
+              <input id="contas-pagar-modal-dt-pagamento" type="date" />
+            </div>
+            <div class="field">
+              <label for="contas-pagar-modal-status">Status</label>
+              <select id="contas-pagar-modal-status">
+                <option value="pendente">Pendente</option>
+                <option value="parcial">Parcial</option>
+                <option value="pago">Pago</option>
+                <option value="cancelado">Cancelado</option>
+              </select>
+            </div>
           </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="contas-pagar-modal-valor-previsto">Valor previsto (R$) <span class="req">*</span></label>
-            <input id="contas-pagar-modal-valor-previsto" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" required />
-          </div>
-          <div class="field">
-            <label for="contas-pagar-modal-valor-pago">Valor pago (R$)</label>
-            <input id="contas-pagar-modal-valor-pago" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="contas-pagar-modal-dt-vencimento">Vencimento</label>
-            <input id="contas-pagar-modal-dt-vencimento" type="date" />
-          </div>
-          <div class="field">
-            <label for="contas-pagar-modal-dt-pagamento">Data pagamento</label>
-            <input id="contas-pagar-modal-dt-pagamento" type="date" />
-          </div>
-          <div class="field">
-            <label for="contas-pagar-modal-status">Status</label>
-            <select id="contas-pagar-modal-status">
-              <option value="pendente">Pendente</option>
-              <option value="parcial">Parcial</option>
-              <option value="pago">Pago</option>
-              <option value="cancelado">Cancelado</option>
-            </select>
-          </div>
-        </div>
-        <div class="field">
+        </section>
+
+        <div class="field modal-contas-pagar-obs">
           <label for="contas-pagar-modal-obs">Observações</label>
-          <textarea id="contas-pagar-modal-obs" rows="3" placeholder="Opcional"></textarea>
+          <textarea id="contas-pagar-modal-obs" rows="4" placeholder="Detalhes adicionais, parcelas, condições de pagamento…"></textarea>
         </div>
-        <div class="btns">
+
+        <div class="btns modal-contas-pagar-btns">
           <button class="btn" type="button" id="contas-pagar-modal-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="contas-pagar-modal-delete">Excluir</button>
           <button class="btn primary" type="button" id="contas-pagar-modal-save">Salvar</button>
