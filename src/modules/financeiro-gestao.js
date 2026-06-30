@@ -314,14 +314,14 @@ function resolveFaseComparativo(totais) {
 }
 
 /** Métricas para comparar custos pendentes (contas a pagar) × sumário de arrecadação.
- *  Pré: faltaPre vs arrecadacaoPrevisto — gap = faltaPre − arrecadacaoPrevisto.
- *  Pós: faltaPos vs arrecadacaoRealizado — gap = faltaPos − arrecadacaoRealizado. */
+ *  Pré: faltaPre vs arrecadacaoPrePrevisto — gap = faltaPre − arrecadacaoPrePrevisto.
+ *  Pós: faltaPos vs arrecadacaoPosPrevisto — gap = faltaPos − arrecadacaoPosPrevisto. */
 function resolveCenariosPrePos(totaisContasPagar, sumarioArrecadacao) {
   const { pre, pos, faltaPre, faltaPos } = resolveFaseComparativo(totaisContasPagar);
   const grupos = resolveSumarioGrupos(sumarioArrecadacao || {});
   const arr = sumarioArrecadacao?.totais || {};
-  const arrecadacaoPrevisto = Number(grupos.totaisPre.previsto) || 0;
-  const arrecadacaoRealizado = Number(grupos.totaisPos.realizado) || 0;
+  const arrecadacaoPrePrevisto = Number(grupos.totaisPre.previsto) || 0;
+  const arrecadacaoPosPrevisto = Number(grupos.totaisPos.previsto) || 0;
   const faltaArrecadarSumario =
     Number.isFinite(Number(arr.falta)) && arr.falta != null
       ? Math.max(0, Number(arr.falta))
@@ -331,20 +331,20 @@ function resolveCenariosPrePos(totaisContasPagar, sumarioArrecadacao) {
     pos,
     faltaPre,
     faltaPos,
-    arrecadacaoPrevisto,
-    arrecadacaoRealizado,
+    arrecadacaoPrePrevisto,
+    arrecadacaoPosPrevisto,
     faltaArrecadarSumario,
   };
 }
 
-function renderCenarioGapNote(gap, { positivo, coberto }) {
+function renderCenarioGapNote(gap) {
   if (gap > 0) {
-    return `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--warn">${positivo} <strong>${cellMoney(gap)}</strong></p>`;
+    return `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--warn">Diferença: <strong>${cellMoney(gap)}</strong> a cobrir</p>`;
   }
   if (gap < 0) {
-    return `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--ok">${coberto} <strong>${cellMoney(Math.abs(gap))}</strong></p>`;
+    return `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--ok">Sobra: <strong>${cellMoney(Math.abs(gap))}</strong></p>`;
   }
-  return `<p class="financeiro-fase-chart-note">Valores equivalentes — custo pendente e arrecadação se equilibram.</p>`;
+  return `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--ok">Equilibrado</p>`;
 }
 
 function renderFaseComparativoCharts(totaisContasPagar, sumarioArrecadacao) {
@@ -353,65 +353,53 @@ function renderFaseComparativoCharts(totaisContasPagar, sumarioArrecadacao) {
     pos,
     faltaPre,
     faltaPos,
-    arrecadacaoPrevisto,
-    arrecadacaoRealizado,
+    arrecadacaoPrePrevisto,
+    arrecadacaoPosPrevisto,
     faltaArrecadarSumario,
   } = resolveCenariosPrePos(totaisContasPagar, sumarioArrecadacao);
 
-  const temPre = faltaPre > 0 || arrecadacaoPrevisto > 0 || pre > 0;
-  const temPos = faltaPos > 0 || arrecadacaoRealizado > 0 || faltaArrecadarSumario > 0 || pos > 0;
+  const temPre = faltaPre > 0 || arrecadacaoPrePrevisto > 0 || pre > 0;
+  const temPos = faltaPos > 0 || arrecadacaoPosPrevisto > 0 || faltaArrecadarSumario > 0 || pos > 0;
   if (!temPre && !temPos) return '';
 
-  const gapPre = faltaPre - arrecadacaoPrevisto;
-  const gapPos = faltaPos - arrecadacaoRealizado;
+  const gapPre = faltaPre - arrecadacaoPrePrevisto;
+  const gapPos = faltaPos - arrecadacaoPosPrevisto;
 
   const preChart = temPre
     ? renderBarChart(
         [
-          { label: 'Falta pré', value: faltaPre, color: BAR_CHART_COLORS.falta },
+          { label: 'Custo pendente', value: faltaPre, color: BAR_CHART_COLORS.falta },
           {
-            label: 'Previsto arrecadação',
-            value: arrecadacaoPrevisto,
+            label: 'Arrec. pré prevista',
+            value: arrecadacaoPrePrevisto,
             color: BAR_CHART_COLORS.previsto,
           },
         ],
-        { title: 'Pré-evento: custos × arrecadação', width: 240, height: 156 },
+        { title: 'Pré-evento', width: 280, height: 200 },
       )
     : '';
 
   const posChart = temPos
     ? renderBarChart(
         [
-          { label: 'Falta pós', value: faltaPos, color: BAR_CHART_COLORS.falta },
+          { label: 'Custo pendente', value: faltaPos, color: BAR_CHART_COLORS.falta },
           {
-            label: 'Realizado arrecadação',
-            value: arrecadacaoRealizado,
-            color: BAR_CHART_COLORS.realizado,
+            label: 'Arrec. pós prevista',
+            value: arrecadacaoPosPrevisto,
+            color: BAR_CHART_COLORS.previsto,
           },
         ],
-        { title: 'Pós-evento: custos × arrecadação', width: 240, height: 156 },
+        { title: 'Pós-evento', width: 280, height: 200 },
       )
     : '';
 
-  const preNote = temPre
-    ? `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--desc">Quanto falta pagar na fase pré vs arrecadação prevista no sumário.</p>${renderCenarioGapNote(gapPre, {
-        positivo: 'Gap (falta pré − previsto arrecadação): ainda faltam',
-        coberto: 'Previsto arrecadação supera o pré pendente em',
-      })}`
-    : '';
-
-  const posNote = temPos
-    ? `<p class="financeiro-fase-chart-note financeiro-fase-chart-note--desc">Quanto falta pagar na fase pós vs arrecadação já realizada no sumário.</p>${renderCenarioGapNote(gapPos, {
-        positivo: 'Gap (falta pós − realizado arrecadação): ainda faltam',
-        coberto: 'Realizado arrecadação supera o pós pendente em',
-      })}`
-    : '';
+  const preNote = temPre ? renderCenarioGapNote(gapPre) : '';
+  const posNote = temPos ? renderCenarioGapNote(gapPos) : '';
 
   return `
       <section class="financeiro-fase-charts" aria-label="Comparativo pré e pós-evento com arrecadação">
         <div class="financeiro-custos-head">
           <h2 class="financeiro-custos-title">Cenários pré e pós-evento</h2>
-          <span class="financeiro-painel-lead">Custo pendente por fase versus sumário de arrecadação (previsto no pré, realizado no pós)</span>
         </div>
         <div class="financeiro-fase-charts-grid">
           ${temPre ? `<div class="financeiro-fase-chart-card">${preChart}${preNote}</div>` : ''}

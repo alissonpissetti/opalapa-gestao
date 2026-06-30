@@ -8581,73 +8581,76 @@ body.wa-inbox-open {
 
 .financeiro-fase-charts {
   margin-top: 0;
+  margin-bottom: 3rem;
 }
 
 .financeiro-fase-charts-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.25rem;
+  gap: 1.5rem;
 }
 
 .financeiro-fase-chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   min-width: 0;
-  padding: 0.25rem;
 }
 
 .financeiro-fase-chart-note {
-  margin: 0.65rem 0 0;
-  padding: 0 0.25rem;
-  font-size: 0.72rem;
-  line-height: 1.45;
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
   color: var(--text-muted, #6b7280);
-}
-
-.financeiro-fase-chart-note--desc {
-  margin-bottom: 0.35rem;
-  color: var(--text-muted, #6b7280);
+  background: var(--surface, #f8fafc);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.5rem;
 }
 
 .financeiro-fase-chart-note--warn {
   color: var(--warn-text, #b45309);
+  background: #fffbeb;
+  border-color: #fde68a;
 }
 
 .financeiro-fase-chart-note--ok {
   color: var(--success-text, #15803d);
+  background: #f0fdf4;
+  border-color: #bbf7d0;
 }
 
 .bar-chart-block {
-  padding: 0.85rem 1rem;
+  padding: 1rem 1.25rem 1.25rem;
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 0.65rem;
   background: var(--surface, #fafafa);
-  height: 100%;
 }
 
 .bar-chart-title {
-  margin: 0 0 0.75rem;
-  font-size: 0.8rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-muted, #6b7280);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--text, #111827);
+  letter-spacing: -0.01em;
 }
 
 .bar-chart-svg {
   display: block;
   width: 100%;
-  max-width: 14rem;
+  max-width: 18rem;
+  height: auto;
   margin: 0 auto;
+  overflow: visible;
 }
 
 .bar-chart-val {
-  font-size: 7px;
   font-weight: 600;
   fill: var(--text, #111827);
   font-family: Inter, system-ui, sans-serif;
 }
 
 .bar-chart-label {
-  font-size: 6.5px;
   fill: var(--text-muted, #6b7280);
   font-family: Inter, system-ui, sans-serif;
 }
@@ -8984,9 +8987,12 @@ body.wa-inbox-open {
   gap: 1.5rem;
 }
 
-#view-financeiro-gestao .pie-chart-block,
-#view-financeiro-gestao .bar-chart-block {
+#view-financeiro-gestao .pie-chart-block {
   height: 100%;
+}
+
+#view-financeiro-gestao .bar-chart-block {
+  height: auto;
 }
 
 #view-financeiro-gestao .table-financeiro-vendas-hora tbody tr:nth-child(even),
@@ -9474,8 +9480,13 @@ body.wa-inbox-open {
     flex-direction: column;
   }
 
+  .financeiro-fase-charts {
+    margin-bottom: 2.5rem;
+  }
+
   .financeiro-fase-charts-grid {
     grid-template-columns: 1fr;
+    gap: 1.25rem;
   }
 
   .financeiro-pie-wrap {
