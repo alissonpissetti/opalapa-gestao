@@ -1,11 +1,26 @@
 import { ensureGruposForEvento } from './grupos.js';
 import { seedEspacosForEvento } from './espacos.js';
 
+function formatDateColumn(raw) {
+  if (raw == null || raw === '') return null;
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    const y = raw.getFullYear();
+    const mo = String(raw.getMonth() + 1).padStart(2, '0');
+    const d = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${d}`;
+  }
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : s || null;
+}
+
 function rowToEvento(row) {
   return {
     id: row.id,
     nome: row.nome || '',
     edicao: row.edicao != null ? Number(row.edicao) : null,
+    dtInicio: formatDateColumn(row.dt_inicio),
+    dtFim: formatDateColumn(row.dt_fim),
     eventoAnteriorId: row.evento_anterior_id != null ? Number(row.evento_anterior_id) : null,
     eventoAnteriorNome: row.evento_anterior_nome || '',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -106,6 +121,17 @@ export async function migrateEventos(pool) {
          FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE`,
     );
   }
+
+  for (const col of ['dt_inicio', 'dt_fim']) {
+    const [cols] = await pool.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'eventos' AND COLUMN_NAME = ?`,
+      [col],
+    );
+    if (!cols.length) {
+      await pool.query(`ALTER TABLE eventos ADD COLUMN ${col} DATE NULL AFTER edicao`);
+    }
+  }
 }
 
 export function createRequireEvento(pool) {
@@ -134,7 +160,7 @@ export function parseEventoId(raw) {
 
 export async function listEventos(pool) {
   const [rows] = await pool.query(
-    `SELECT e.id, e.nome, e.edicao, e.evento_anterior_id, e.created_at, e.updated_at,
+    `SELECT e.id, e.nome, e.edicao, e.dt_inicio, e.dt_fim, e.evento_anterior_id, e.created_at, e.updated_at,
             a.nome AS evento_anterior_nome
      FROM eventos e
      LEFT JOIN eventos a ON a.id = e.evento_anterior_id
@@ -145,7 +171,7 @@ export async function listEventos(pool) {
 
 export async function findEventoById(pool, id) {
   const [rows] = await pool.query(
-    `SELECT e.id, e.nome, e.edicao, e.evento_anterior_id, e.created_at, e.updated_at,
+    `SELECT e.id, e.nome, e.edicao, e.dt_inicio, e.dt_fim, e.evento_anterior_id, e.created_at, e.updated_at,
             a.nome AS evento_anterior_nome
      FROM eventos e
      LEFT JOIN eventos a ON a.id = e.evento_anterior_id
@@ -153,6 +179,17 @@ export async function findEventoById(pool, id) {
     [id],
   );
   return rows[0] ? rowToEvento(rows[0]) : null;
+}
+
+function normalizeOptionalDate(raw, label) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  throw Object.assign(new Error(`${label} inválida (use AAAA-MM-DD ou DD/MM/AAAA)`), { status: 400 });
 }
 
 function normalizeEventoInput(body) {
@@ -164,6 +201,12 @@ function normalizeEventoInput(body) {
     throw Object.assign(new Error('Informe o ano da edição (ex.: 2026)'), { status: 400 });
   }
 
+  const dtInicio = normalizeOptionalDate(body?.dtInicio ?? body?.dt_inicio, 'Data de início');
+  const dtFim = normalizeOptionalDate(body?.dtFim ?? body?.dt_fim, 'Data de fim');
+  if (dtInicio && dtFim && dtFim < dtInicio) {
+    throw Object.assign(new Error('A data de fim não pode ser anterior à data de início'), { status: 400 });
+  }
+
   const eventoAnteriorId =
     body?.eventoAnteriorId != null && body.eventoAnteriorId !== ''
       ? Number(body.eventoAnteriorId)
@@ -172,7 +215,7 @@ function normalizeEventoInput(body) {
     throw Object.assign(new Error('Edição anterior inválida'), { status: 400 });
   }
 
-  return { nome, edicao, eventoAnteriorId };
+  return { nome, edicao, dtInicio, dtFim, eventoAnteriorId };
 }
 
 async function seedEstruturaEvento(pool, eventoId) {
@@ -191,9 +234,9 @@ export async function createEvento(pool, body) {
   try {
     await conn.beginTransaction();
     const [result] = await conn.query(
-      `INSERT INTO eventos (nome, edicao, evento_anterior_id, updated_at)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP(3))`,
-      [data.nome, data.edicao, data.eventoAnteriorId],
+      `INSERT INTO eventos (nome, edicao, dt_inicio, dt_fim, evento_anterior_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+      [data.nome, data.edicao, data.dtInicio, data.dtFim, data.eventoAnteriorId],
     );
     const eventoId = result.insertId;
     await seedEstruturaEvento(conn, eventoId);
@@ -221,9 +264,9 @@ export async function updateEvento(pool, id, body) {
 
   try {
     await pool.query(
-      `UPDATE eventos SET nome = ?, edicao = ?, evento_anterior_id = ?, updated_at = CURRENT_TIMESTAMP(3)
+      `UPDATE eventos SET nome = ?, edicao = ?, dt_inicio = ?, dt_fim = ?, evento_anterior_id = ?, updated_at = CURRENT_TIMESTAMP(3)
        WHERE id = ?`,
-      [data.nome, data.edicao, data.eventoAnteriorId, id],
+      [data.nome, data.edicao, data.dtInicio, data.dtFim, data.eventoAnteriorId, id],
     );
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {

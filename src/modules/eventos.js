@@ -6,7 +6,7 @@ import {
   fetchEventoComparacao,
 } from '../lib/api.js';
 import { getActiveEvento, setActiveEvento } from '../lib/evento.js';
-import { fmtDate, fmtMoney, escapeHtml } from '../lib/format.js';
+import { fmtDate, fmtMoney, escapeHtml, toDateInputValue } from '../lib/format.js';
 
 function fmtDelta({ diff, pct }) {
   const sign = diff > 0 ? '+' : '';
@@ -24,8 +24,11 @@ export function initEventoSelector({ onChange }) {
   const select = document.getElementById('evento-select');
   if (!select) return { refresh: async () => {} };
 
+  let eventosList = [];
+
   async function refresh(eventos) {
     const list = eventos || (await fetchEventos()).eventos || [];
+    eventosList = list;
     const active = getActiveEvento();
     select.innerHTML = list
       .map(
@@ -38,11 +41,15 @@ export function initEventoSelector({ onChange }) {
 
   select.addEventListener('change', () => {
     const id = Number(select.value);
-    const option = select.selectedOptions[0];
     if (!id) return;
-    const nome = option?.textContent?.replace(/\s*\(\d+\)$/, '') || '';
-    const edicao = Number(option?.textContent?.match(/\((\d+)\)$/)?.[1]);
-    setActiveEvento({ id, nome, edicao });
+    const evento = eventosList.find((e) => e.id === id);
+    if (evento) setActiveEvento(evento);
+    else {
+      const option = select.selectedOptions[0];
+      const nome = option?.textContent?.replace(/\s*\(\d+\)$/, '') || '';
+      const edicao = Number(option?.textContent?.match(/\((\d+)\)$/)?.[1]);
+      setActiveEvento({ id, nome, edicao });
+    }
     onChange?.();
   });
 
@@ -59,6 +66,8 @@ export function initEventosModule({ onEventosChanged }) {
     modalTitle: document.getElementById('evento-modal-title'),
     nome: document.getElementById('ev-nome'),
     edicao: document.getElementById('ev-edicao'),
+    dtInicio: document.getElementById('ev-dt-inicio'),
+    dtFim: document.getElementById('ev-dt-fim'),
     anterior: document.getElementById('ev-anterior'),
     btnCancel: document.getElementById('evento-btn-cancel'),
     btnSave: document.getElementById('evento-btn-save'),
@@ -74,6 +83,8 @@ export function initEventosModule({ onEventosChanged }) {
     els.modalTitle.textContent = evento ? 'Editar evento' : 'Novo evento';
     els.nome.value = evento?.nome || '';
     els.edicao.value = evento?.edicao || new Date().getFullYear();
+    if (els.dtInicio) els.dtInicio.value = toDateInputValue(evento?.dtInicio);
+    if (els.dtFim) els.dtFim.value = toDateInputValue(evento?.dtFim);
     els.anterior.innerHTML =
       '<option value="">— Nenhuma —</option>' +
       eventos
@@ -202,6 +213,8 @@ export function initEventosModule({ onEventosChanged }) {
     const body = {
       nome: els.nome.value.trim(),
       edicao: Number(els.edicao.value),
+      dtInicio: els.dtInicio?.value?.trim() || null,
+      dtFim: els.dtFim?.value?.trim() || null,
       eventoAnteriorId: els.anterior.value ? Number(els.anterior.value) : null,
     };
     try {

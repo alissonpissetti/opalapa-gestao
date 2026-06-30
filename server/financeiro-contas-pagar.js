@@ -1,3 +1,6 @@
+import { findEventoById } from './eventos.js';
+import { inferFaseContaPagar } from '../shared/financeiro-fase.js';
+
 const STATUS = ['pendente', 'parcial', 'pago', 'cancelado'];
 const FASE = ['pre', 'pos'];
 
@@ -512,6 +515,17 @@ function normalizeContaInput(raw, { forInsert = false } = {}) {
   };
 }
 
+async function applyAutoFase(pool, eventoId, data, raw) {
+  if (raw?.autoFase === false) return;
+  const evento = await findEventoById(pool, eventoId);
+  const inferred = inferFaseContaPagar({
+    evento,
+    dtVencimento: data.dtVencimento,
+    dtPagamento: data.dtPagamento,
+  });
+  if (inferred) data.fase = inferred;
+}
+
 async function validateContaRefs(pool, eventoId, data) {
   const [pc] = await pool.query(
     `SELECT pc.id, pc.categoria_id, pc.ativo FROM financeiro_plano_contas pc
@@ -557,6 +571,7 @@ export async function findContaPagarById(pool, id, eventoId) {
 export async function createContaPagar(pool, eventoId, raw) {
   const data = normalizeContaInput(raw, { forInsert: true });
   await validateContaRefs(pool, eventoId, data);
+  await applyAutoFase(pool, eventoId, data, raw);
 
   const [result] = await pool.query(
     `INSERT INTO financeiro_contas_pagar (
@@ -584,6 +599,7 @@ export async function createContaPagar(pool, eventoId, raw) {
 export async function updateContaPagar(pool, id, eventoId, raw) {
   const data = normalizeContaInput(raw);
   await validateContaRefs(pool, eventoId, data);
+  await applyAutoFase(pool, eventoId, data, raw);
 
   const [result] = await pool.query(
     `UPDATE financeiro_contas_pagar SET

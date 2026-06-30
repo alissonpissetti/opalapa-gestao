@@ -1538,6 +1538,7 @@
                 <option value="pre">Pré-evento</option>
                 <option value="pos">Pós-evento</option>
               </select>
+              <p class="field-hint">Definido automaticamente pela data de vencimento e datas do evento.</p>
             </div>
           </div>
         </section>
@@ -1625,6 +1626,17 @@
             </select>
           </div>
         </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="ev-dt-inicio">Data de início</label>
+            <input id="ev-dt-inicio" type="date" />
+          </div>
+          <div class="field">
+            <label for="ev-dt-fim">Data de fim</label>
+            <input id="ev-dt-fim" type="date" />
+          </div>
+        </div>
+        <p class="field-hint">As datas do evento definem o corte pré/pós nas contas a pagar (a partir do último dia).</p>
         <p class="field-hint">Ao criar um novo evento, a estrutura de espaços é copiada automaticamente (vazia).</p>
         <div class="btns">
           <button class="btn" type="button" id="evento-btn-cancel">Cancelar</button>

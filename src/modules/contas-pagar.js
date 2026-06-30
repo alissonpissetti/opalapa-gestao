@@ -17,6 +17,8 @@ import {
   parseValor,
   toDateInputValue,
 } from '../lib/format.js';
+import { getActiveEvento } from '../lib/evento.js';
+import { inferFaseContaPagar } from '../../shared/financeiro-fase.js';
 
 const STATUS_LABEL = {
   pendente: 'Pendente',
@@ -136,6 +138,18 @@ export function initContasPagarModule() {
   let inlineEditId = null;
   let loading = false;
   let duplicating = false;
+  let faseManualOverride = false;
+
+  function applyAutoFase() {
+    if (faseManualOverride || !els.fieldFase) return;
+    const evento = getActiveEvento();
+    const inferred = inferFaseContaPagar({
+      evento,
+      dtVencimento: els.fieldDtVencimento?.value?.trim() || '',
+      dtPagamento: els.fieldDtPagamento?.value?.trim() || '',
+    });
+    if (inferred) els.fieldFase.value = inferred;
+  }
 
   function showFormErrors(messages) {
     if (!els.formErrors) return;
@@ -235,18 +249,23 @@ export function initContasPagarModule() {
   }
 
   function contaToPayload(conta, overrides = {}) {
+    const evento = getActiveEvento();
+    const dtVencimento = conta.dtVencimento || '';
+    const dtPagamento = overrides.dtPagamento ?? conta.dtPagamento ?? '';
+    const inferred = inferFaseContaPagar({ evento, dtVencimento, dtPagamento });
     return {
       categoriaId: conta.categoriaId,
       planoContaId: conta.planoContaId,
       fornecedor: overrides.fornecedor ?? conta.fornecedor ?? '',
       descricao: conta.descricao,
-      fase: overrides.fase ?? (conta.fase === 'pos' ? 'pos' : 'pre'),
+      fase: overrides.fase ?? inferred ?? (conta.fase === 'pos' ? 'pos' : 'pre'),
       valorPrevisto: overrides.valorPrevisto ?? conta.valorPrevisto,
       valorPago: overrides.valorPago ?? conta.valorPago ?? 0,
-      dtVencimento: conta.dtVencimento || '',
-      dtPagamento: overrides.dtPagamento ?? conta.dtPagamento ?? '',
+      dtVencimento,
+      dtPagamento,
       status: overrides.status ?? conta.status ?? 'pendente',
       obs: conta.obs || '',
+      autoFase: true,
     };
   }
 
@@ -407,6 +426,7 @@ export function initContasPagarModule() {
 
   async function openModal(conta = null) {
     editId = conta?.id ?? null;
+    faseManualOverride = false;
     showFormErrors(null);
 
     if (!categorias.length) {
@@ -451,6 +471,8 @@ export function initContasPagarModule() {
     }
     if (els.fieldStatus) els.fieldStatus.value = conta?.status || 'pendente';
     if (els.fieldObs) els.fieldObs.value = conta?.obs || '';
+
+    applyAutoFase();
 
     els.btnDelete?.classList.toggle('hidden', !editId);
     els.modalBg?.classList.add('open');
@@ -550,6 +572,7 @@ export function initContasPagarModule() {
         dtPagamento: fields.dtPagamento,
         status: fields.status,
         obs: fields.obs,
+        autoFase: !faseManualOverride,
       };
 
       if (editId) {
@@ -650,6 +673,20 @@ export function initContasPagarModule() {
 
   els.fieldCategoria?.addEventListener('input', () => {
     refreshPlanoDatalist(els.fieldCategoria.value);
+  });
+
+  els.fieldDtVencimento?.addEventListener('change', () => {
+    faseManualOverride = false;
+    applyAutoFase();
+  });
+  els.fieldDtPagamento?.addEventListener('change', () => {
+    if (!els.fieldDtVencimento?.value?.trim()) {
+      faseManualOverride = false;
+      applyAutoFase();
+    }
+  });
+  els.fieldFase?.addEventListener('change', () => {
+    faseManualOverride = true;
   });
 
   els.btnNew?.addEventListener('click', () => void openModal());
