@@ -38,6 +38,7 @@ import {
 } from '../lib/format.js';
 import { LABELS, COLORS, FUNIL_STATUS_ORDER } from '../lib/constants.js';
 import { mountContactAvatar } from '../lib/contact-avatar.js';
+import { bindWhatsappChatButtons, renderWhatsappPhoneButton } from '../lib/whatsapp-chat.js';
 
 const PAGE_CONFIG = {
   comercial: {
@@ -173,19 +174,25 @@ function shortRef(descricao, max = 28) {
 function groupItemsForTable(list) {
   const map = new Map();
   for (const item of list) {
-    const key = `${item.participanteId}:${item.tipo}`;
+    const key = String(item.participanteId);
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(item);
   }
 
+  const tipoOrder = { patrocinio: 0, espaco: 1 };
+
   return [...map.values()].map((groupItems) => {
-    const sorted = [...groupItems].sort((a, b) =>
-      (a.descricao || '').localeCompare(b.descricao || '', 'pt-BR'),
-    );
+    const sorted = [...groupItems].sort((a, b) => {
+      const oa = tipoOrder[a.tipo] ?? 9;
+      const ob = tipoOrder[b.tipo] ?? 9;
+      if (oa !== ob) return oa - ob;
+      return (a.descricao || '').localeCompare(b.descricao || '', 'pt-BR');
+    });
     const valorTotal = sorted.reduce((s, i) => s + Number(i.valorTotal || 0), 0);
     const valorPago = sorted.reduce((s, i) => s + Number(i.valorPago || 0), 0);
     const valorFalta = Math.max(0, valorTotal - valorPago);
     const statuses = [...new Set(sorted.map((i) => i.status || 'neg'))];
+    const tipos = [...new Set(sorted.map((i) => i.tipo))];
 
     return {
       items: sorted,
@@ -193,12 +200,21 @@ function groupItemsForTable(list) {
       participanteId: sorted[0].participanteId,
       participanteNome: sorted[0].participanteNome,
       tipo: sorted[0].tipo,
+      tipos,
       valorTotal,
       valorPago,
       valorFalta,
       statuses,
     };
   });
+}
+
+function renderTipoBadges(tipos) {
+  const list = tipos?.length ? tipos : [];
+  if (!list.length) return '';
+  return list
+    .map((t) => `<span class="badge ${tipoBadgeClass(t)}">${TIPO_LABELS[t]}</span>`)
+    .join('');
 }
 
 const ICON_PAYMENT = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>`;
@@ -226,6 +242,7 @@ export function initArrecadacaoModule(
     onNavigate,
     openTarefaEditor,
     onEspacosDataChanged,
+    onOpenEspaco,
     currentUser,
     onOpenWhatsappChat,
   } = {},
@@ -466,11 +483,16 @@ export function initArrecadacaoModule(
     return `${d}/${m}/${y}`;
   }
 
-  function whatsappLink(phone) {
-    const digits = String(phone || '').replace(/\D/g, '');
-    if (!digits) return '';
-    const full = digits.startsWith('55') ? digits : `55${digits}`;
-    return `https://wa.me/${full}`;
+  function handleOpenWhatsappChat(participanteId, { closeLead = false } = {}) {
+    const id = Number(participanteId);
+    if (!Number.isInteger(id) || id < 1) return;
+    const p = getParticipanteById(id);
+    if (!String(p?.contatoTelefone || '').trim()) {
+      alert('Cadastre um WhatsApp para este lead nos dados do lead.');
+      return;
+    }
+    if (closeLead) closeLeadWorkspace();
+    onOpenWhatsappChat?.(id);
   }
 
   function readParticipanteInput() {
@@ -1030,27 +1052,26 @@ export function initArrecadacaoModule(
     tbody.innerHTML = pagamentos
       .map((p) => {
         const ref = showReferencia
-          ? `<td class="cell-muted">${escapeHtml(p.arrecadacaoDescricao || '—')}</td>`
+          ? `<td class="cell-ref" title="${escapeHtml(p.arrecadacaoDescricao || '')}">${escapeHtml(p.arrecadacaoDescricao || '—')}</td>`
           : '';
         const canDelete =
           allowDelete && arrecadacaoId != null && Number(p.arrecadacaoId) === Number(arrecadacaoId);
-        const actions = canDelete
-          ? `<td class="row-actions-icons">${actionIconBtn({
+        const actions = allowDelete
+          ? `<td class="col-acao">${canDelete ? actionIconBtn({
               action: 'excluir-pagamento',
               id: p.id,
               title: 'Remover pagamento',
               icon: ICON_DELETE,
               danger: true,
-            })}</td>`
-          : allowDelete
-            ? '<td></td>'
-            : '';
+            }) : ''}</td>`
+          : '';
+        const obs = p.obs ? escapeHtml(p.obs) : '—';
         return `
         <tr data-pagamento-id="${p.id}">
-          <td>${fmtDate(p.registradoEm)}</td>
+          <td class="col-data">${fmtDate(p.registradoEm)}</td>
           ${ref}
-          <td class="cell-money" style="color:#5dcaa5">${fmtMoney(p.valor)}</td>
-          <td class="${p.obs ? 'cell-muted' : 'cell-empty'}">${p.obs ? escapeHtml(p.obs) : '—'}</td>
+          <td class="col-valor cell-money">${fmtMoney(p.valor)}</td>
+          <td class="col-obs ${p.obs ? 'cell-muted' : 'cell-empty'}" title="${p.obs ? escapeHtml(p.obs) : ''}">${obs}</td>
           ${actions}
         </tr>
       `;
@@ -1070,10 +1091,21 @@ export function initArrecadacaoModule(
   function renderPagamentoResumo(item) {
     if (!els.pagamentoResumo) return;
     const falta = Math.max(0, item.valorTotal - item.valorPago);
+    const faltaClass = falta > 0 ? 'pagamento-resumo-valor--falta' : 'pagamento-resumo-valor--quitado';
+    const faltaLabel = falta > 0 ? fmtMoney(falta) : 'Quitado';
     els.pagamentoResumo.innerHTML = `
-      <div><span>Total:</span><strong>${fmtMoney(item.valorTotal)}</strong></div>
-      <div><span>Já pago:</span><strong style="color:#5dcaa5">${fmtMoney(item.valorPago)}</strong></div>
-      <div><span>Falta:</span><strong style="color:#fac775">${falta > 0 ? fmtMoney(falta) : 'Quitado'}</strong></div>
+      <div class="pagamento-resumo-item">
+        <span class="pagamento-resumo-label">Total</span>
+        <strong class="pagamento-resumo-valor">${fmtMoney(item.valorTotal)}</strong>
+      </div>
+      <div class="pagamento-resumo-item">
+        <span class="pagamento-resumo-label">Já pago</span>
+        <strong class="pagamento-resumo-valor pagamento-resumo-valor--pago">${fmtMoney(item.valorPago)}</strong>
+      </div>
+      <div class="pagamento-resumo-item">
+        <span class="pagamento-resumo-label">Falta</span>
+        <strong class="pagamento-resumo-valor ${faltaClass}">${faltaLabel}</strong>
+      </div>
     `;
   }
 
@@ -1088,8 +1120,6 @@ export function initArrecadacaoModule(
     });
     renderPagamentoHistoricoTable(els.pagamentoHistoricoParticipante, participante.pagamentos || [], {
       showReferencia: true,
-      allowDelete: true,
-      arrecadacaoId: item.id,
     });
     if (els.pagamentoHistoricoParticipanteSub) {
       els.pagamentoHistoricoParticipanteSub.textContent = item.participanteNome;
@@ -1384,7 +1414,7 @@ export function initArrecadacaoModule(
       <article class="arr-kanban-card${group.merged ? ' arr-kanban-card--grouped' : ''}" draggable="true" data-id="${primary.id}" data-group-ids="${groupIds}">
         <div class="arr-kanban-card-head">
           <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
-          <span class="badge ${tipoBadgeClass(group.tipo)}">${TIPO_LABELS[group.tipo]}</span>
+          ${renderTipoBadges(group.tipos || [group.tipo])}
         </div>
         ${refsHtml}
         <div class="arr-kanban-card-valores">
@@ -1619,19 +1649,7 @@ export function initArrecadacaoModule(
     return '';
   }
 
-  function renderLeadWhatsappChatButton() {
-    return `<button type="button" class="lw-field-ext lw-field-ext--whatsapp" data-action="open-whatsapp-chat" title="Abrir conversa no WhatsApp" aria-label="Abrir conversa no WhatsApp">↗</button>`;
-  }
-
-  function leadFieldExtButton(field, item, p, display) {
-    if (
-      field === 'whatsapp' &&
-      display !== '—' &&
-      String(p?.contatoTelefone || '').trim() &&
-      item?.participanteId
-    ) {
-      return renderLeadWhatsappChatButton();
-    }
+  function leadFieldExtButton(field, p, display) {
     const extUrl = leadFieldExternalLink(field, p);
     if (extUrl && display !== '—') {
       return `<a href="${extUrl}" class="lw-field-ext" target="_blank" rel="noopener noreferrer" title="Abrir em nova janela" aria-label="Abrir em nova janela" onclick="event.stopPropagation()">↗</a>`;
@@ -1639,16 +1657,46 @@ export function initArrecadacaoModule(
     return '';
   }
 
+  function renderLeadWhatsappValue(item, p, display) {
+    if (display === '—' || !item?.participanteId || !String(p?.contatoTelefone || '').trim()) {
+      return `<span>${escapeHtml(display)}</span>`;
+    }
+    return renderWhatsappPhoneButton({
+      participanteId: item.participanteId,
+      phone: p.contatoTelefone,
+      className: 'tbtn linkish wa-phone-btn lw-phone-btn',
+    });
+  }
+
   function renderLeadFieldRow(field, item, p) {
     const canEdit = leadFieldCanEdit(field, item);
     const display = leadFieldDisplayValue(field, item, p);
     const extUrl = leadFieldExternalLink(field, p);
-    const extBtn = leadFieldExtButton(field, item, p, display);
+    const extBtn = leadFieldExtButton(field, p, display);
     const isWhatsapp = field === 'whatsapp';
+
+    if (isWhatsapp) {
+      const phoneHtml = renderLeadWhatsappValue(item, p, display);
+      if (!canEdit) {
+        return `
+        <div class="lw-info-row" data-lw-row="${field}">
+          <dt>${escapeHtml(leadFieldLabel(field, item))}</dt>
+          <dd class="lw-field-cell lw-field-cell--static">${phoneHtml}</dd>
+        </div>`;
+      }
+      return `
+        <div class="lw-info-row" data-lw-row="${field}">
+          <dt>${escapeHtml(leadFieldLabel(field, item))}</dt>
+          <dd class="lw-field-cell lw-field-cell--whatsapp">
+            ${phoneHtml}
+            <button type="button" class="lw-field-btn lw-field-btn--compact" data-lw-field="${field}" title="Editar WhatsApp">Editar</button>
+          </dd>
+        </div>`;
+    }
 
     if (!canEdit) {
       const valueHtml =
-        !isWhatsapp && extUrl && display !== '—'
+        extUrl && display !== '—'
           ? `<a href="${extUrl}" class="lw-ext-link" target="_blank" rel="noopener noreferrer">${escapeHtml(display)}</a>`
           : `<span>${escapeHtml(display)}</span>`;
       return `
@@ -1671,6 +1719,71 @@ export function initArrecadacaoModule(
           ${extBtn}
         </dd>
       </div>`;
+  }
+
+  function findRelatedLeads(item) {
+    if (!item?.participanteId || item.tipo === 'artistico') return [];
+    return items.filter(
+      (x) =>
+        x.participanteId === item.participanteId && x.id !== item.id && x.tipo !== 'artistico',
+    );
+  }
+
+  function renderLeadVinculosBlock(item) {
+    const related = findRelatedLeads(item);
+    if (!related.length) return '';
+
+    const rows = related
+      .map((r) => {
+        const label =
+          r.tipo === 'espaco'
+            ? shortRef(r.descricao, 56)
+            : r.descricao && r.descricao !== 'Patrocínio'
+              ? `${TIPO_LABELS[r.tipo]} · ${r.descricao}`
+              : TIPO_LABELS[r.tipo];
+        const mapBtn =
+          r.espacoId && (r.espacoNumero != null || onOpenEspaco)
+            ? `<button type="button" class="lw-vinculo-map tip-center" data-lw-espaco-id="${r.espacoId}" data-lw-espaco-numero="${r.espacoNumero ?? ''}" data-lw-espaco-grupo="${r.espacoGrupoSlug || ''}" data-tip="Ver no mapa de espaços" aria-label="Ver no mapa de espaços">Mapa</button>`
+            : '';
+        return `<li class="lw-vinculo-item">
+          <button type="button" class="lw-vinculo-btn" data-lw-vinculo-id="${r.id}">
+            <span class="badge ${tipoBadgeClass(r.tipo)}">${TIPO_LABELS[r.tipo]}</span>
+            <span class="lw-vinculo-label">${escapeHtml(label)}</span>
+            <span class="badge ${r.status}">${escapeHtml(etapaLabel(r.status))}</span>
+          </button>
+          ${mapBtn}
+        </li>`;
+      })
+      .join('');
+
+    return `
+      <div class="lw-vinculos">
+        <h3 class="lw-vinculos-title">Vínculos</h3>
+        <p class="lw-hint lw-vinculos-hint">Patrocínio e espaço físico do mesmo participante ficam ligados aqui.</p>
+        <ul class="lw-vinculos-list">${rows}</ul>
+      </div>`;
+  }
+
+  function bindLeadVinculosHandlers(root) {
+    root?.querySelectorAll('[data-lw-vinculo-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.lwVinculoId);
+        if (id) void openLeadDetailModal(id);
+      });
+    });
+    root?.querySelectorAll('[data-lw-espaco-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const espacoId = Number(btn.dataset.lwEspacoId);
+        const numero = Number(btn.dataset.lwEspacoNumero) || null;
+        const grupoSlug = btn.dataset.lwEspacoGrupo || '';
+        if (onOpenEspaco) {
+          void onOpenEspaco({ espacoId, numero, grupoSlug });
+        } else if (onNavigate) {
+          onNavigate('espacos');
+        }
+      });
+    });
   }
 
   function renderLeadDealPanel(item) {
@@ -1730,6 +1843,7 @@ export function initArrecadacaoModule(
         ${editableRows.join('')}
         ${staticRows.join('')}
       </dl>
+      ${renderLeadVinculosBlock(item)}
       ${renderSeguidoresHistoricoBlock(item)}
       <p class="lw-meta cell-muted">Cadastro: ${fmtDate(item.createdAt)} · Atualizado: ${fmtDate(item.updatedAt)}</p>
     `;
@@ -1737,13 +1851,9 @@ export function initArrecadacaoModule(
     els.leadDealPanel.querySelectorAll('[data-lw-field]').forEach((btn) => {
       btn.addEventListener('click', () => startLeadFieldEdit(btn.dataset.lwField, item));
     });
+    bindLeadVinculosHandlers(els.leadDealPanel);
 
-    els.leadDealPanel.querySelectorAll('[data-action="open-whatsapp-chat"]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openLeadWhatsappChat();
-      });
-    });
+    bindLeadWhatsappChatAction(els.leadDealPanel);
     renderLeadOrigemFields(item);
   }
 
@@ -1798,6 +1908,9 @@ export function initArrecadacaoModule(
           const { item: updated } = await updateArrecadacao(item.id, { status });
           if (updated) await refreshLeadDetailUi(updated);
           await loadArrecadacao();
+          if (item.tipo === 'espaco' || item.tipo === 'patrocinio') {
+            await onEspacosDataChanged?.();
+          }
         } catch (err) {
           alert(err.message);
         }
@@ -2251,6 +2364,7 @@ export function initArrecadacaoModule(
     mountContactAvatar(
       els.leadAvatar,
       {
+        participanteId: item?.participanteId,
         participanteNome: item?.participanteNome,
         avatarUrl: p?.avatarUrl,
       },
@@ -2315,7 +2429,7 @@ export function initArrecadacaoModule(
     const display = formatPhoneDisplay(phone);
     return `
       <article class="lead-interacao-item lead-interacao-item--whatsapp-chat" data-tipo="whatsapp-chat">
-        <button type="button" class="lead-interacao-whatsapp-chat" data-action="open-whatsapp-chat">
+        <button type="button" class="lead-interacao-whatsapp-chat" data-action="open-whatsapp-chat" data-participante-id="${item?.participanteId || ''}">
           <span class="lead-interacao-whatsapp-chat-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="22" height="22">
               <path fill="currentColor" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
@@ -2331,12 +2445,9 @@ export function initArrecadacaoModule(
   }
 
   function bindLeadWhatsappChatAction(root = document) {
-    root.querySelectorAll('[data-action="open-whatsapp-chat"]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openLeadWhatsappChat();
-      });
-    });
+    bindWhatsappChatButtons(root, (participanteId) =>
+      handleOpenWhatsappChat(participanteId, { closeLead: true }),
+    );
   }
 
   function renderLeadWhatsappInteraction(item = leadDetailItem) {
@@ -2400,18 +2511,6 @@ export function initArrecadacaoModule(
   function renderLeadWhatsappAction(item) {
     renderLeadWhatsappInteraction(item);
     renderInteracoesList();
-  }
-
-  function openLeadWhatsappChat() {
-    const participanteId = leadDetailItem?.participanteId;
-    if (!participanteId) return;
-    const p = getParticipanteById(participanteId);
-    if (!String(p?.contatoTelefone || '').trim()) {
-      alert('Cadastre um WhatsApp para este lead nos dados do lead.');
-      return;
-    }
-    closeLeadWorkspace();
-    onOpenWhatsappChat?.(participanteId);
   }
 
   function renderResponsavelOptions(selectEl, selectedId = null) {
@@ -2636,24 +2735,35 @@ export function initArrecadacaoModule(
   }
 
   async function openLeadDetail(id, { tipo, navigate = false } = {}) {
-    if (tipo === 'artistico') {
+    const numId = Number(id);
+    let item = resolveLeadItem(numId);
+    if (!item) {
+      item = await ensureLeadItem(numId);
+    }
+    const resolvedTipo = tipo || item?.tipo;
+
+    if (resolvedTipo === 'artistico') {
       await switchLeadScope('artistico', { navigate });
-    } else if (tipo === 'patrocinio' || tipo === 'espaco') {
+    } else if (
+      resolvedTipo === 'patrocinio' ||
+      resolvedTipo === 'espaco' ||
+      resolvedTipo === 'contato'
+    ) {
       await switchLeadScope('comercial', { navigate });
-    } else if (!items.find((x) => x.id === id)) {
+    } else if (!items.find((x) => x.id === numId)) {
       for (const scope of ['comercial', 'artistico']) {
         const data = await fetchArrecadacao({ scope });
-        const found = itemsForScope(data.items || [], scope).find((x) => x.id === id);
+        const found = itemsForScope(data.items || [], scope).find((x) => x.id === numId);
         if (found) {
           await switchLeadScope(scope, { navigate });
           break;
         }
       }
     }
-    if (!resolveLeadItem(id)) {
+    if (!resolveLeadItem(numId)) {
       await loadArrecadacao();
     }
-    return openLeadDetailModal(id);
+    return openLeadDetailModal(numId);
   }
 
   async function switchLeadScope(scope, { navigate = false } = {}) {
@@ -2810,6 +2920,11 @@ export function initArrecadacaoModule(
         await updateArrecadacao(id, { status });
       }
       await loadArrecadacao();
+      const needsEspacosRefresh = toMove.some((id) => {
+        const item = items.find((x) => x.id === id);
+        return item?.tipo === 'espaco' || item?.tipo === 'patrocinio';
+      });
+      if (needsEspacosRefresh) await onEspacosDataChanged?.();
     } catch (err) {
       alert(err.message);
     }
@@ -3133,7 +3248,6 @@ export function initArrecadacaoModule(
     const p = getParticipanteById(item.participanteId);
     const ig = p?.instagram ? formatInstagram(p.instagram) : '';
     const wa = p?.contatoTelefone ? formatPhoneDisplay(p.contatoTelefone) : '';
-    const waUrl = whatsappLink(p?.contatoTelefone);
     const lines = [
       `<button type="button" class="arr-ref-chip arr-ref-chip--nome" data-action="abrir-lead" data-id="${item.id}" title="Abrir lead">${escapeHtml(item.participanteNome)}</button>`,
     ];
@@ -3142,11 +3256,10 @@ export function initArrecadacaoModule(
     }
     if (wa) {
       lines.push(
-        `<div class="arr-artistico-contato-line">${
-          waUrl
-            ? `<a href="${waUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${escapeHtml(wa)}</a>`
-            : escapeHtml(wa)
-        }</div>`,
+        `<div class="arr-artistico-contato-line">${renderWhatsappPhoneButton({
+          participanteId: item.participanteId,
+          phone: p?.contatoTelefone,
+        })}</div>`,
       );
     }
     if (lines.length === 1) {
@@ -3175,6 +3288,8 @@ export function initArrecadacaoModule(
         openLeadDetailModal(Number(row.dataset.id));
       });
     });
+
+    bindWhatsappChatButtons(els.table, handleOpenWhatsappChat);
   }
 
   function renderArtisticoTable() {
@@ -3284,7 +3399,7 @@ export function initArrecadacaoModule(
           </td>
           <td class="arr-cell-situacao">
             <div class="arr-situacao-stack">
-              <span class="badge ${tipoBadgeClass(group.tipo)}">${TIPO_LABELS[group.tipo]}</span>
+              ${renderTipoBadges(group.tipos || [group.tipo])}
               ${statusBadges}
             </div>
           </td>

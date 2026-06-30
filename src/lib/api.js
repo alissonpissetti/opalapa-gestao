@@ -131,6 +131,32 @@ export function deleteUser(id) {
   return apiRequest(`/api/users/${id}`, { method: 'DELETE' });
 }
 
+export function fetchPermissionCatalog() {
+  return apiRequest('/api/permission-groups/catalog');
+}
+
+export function fetchPermissionGroups() {
+  return apiRequest('/api/permission-groups');
+}
+
+export function createPermissionGroup(data) {
+  return apiRequest('/api/permission-groups', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updatePermissionGroup(id, data) {
+  return apiRequest(`/api/permission-groups/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deletePermissionGroup(id) {
+  return apiRequest(`/api/permission-groups/${id}`, { method: 'DELETE' });
+}
+
 export function fetchParticipantes() {
   return apiRequest('/api/participantes');
 }
@@ -323,6 +349,73 @@ export function deleteMarketingCriativo(id) {
   return apiRequest(`/api/marketing/criativos/${id}`, { method: 'DELETE' });
 }
 
+export function fetchProducaoCronologia() {
+  return apiRequest('/api/producao/cronologia');
+}
+
+export function createProducaoCronologia(data) {
+  return apiRequest('/api/producao/cronologia', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateProducaoCronologia(id, data) {
+  return apiRequest(`/api/producao/cronologia/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProducaoCronologia(id) {
+  return apiRequest(`/api/producao/cronologia/${id}`, { method: 'DELETE' });
+}
+
+export function fetchProducaoPremiacoes() {
+  return apiRequest('/api/producao/premiacoes');
+}
+
+export function createProducaoPremiacao(data) {
+  return apiRequest('/api/producao/premiacoes', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateProducaoPremiacao(id, data) {
+  return apiRequest(`/api/producao/premiacoes/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProducaoPremiacao(id) {
+  return apiRequest(`/api/producao/premiacoes/${id}`, { method: 'DELETE' });
+}
+
+export function fetchFinanceiroResultado() {
+  return apiRequest('/api/financeiro/resultado');
+}
+
+export function carregarModeloFinanceiroResultado({ substituir = false } = {}) {
+  return apiRequest('/api/financeiro/resultado/carregar-modelo', {
+    method: 'POST',
+    body: JSON.stringify({ substituir }),
+  });
+}
+
+export function createFinanceiroLinha(data) {
+  return apiRequest('/api/financeiro/resultado/linhas', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateFinanceiroLinha(id, data) {
+  return apiRequest(`/api/financeiro/resultado/linhas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteFinanceiroLinha(id) {
+  return apiRequest(`/api/financeiro/resultado/linhas/${id}`, { method: 'DELETE' });
+}
+
 export function fetchWhatsappStatus() {
   return apiRequest('/api/whatsapp/status');
 }
@@ -367,6 +460,11 @@ export function sendLeadWhatsappReaction(arrecadacaoId, mensagemId, emoji) {
     method: 'POST',
     body: JSON.stringify({ emoji }),
   });
+}
+
+export function fetchLinkPreview(url) {
+  const q = new URLSearchParams({ url: String(url || '') });
+  return apiRequest(`/api/link-preview?${q}`);
 }
 
 export function fetchWhatsappInbox() {

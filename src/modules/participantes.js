@@ -5,6 +5,7 @@ import {
   deleteParticipante,
 } from '../lib/api.js';
 import { fmtDate, escapeHtml } from '../lib/format.js';
+import { bindWhatsappChatButtons, renderWhatsappPhoneButton } from '../lib/whatsapp-chat.js';
 
 function formatPhone(phone) {
   if (!phone) return '—';
@@ -24,7 +25,7 @@ function formatInstagram(ig) {
   return ig.startsWith('@') ? ig : `@${ig}`;
 }
 
-export function initParticipantesModule(store, { onSaved } = {}) {
+export function initParticipantesModule(store, { onSaved, onOpenWhatsappChat } = {}) {
   const els = {
     table: document.getElementById('participantes-table'),
     summary: document.getElementById('participantes-summary'),
@@ -213,7 +214,7 @@ export function initParticipantesModule(store, { onSaved } = {}) {
           <td class="${p.instagram ? '' : 'cell-empty'}">${p.instagram ? escapeHtml(formatInstagram(p.instagram)) : '—'}</td>
           <td class="${p.seguidores != null ? '' : 'cell-empty'}">${formatSeguidores(p.seguidores)}</td>
           <td class="${p.contatoNome ? '' : 'cell-empty'}">${p.contatoNome ? escapeHtml(p.contatoNome) : '—'}</td>
-          <td class="${p.contatoTelefone ? '' : 'cell-empty'}">${p.contatoTelefone ? formatPhone(p.contatoTelefone) : '—'}</td>
+          <td class="${p.contatoTelefone ? '' : 'cell-empty'}">${p.contatoTelefone ? renderWhatsappPhoneButton({ participanteId: p.id, phone: p.contatoTelefone }) : '—'}</td>
           <td class="cell-muted">${fmtDate(p.updatedAt || p.createdAt)}</td>
           <td class="row-actions">
             <button class="tbtn" type="button" data-action="edit" data-id="${p.id}">Editar</button>
@@ -250,7 +251,8 @@ export function initParticipantesModule(store, { onSaved } = {}) {
     });
 
     els.table.querySelectorAll('tr[data-id]').forEach((row) => {
-      row.addEventListener('click', () => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="open-whatsapp-chat"]')) return;
         const p = participantes.find((x) => x.id === Number(row.dataset.id));
         if (p) openModal(p);
       });
@@ -259,6 +261,7 @@ export function initParticipantesModule(store, { onSaved } = {}) {
       chk.addEventListener('change', () => toggleSelect(Number(chk.dataset.id), chk.checked));
     });
 
+    bindWhatsappChatButtons(els.table, onOpenWhatsappChat);
     updateSelectionUi();
   }
 

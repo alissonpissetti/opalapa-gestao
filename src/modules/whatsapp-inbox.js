@@ -18,7 +18,7 @@ import {
   bindContactAvatarImages,
   mountContactAvatar,
   participantInitial,
-  resolveApiAssetUrl,
+  avatarImgSrc,
 } from '../lib/contact-avatar.js';
 
 function wsUrl() {
@@ -37,11 +37,17 @@ function wsUrl() {
 
 function renderContactAvatar(contact, className = 'wa-thread-avatar') {
   const initial = participantInitial(contact?.participanteNome);
-  if (!contact?.avatarUrl) {
-    return `<span class="${className}" data-initial="${escapeHtml(initial)}">${escapeHtml(initial)}</span>`;
+  const participanteId = Number(contact?.participanteId);
+  const idAttr =
+    Number.isInteger(participanteId) && participanteId > 0
+      ? ` data-participante-id="${participanteId}"`
+      : '';
+  const hasPhoto = Boolean(contact?.avatarUrl);
+  if (!hasPhoto) {
+    return `<span class="${className}" data-initial="${escapeHtml(initial)}"${idAttr}>${escapeHtml(initial)}</span>`;
   }
-  const src = escapeHtml(resolveApiAssetUrl(contact.avatarUrl));
-  return `<span class="${className} ${className}--photo" data-initial="${escapeHtml(initial)}"><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
+  const src = escapeHtml(avatarImgSrc(contact));
+  return `<span class="${className} ${className}--photo" data-initial="${escapeHtml(initial)}"${idAttr}><img src="${src}" alt="" decoding="async" /></span>`;
 }
 
 function bindContactAvatars(container) {
@@ -95,6 +101,28 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
   let unbindReactions = null;
   let unbindCompose = null;
   let draftInputTimer = null;
+  let lastThreadsContentKey = '';
+
+  function threadsContentKey(list) {
+    return (list || [])
+      .map((t) => {
+        const preview = previewText(t.ultimaMensagem);
+        const time = t.ultimaMensagem?.enviadoEm || '';
+        const funil = t.etapaFunil?.titulo || '';
+        const hasAvatar = t.avatarUrl ? '1' : '0';
+        return `${t.participanteId}|${t.participanteNome}|${preview}|${time}|${funil}|${hasAvatar}`;
+      })
+      .join('\n');
+  }
+
+  function updateThreadActiveState() {
+    if (!threadList) return;
+    const activeId = activeThread?.participanteId;
+    threadList.querySelectorAll('.wa-thread').forEach((btn) => {
+      const id = Number(btn.dataset.participanteId);
+      btn.classList.toggle('wa-thread--active', id === activeId);
+    });
+  }
 
   function persistActiveDraft() {
     if (!activeThread?.participanteId || !chatInput) return;
@@ -218,17 +246,27 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     });
   }
 
-  function renderThreads() {
+  function renderThreads({ force = false } = {}) {
     if (!threadList) return;
     const q = filter.trim().toLowerCase();
     const list = q ? filteredThreads() : threads;
 
     if (!list.length) {
+      const emptyKey = `empty:${q}`;
+      if (!force && emptyKey === lastThreadsContentKey) return;
+      lastThreadsContentKey = emptyKey;
       threadList.innerHTML = q
         ? '<p class="wa-thread-empty">Nenhum lead encontrado para esta busca.</p>'
         : '<p class="wa-thread-empty">Nenhum lead com WhatsApp neste evento.</p>';
       return;
     }
+
+    const contentKey = `${q}::${threadsContentKey(list)}`;
+    if (!force && contentKey === lastThreadsContentKey) {
+      updateThreadActiveState();
+      return;
+    }
+    lastThreadsContentKey = contentKey;
 
     threadList.innerHTML = list
       .map((t) => {
@@ -362,6 +400,24 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     }
   }
 
+  function resolveThreadArrecadacaoId(thread) {
+    if (!thread) return null;
+    if (messages.length) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const arrecadacaoId = Number(messages[i]?.arrecadacaoId);
+        if (arrecadacaoId > 0) return arrecadacaoId;
+      }
+    }
+    const ids = thread.arrecadacaoIds || [];
+    if (ids.length > 1) return ids[ids.length - 1];
+    return thread.primaryArrecadacaoId || null;
+  }
+
+  function resolveThreadLeadTipo(thread, arrecadacaoId) {
+    if (thread?.leadTipo && thread.leadTipo !== 'contato') return thread.leadTipo;
+    return thread?.leadTipo || undefined;
+  }
+
   function showChatPane(show) {
     chatEmpty?.classList.toggle('hidden', show);
     chatActive?.classList.toggle('hidden', !show);
@@ -395,6 +451,11 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     activeThread = thread;
     if (chatName) chatName.textContent = thread.participanteNome;
     renderChatFunil(thread);
+    btnOpenLead?.classList.toggle(
+      'hidden',
+      !(thread?.primaryArrecadacaoId || thread?.arrecadacaoIds?.length) ||
+        thread?.leadTipo === 'contato',
+    );
     if (chatPhone) {
       chatPhone.textContent = thread.telefone ? formatPhoneDisplay(thread.telefone) : '';
     }
@@ -402,7 +463,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
       mountContactAvatar(chatAvatar, thread, 'wa-chat-avatar');
     }
     showChatPane(true);
-    renderThreads();
+    updateThreadActiveState();
     loadDraftForThread(participanteId);
     chatMessages.innerHTML = '<p class="wa-chat-placeholder">Carregando conversa…</p>';
     try {
@@ -621,6 +682,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
 
   async function openInbox({ participanteId = null } = {}) {
     persistActiveDraft();
+    lastThreadsContentKey = '';
     screen.classList.remove('hidden');
     screen.setAttribute('aria-hidden', 'false');
     document.body.classList.add('wa-inbox-open');
@@ -637,7 +699,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
         await selectThread(thread.participanteId);
       } else {
         alert(
-          'Não foi possível abrir a conversa. Verifique se o participante tem WhatsApp cadastrado e lead vinculado neste evento.',
+          'Não foi possível abrir a conversa. Verifique se o contato tem WhatsApp cadastrado.',
         );
       }
     }
@@ -649,6 +711,7 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
 
   function closeInbox() {
     persistActiveDraft();
+    lastThreadsContentKey = '';
     clearTimeout(draftInputTimer);
     draftInputTimer = null;
     screen.classList.add('hidden');
@@ -714,10 +777,13 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
     showChatPane(false);
     renderThreads();
   });
-  btnOpenLead?.addEventListener('click', () => {
-    if (!activeThread?.primaryArrecadacaoId) return;
+  btnOpenLead?.addEventListener('click', async () => {
+    if (!activeThread) return;
+    const arrecadacaoId = resolveThreadArrecadacaoId(activeThread);
+    if (!arrecadacaoId) return;
+    const tipo = resolveThreadLeadTipo(activeThread, arrecadacaoId);
     closeInbox();
-    onOpenLead?.(activeThread.primaryArrecadacaoId);
+    await onOpenLead?.(arrecadacaoId, { tipo });
   });
   btnChatSync?.addEventListener('click', () => {
     syncActiveThread();

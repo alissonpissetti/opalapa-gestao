@@ -5,7 +5,7 @@ const apiPort = Number(process.env.PORT) || 3001;
 const vitePort = Number(process.env.VITE_PORT) || 5173;
 const ports = [...new Set([apiPort, vitePort])];
 
-function pidsOnPort(port) {
+function pidsOnPortUnix(port) {
   try {
     const out = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim();
     if (!out) return [];
@@ -15,9 +15,43 @@ function pidsOnPort(port) {
   }
 }
 
+function pidsOnPortWindows(port) {
+  try {
+    const out = execSync(`netstat -ano | findstr :${port}`, {
+      encoding: 'utf8',
+      shell: true,
+    });
+    const pids = new Set();
+    for (const line of out.split('\n')) {
+      if (!line.includes('LISTENING')) continue;
+      const parts = line.trim().split(/\s+/);
+      const pid = parts[parts.length - 1];
+      if (pid && pid !== '0') pids.add(pid);
+    }
+    return [...pids];
+  } catch {
+    return [];
+  }
+}
+
+function pidsOnPort(port) {
+  if (process.platform === 'win32') return pidsOnPortWindows(port);
+  return pidsOnPortUnix(port);
+}
+
 function killPid(pid) {
   const id = Number(pid);
   if (!Number.isInteger(id) || id <= 0) return false;
+
+  if (process.platform === 'win32') {
+    try {
+      execSync(`taskkill /PID ${id} /F`, { stdio: 'ignore', shell: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
     process.kill(id, 'SIGTERM');
     return true;

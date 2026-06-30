@@ -18,33 +18,119 @@
       <div class="login-card">
         <div class="login-brand">Opalapa <span>· Gestão</span></div>
         <h1>Entrar</h1>
-        <p class="login-subtitle">Use seu e-mail ou celular e senha para acessar o sistema.</p>
-        <form id="login-form" class="login-form" autocomplete="on">
-          <div class="field">
-            <label for="login-input">E-mail ou celular</label>
-            <input
-              id="login-input"
-              type="text"
-              name="login"
-              autocomplete="username"
-              placeholder="voce@email.com ou (11) 99999-9999"
-              required
-            />
-          </div>
-          <div class="field">
-            <label for="login-password">Senha</label>
-            <input
-              id="login-password"
-              type="password"
-              name="password"
-              autocomplete="current-password"
-              placeholder="Sua senha"
-              required
-            />
-          </div>
-          <p id="login-error" class="login-error" role="alert"></p>
-          <button class="btn primary login-submit" type="submit" id="login-submit">Entrar</button>
-        </form>
+        <p class="login-subtitle" id="login-subtitle">Entre com e-mail ou celular e senha.</p>
+
+        <div class="login-tabs" role="tablist" aria-label="Forma de login">
+          <button type="button" class="login-tab active" data-panel="password" role="tab" aria-selected="true">Senha</button>
+          <button type="button" class="login-tab" data-panel="sms" role="tab" aria-selected="false">Código SMS</button>
+        </div>
+
+        <div id="login-panel-password" class="login-panel">
+          <form id="login-form-password" class="login-form" autocomplete="on">
+            <div class="field">
+              <label for="login-input">E-mail ou celular</label>
+              <input
+                id="login-input"
+                type="text"
+                name="login"
+                autocomplete="username"
+                placeholder="voce@email.com ou (11) 99999-9999"
+                required
+              />
+            </div>
+            <div class="field">
+              <label for="login-password">Senha</label>
+              <input
+                id="login-password"
+                type="password"
+                name="password"
+                autocomplete="current-password"
+                placeholder="Sua senha"
+                required
+              />
+            </div>
+            <p class="login-forgot-wrap">
+              <a href="#" id="login-forgot-link">Esqueci minha senha</a>
+            </p>
+            <button class="btn primary login-submit" type="submit" id="login-submit-password">Entrar</button>
+          </form>
+        </div>
+
+        <div id="login-panel-sms" class="login-panel hidden">
+          <form id="login-form-sms" class="login-form">
+            <div class="field">
+              <label for="login-sms-phone">Celular cadastrado</label>
+              <input
+                id="login-sms-phone"
+                type="tel"
+                inputmode="numeric"
+                autocomplete="tel"
+                placeholder="(11) 99999-9999"
+                required
+              />
+            </div>
+            <div class="field hidden" id="login-sms-code-wrap">
+              <label for="login-sms-code">Código recebido por SMS</label>
+              <input
+                id="login-sms-code"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                placeholder="000000"
+                maxlength="6"
+                pattern="[0-9]{6}"
+              />
+            </div>
+            <button class="btn" type="button" id="login-sms-send">Enviar código</button>
+            <button class="btn primary login-submit hidden" type="submit" id="login-sms-submit">Entrar com código</button>
+          </form>
+        </div>
+
+        <div id="login-panel-forgot" class="login-panel hidden">
+          <form id="login-form-forgot" class="login-form">
+            <div class="field">
+              <label for="login-forgot-input">E-mail ou celular</label>
+              <input
+                id="login-forgot-input"
+                type="text"
+                autocomplete="username"
+                placeholder="voce@email.com ou (11) 99999-9999"
+                required
+              />
+              <p class="field-hint">Enviaremos o código para o celular cadastrado nesta conta.</p>
+            </div>
+            <div class="field hidden" id="login-forgot-code-wrap">
+              <label for="login-forgot-code">Código SMS</label>
+              <input
+                id="login-forgot-code"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                placeholder="000000"
+                maxlength="6"
+                pattern="[0-9]{6}"
+              />
+            </div>
+            <div class="field hidden" id="login-forgot-password-wrap">
+              <label for="login-forgot-password">Nova senha</label>
+              <input
+                id="login-forgot-password"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Mínimo 6 caracteres"
+                minlength="6"
+              />
+            </div>
+            <button class="btn" type="button" id="login-forgot-send">Enviar código</button>
+            <button class="btn primary login-submit hidden" type="submit" id="login-forgot-submit">Redefinir senha</button>
+            <p class="login-forgot-wrap">
+              <a href="#" id="login-forgot-back">Voltar ao login</a>
+            </p>
+          </form>
+        </div>
+
+        <p id="login-hint" class="login-hint hidden" role="status"></p>
+        <p id="login-error" class="login-error" role="alert"></p>
       </div>
     </section>
 
@@ -62,6 +148,25 @@
           <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico">Artístico</a>
           <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas">Tarefas</a>
           <a href="#marketing" class="nav-link" data-view="marketing" id="nav-marketing">Marketing</a>
+          <div class="nav-dropdown" id="nav-producao">
+            <button type="button" class="nav-dropdown-toggle" id="nav-producao-toggle" aria-expanded="false" aria-haspopup="true">
+              Produção
+              <span class="nav-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="nav-dropdown-menu" role="menu">
+              <a href="#cronologia" class="nav-link" data-view="cronologia" id="nav-cronologia" role="menuitem">Cronologia</a>
+              <a href="#premiacoes" class="nav-link" data-view="premiacoes" id="nav-premiacoes" role="menuitem">Premiações</a>
+            </div>
+          </div>
+          <div class="nav-dropdown" id="nav-financeiro">
+            <button type="button" class="nav-dropdown-toggle" id="nav-financeiro-toggle" aria-expanded="false" aria-haspopup="true">
+              Financeiro
+              <span class="nav-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="nav-dropdown-menu" role="menu">
+              <a href="#financeiro-gestao" class="nav-link" data-view="financeiro-gestao" id="nav-financeiro-gestao" role="menuitem">Gestão</a>
+            </div>
+          </div>
           <div class="nav-dropdown" id="nav-acessos">
             <button type="button" class="nav-dropdown-toggle" id="nav-acessos-toggle" aria-expanded="false" aria-haspopup="true">
               Acessos
@@ -69,6 +174,7 @@
             </button>
             <div class="nav-dropdown-menu" role="menu">
               <a href="#usuarios" class="nav-link" data-view="usuarios" id="nav-usuarios" role="menuitem">Usuários</a>
+              <a href="#permissoes" class="nav-link" data-view="permissoes" id="nav-permissoes" role="menuitem">Grupos</a>
             </div>
           </div>
           </div>
@@ -506,6 +612,117 @@
       </section>
     </main>
 
+    <main id="view-cronologia" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Cronologia</h1>
+          <p class="subtitle">Pessoas e atrações do Opalapa (1968–1992).</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-cronologia-new">Novo registro</button>
+      </div>
+      <div class="report-filters cronologia-filters">
+        <div class="field field-inline">
+          <label for="cronologia-filter-ano">Ano</label>
+          <select id="cronologia-filter-ano"></select>
+        </div>
+        <div class="field field-inline">
+          <label for="cronologia-filter-situacao">Situação</label>
+          <select id="cronologia-filter-situacao">
+            <option value="">Todas</option>
+            <option value="confirmado">Confirmado</option>
+            <option value="negociacao">Negociação</option>
+            <option value="desejado">Desejado</option>
+          </select>
+        </div>
+      </div>
+      <p class="report-summary" id="cronologia-summary"></p>
+      <div class="table-wrap">
+        <table class="table-cronologia">
+          <thead>
+            <tr>
+              <th>Ano</th>
+              <th>Veículo</th>
+              <th>Nome</th>
+              <th>Telefone</th>
+              <th>Cidade/UF</th>
+              <th>Situação</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="cronologia-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-premiacoes" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Premiações</h1>
+          <p class="subtitle">Prêmios do evento e vencedores, quando definidos.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-premiacoes-new">Novo prêmio</button>
+      </div>
+      <p class="report-summary" id="premiacoes-summary"></p>
+      <div class="table-wrap">
+        <table class="table-premiacoes">
+          <thead>
+            <tr>
+              <th>Prêmio</th>
+              <th>Descrição</th>
+              <th>Vencedor</th>
+              <th>Telefone</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="premiacoes-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-financeiro-gestao" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Gestão financeira</h1>
+          <p class="subtitle">Resultado do evento — orçamento, realizado e status por item (aba Resultado).</p>
+        </div>
+        <div class="report-head-actions report-head-actions--split">
+          <button class="tbtn hidden" type="button" id="btn-financeiro-modelo">Recarregar modelo</button>
+          <button class="tbtn primary" type="button" id="btn-financeiro-new">Nova linha</button>
+        </div>
+      </div>
+      <p class="report-summary" id="financeiro-summary"></p>
+      <div class="financeiro-empty hidden" id="financeiro-empty">
+        <p>Nenhuma linha neste evento. Carregue o modelo da planilha para preencher a estrutura completa.</p>
+        <button class="tbtn primary" type="button" id="btn-financeiro-empty-modelo">Carregar modelo da planilha</button>
+      </div>
+      <div class="table-wrap financeiro-scroll" id="financeiro-table-wrap">
+        <table class="table-financeiro">
+          <thead>
+            <tr>
+              <th class="fin-col-item">Item</th>
+              <th class="fin-col-money">Orç. categoria</th>
+              <th class="fin-col-sub">Sub-Item</th>
+              <th>Prev. Qtde</th>
+              <th>Diária</th>
+              <th class="fin-col-money">Orçamento</th>
+              <th class="fin-col-money">R$ Unit</th>
+              <th class="fin-col-money">R$ Bonificado</th>
+              <th class="fin-col-money">R$ Total</th>
+              <th class="fin-col-money">Pré Evento</th>
+              <th class="fin-col-money">Pós Evento</th>
+              <th class="fin-col-money">Realizado</th>
+              <th>Status</th>
+              <th>Dt Prevista</th>
+              <th>Dt Realiz</th>
+              <th>Quem?</th>
+              <th class="fin-col-money">Reembolso</th>
+            </tr>
+          </thead>
+          <tbody id="financeiro-table"></tbody>
+        </table>
+      </div>
+    </main>
+
     <main id="view-usuarios" class="page view hidden">
       <div class="report-head">
         <div>
@@ -522,11 +739,37 @@
               <th>Nome</th>
               <th>E-mail</th>
               <th>Celular</th>
+              <th>Grupo</th>
               <th>Cadastro</th>
               <th>Ações</th>
             </tr>
           </thead>
           <tbody id="users-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-permissoes" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Grupos de permissão</h1>
+          <p class="subtitle">Defina quais áreas e telas cada grupo pode acessar no sistema.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-permissoes-new">Novo grupo</button>
+      </div>
+      <p class="report-summary" id="permissoes-summary"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Grupo</th>
+              <th>Descrição</th>
+              <th>Telas</th>
+              <th>Usuários</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="permissoes-table"></tbody>
         </table>
       </div>
     </main>
@@ -735,26 +978,28 @@
     </div>
 
     <div class="modal-bg" id="pagamento-modal-bg">
-      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="pagamento-modal-title">
+      <div class="modal modal-pagamento" role="dialog" aria-modal="true" aria-labelledby="pagamento-modal-title">
         <h2 id="pagamento-modal-title">Registrar pagamento</h2>
         <p class="msub" id="pagamento-modal-sub"></p>
         <div class="pagamento-resumo" id="pagamento-resumo"></div>
-        <div class="field">
-          <label for="pagamento-valor">Valor recebido (R$)</label>
-          <input
-            id="pagamento-valor"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            placeholder="0,00"
-            maxlength="18"
-          />
+        <div class="pagamento-form">
+          <div class="field pagamento-field-valor">
+            <label for="pagamento-valor">Valor recebido (R$)</label>
+            <input
+              id="pagamento-valor"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="0,00"
+              maxlength="18"
+            />
+          </div>
+          <div class="field">
+            <label for="pagamento-obs">Observações</label>
+            <textarea id="pagamento-obs" rows="2" placeholder="Ex.: PIX, parcela 1 de 3, comprovante…"></textarea>
+          </div>
         </div>
-        <div class="field">
-          <label for="pagamento-obs">Observações</label>
-          <textarea id="pagamento-obs" placeholder="Ex.: PIX, parcela 1 de 3, comprovante…"></textarea>
-        </div>
-        <div class="btns">
+        <div class="btns pagamento-btns">
           <button class="btn" type="button" id="pagamento-btn-cancel">Cancelar</button>
           <button class="btn primary" type="button" id="pagamento-btn-save">Registrar pagamento</button>
         </div>
@@ -762,14 +1007,14 @@
           <div class="pagamento-historico-head">
             <h3>Histórico deste registro</h3>
           </div>
-          <div class="table-wrap">
-            <table>
+          <div class="pagamento-table-wrap">
+            <table class="pagamento-table">
               <thead>
                 <tr>
-                  <th>Data</th>
-                  <th>Valor</th>
-                  <th>Observações</th>
-                  <th></th>
+                  <th class="col-data">Data</th>
+                  <th class="col-valor">Valor</th>
+                  <th class="col-obs">Observações</th>
+                  <th class="col-acao" aria-label="Ações"><span class="sr-only">Ações</span></th>
                 </tr>
               </thead>
               <tbody id="pagamento-historico-registro"></tbody>
@@ -781,14 +1026,14 @@
             <h3>Histórico do participante</h3>
             <p class="field-hint" id="pagamento-historico-participante-sub"></p>
           </div>
-          <div class="table-wrap">
-            <table>
+          <div class="pagamento-table-wrap">
+            <table class="pagamento-table pagamento-table--participante">
               <thead>
                 <tr>
-                  <th>Data</th>
-                  <th>Referência</th>
-                  <th>Valor</th>
-                  <th>Observações</th>
+                  <th class="col-data">Data</th>
+                  <th class="col-ref">Referência</th>
+                  <th class="col-valor">Valor</th>
+                  <th class="col-obs">Observações</th>
                 </tr>
               </thead>
               <tbody id="pagamento-historico-participante"></tbody>
@@ -1078,6 +1323,192 @@
       </div>
     </div>
 
+    <div class="modal-bg" id="cronologia-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cronologia-modal-title">
+        <h2 id="cronologia-modal-title">Cronologia</h2>
+        <p class="msub" id="cronologia-modal-sub"></p>
+        <p class="form-errors hidden" id="cronologia-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="cronologia-modal-veiculo">Veículo</label>
+          <input
+            id="cronologia-modal-veiculo"
+            type="text"
+            list="cronologia-veiculos-list"
+            placeholder="Ex.: Opala Diplomata, Caravan SS"
+            autocomplete="off"
+            required
+          />
+          <datalist id="cronologia-veiculos-list"></datalist>
+        </div>
+        <div class="field">
+          <label for="cronologia-modal-nome">Nome</label>
+          <input id="cronologia-modal-nome" type="text" placeholder="Ex.: Maria Bethânia" required />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cronologia-modal-telefone">Telefone <span class="field-optional">(opcional)</span></label>
+            <input id="cronologia-modal-telefone" type="tel" placeholder="(11) 99999-9999" autocomplete="tel" />
+            <p class="field-hint">Com telefone, o contato pode conversar pelo WhatsApp mesmo sem ser lead.</p>
+          </div>
+          <div class="field">
+            <label for="cronologia-modal-ano">Ano</label>
+            <select id="cronologia-modal-ano" required></select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cronologia-modal-cidade-uf">Cidade/UF <span class="field-optional">(opcional)</span></label>
+            <input id="cronologia-modal-cidade-uf" type="text" placeholder="Ex.: Rio de Janeiro/RJ" />
+          </div>
+          <div class="field">
+            <label for="cronologia-modal-situacao">Situação</label>
+            <select id="cronologia-modal-situacao" required>
+              <option value="confirmado">Confirmado</option>
+              <option value="negociacao">Negociação</option>
+              <option value="desejado" selected>Desejado</option>
+            </select>
+          </div>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="cronologia-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="cronologia-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="cronologia-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="premiacoes-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="premiacoes-modal-title">
+        <h2 id="premiacoes-modal-title">Prêmio</h2>
+        <p class="msub" id="premiacoes-modal-sub"></p>
+        <p class="form-errors hidden" id="premiacoes-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="premiacoes-modal-nome">Nome do prêmio</label>
+          <input id="premiacoes-modal-nome" type="text" placeholder="Ex.: Melhor stand, Sorteio Instagram…" required />
+        </div>
+        <div class="field">
+          <label for="premiacoes-modal-descricao">Descrição</label>
+          <textarea id="premiacoes-modal-descricao" rows="3" placeholder="Detalhes do prêmio, critérios, patrocinador…"></textarea>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="premiacoes-modal-vencedor-nome">Vencedor <span class="field-optional">(opcional)</span></label>
+            <input id="premiacoes-modal-vencedor-nome" type="text" placeholder="Nome de quem ganhou" />
+          </div>
+          <div class="field">
+            <label for="premiacoes-modal-vencedor-telefone">Telefone do vencedor <span class="field-optional">(opcional)</span></label>
+            <input id="premiacoes-modal-vencedor-telefone" type="tel" placeholder="(11) 99999-9999" autocomplete="tel" />
+            <p class="field-hint">Com telefone, o contato pode ser aberto no WhatsApp.</p>
+          </div>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="premiacoes-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="premiacoes-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="premiacoes-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="financeiro-modal-bg">
+      <div class="modal modal-form-xl" role="dialog" aria-modal="true" aria-labelledby="financeiro-modal-title">
+        <h2 id="financeiro-modal-title">Linha financeira</h2>
+        <p class="msub" id="financeiro-modal-sub"></p>
+        <p class="form-errors hidden" id="financeiro-modal-errors" role="alert"></p>
+        <div class="field-row">
+          <div class="field">
+            <label for="financeiro-modal-tipo">Tipo de linha</label>
+            <select id="financeiro-modal-tipo">
+              <option value="linha">Linha</option>
+              <option value="categoria">Categoria</option>
+              <option value="secao">Seção</option>
+              <option value="resumo">Resumo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-item">Item</label>
+            <input id="financeiro-modal-item" type="text" placeholder="Ex.: RH, MKT…" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-orcamento-categoria">Orçamento categoria (R$)</label>
+            <input id="financeiro-modal-orcamento-categoria" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="financeiro-modal-sub-item">Sub-Item</label>
+            <input id="financeiro-modal-sub-item" type="text" placeholder="Ex.: Alisson, Registro de Marca…" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-previsto-qtde">Previsto Qtde</label>
+            <input id="financeiro-modal-previsto-qtde" type="text" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-diaria">Diária</label>
+            <input id="financeiro-modal-diaria" type="text" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="financeiro-modal-orcamento">Orçamento (R$)</label>
+            <input id="financeiro-modal-orcamento" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-valor-unit">R$ Unit</label>
+            <input id="financeiro-modal-valor-unit" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-valor-bonificado">R$ Bonificado</label>
+            <input id="financeiro-modal-valor-bonificado" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-valor-total">R$ Total</label>
+            <input id="financeiro-modal-valor-total" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="financeiro-modal-pre-evento">Pré Evento (R$)</label>
+            <input id="financeiro-modal-pre-evento" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-pos-evento">Pós Evento (R$)</label>
+            <input id="financeiro-modal-pos-evento" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-realizado-pago">Realizado R$ Pago</label>
+            <input id="financeiro-modal-realizado-pago" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-reembolso">Reembolso (R$)</label>
+            <input id="financeiro-modal-reembolso" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="financeiro-modal-status">Status</label>
+            <input id="financeiro-modal-status" type="text" placeholder="Ex.: Pago, Pendente…" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-dt-prevista">Dt Prevista</label>
+            <input id="financeiro-modal-dt-prevista" type="text" placeholder="DD/MM/AAAA" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-dt-realiz">Dt Realiz</label>
+            <input id="financeiro-modal-dt-realiz" type="text" placeholder="DD/MM/AAAA" />
+          </div>
+          <div class="field">
+            <label for="financeiro-modal-quem">Quem?</label>
+            <input id="financeiro-modal-quem" type="text" />
+          </div>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="financeiro-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="financeiro-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="financeiro-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="evento-modal-bg">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="evento-modal-title">
         <h2 id="evento-modal-title">Evento</h2>
@@ -1226,6 +1657,33 @@
       </div>
     </div>
 
+    <div class="modal-bg" id="permissoes-modal-bg">
+      <div class="modal modal-form-xl" role="dialog" aria-modal="true" aria-labelledby="permissoes-modal-title">
+        <h2 id="permissoes-modal-title">Grupo de permissão</h2>
+        <p class="msub" id="permissoes-modal-sub"></p>
+        <p class="form-errors hidden" id="permissoes-modal-errors" role="alert"></p>
+        <div class="field-row">
+          <div class="field">
+            <label for="permissoes-modal-name">Nome</label>
+            <input id="permissoes-modal-name" type="text" placeholder="Ex.: Comercial, Financeiro…" required />
+          </div>
+          <div class="field">
+            <label for="permissoes-modal-description">Descrição</label>
+            <input id="permissoes-modal-description" type="text" placeholder="Opcional" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Telas permitidas</label>
+          <div id="permissoes-modal-views" class="permissoes-views"></div>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="permissoes-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="permissoes-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="permissoes-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="user-modal-bg">
       <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
         <h2 id="user-modal-title">Usuário</h2>
@@ -1248,6 +1706,11 @@
           <label for="u-password">Senha</label>
           <input id="u-password" type="password" autocomplete="new-password" />
           <p class="field-hint" id="u-password-hint"></p>
+        </div>
+        <div class="field">
+          <label for="u-permission-group">Grupo de permissão</label>
+          <select id="u-permission-group" required></select>
+          <p class="field-hint">Controla quais telas do menu este usuário pode acessar.</p>
         </div>
         <div class="btns">
           <button class="btn" type="button" id="user-btn-cancel">Cancelar</button>

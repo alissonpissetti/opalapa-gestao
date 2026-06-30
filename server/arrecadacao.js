@@ -28,6 +28,8 @@ function rowToArrecadacao(row) {
     tipo: row.tipo,
     status: row.status || 'neg',
     espacoId: row.espaco_id != null ? Number(row.espaco_id) : null,
+    espacoNumero: row.espaco_numero != null ? Number(row.espaco_numero) : null,
+    espacoGrupoSlug: row.espaco_grupo_slug || '',
     espacoTipo: row.espaco_tipo || '',
     descricao: row.descricao || '',
     valorTotal,
@@ -133,6 +135,16 @@ export async function migrateArrecadacao(pool) {
       `ALTER TABLE arrecadacao MODIFY tipo ENUM('espaco', 'patrocinio', 'artistico') NOT NULL DEFAULT 'patrocinio'`,
     );
   }
+  const [tipoCol2] = await pool.query(
+    `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'tipo'`,
+  );
+  const tipoEnum2 = tipoCol2[0]?.COLUMN_TYPE || '';
+  if (tipoEnum2 && !tipoEnum2.includes('contato')) {
+    await pool.query(
+      `ALTER TABLE arrecadacao MODIFY tipo ENUM('espaco', 'patrocinio', 'artistico', 'contato') NOT NULL DEFAULT 'patrocinio'`,
+    );
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS arrecadacao_pagamentos (
@@ -200,6 +212,50 @@ function valorEspacoParaArrecadacao(espaco, leaders) {
   return espaco.valor != null ? Number(espaco.valor) : 0;
 }
 
+async function findPatrocinioVinculo(pool, eventoId, participanteId) {
+  const [rows] = await pool.query(
+    `SELECT id, status, marketing_canal_id, marketing_campanha_id, marketing_criativo_id
+     FROM arrecadacao
+     WHERE evento_id = ? AND participante_id = ? AND tipo = 'patrocinio'
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 1`,
+    [eventoId, participanteId],
+  );
+  return rows[0] || null;
+}
+
+async function syncLinkedArrecadacaoStatus(pool, eventoId, participanteId, status, excludeId) {
+  if (!participanteId || !eventoId) return;
+
+  const etapas = await listFunilEtapas(pool, eventoId, { escopo: 'comercial' });
+  const perdas = perdaStatuses(etapas);
+  if (perdas.has(status)) return;
+
+  const [siblings] = await pool.query(
+    `SELECT id, tipo, espaco_id, status
+     FROM arrecadacao
+     WHERE evento_id = ? AND participante_id = ? AND id != ? AND tipo IN ('patrocinio', 'espaco')`,
+    [eventoId, participanteId, excludeId],
+  );
+
+  for (const sib of siblings) {
+    if (perdas.has(sib.status) || sib.status === status) continue;
+
+    if (sib.tipo === 'espaco' && sib.espaco_id) {
+      const espacoStatus = await espacoStatusForArrecadacao(pool, eventoId, status);
+      await pool.query(
+        `UPDATE espacos SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+        [espacoStatus, sib.espaco_id],
+      );
+    }
+
+    await pool.query(
+      `UPDATE arrecadacao SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+      [status, sib.id],
+    );
+  }
+}
+
 export async function syncArrecadacaoForGrupo(pool, grupoId) {
   const [grupoRows] = await pool.query(
     'SELECT evento_id FROM grupos_espacos WHERE id = ? LIMIT 1',
@@ -219,6 +275,8 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
 
   const leaders = pickSaleGroupLeaders(espacos);
   const keepEspacoIds = [];
+  const etapas = await listFunilEtapas(pool, eventoId, { escopo: 'comercial' });
+  const perdas = perdaStatuses(etapas);
 
   for (const e of espacos) {
     if (!e.participante_id) continue;
@@ -228,6 +286,13 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
     keepEspacoIds.push(e.id);
     const descricao = `${e.label || `Espaço ${e.numero}`} — ${e.grupo_nome}`;
     const grupoSuffix = e.sale_group ? ' · venda em grupo' : '';
+    const patrocinio = await findPatrocinioVinculo(pool, eventoId, e.participante_id);
+    const statusFromPatrocinio =
+      patrocinio?.status && !perdas.has(patrocinio.status) ? patrocinio.status : null;
+    const arrecadacaoStatus = statusFromPatrocinio || e.status;
+    const espacoStatus = statusFromPatrocinio
+      ? await espacoStatusForArrecadacao(pool, eventoId, statusFromPatrocinio)
+      : e.status;
 
     const [existing] = await pool.query(
       'SELECT id, valor_pago, status FROM arrecadacao WHERE espaco_id = ? LIMIT 1',
@@ -241,15 +306,58 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
         `UPDATE arrecadacao SET
            participante_id = ?, descricao = ?, valor_total = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
          WHERE id = ?`,
-        [e.participante_id, descricao + grupoSuffix, valorTotal, e.status, existing[0].id],
+        [e.participante_id, descricao + grupoSuffix, valorTotal, arrecadacaoStatus, existing[0].id],
       );
+      if (espacoStatus !== e.status) {
+        await pool.query(
+          `UPDATE espacos SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+          [espacoStatus, e.id],
+        );
+      }
+      if (
+        patrocinio &&
+        (patrocinio.marketing_canal_id ||
+          patrocinio.marketing_campanha_id ||
+          patrocinio.marketing_criativo_id)
+      ) {
+        await pool.query(
+          `UPDATE arrecadacao SET
+             marketing_canal_id = COALESCE(marketing_canal_id, ?),
+             marketing_campanha_id = COALESCE(marketing_campanha_id, ?),
+             marketing_criativo_id = COALESCE(marketing_criativo_id, ?)
+           WHERE id = ?`,
+          [
+            patrocinio.marketing_canal_id,
+            patrocinio.marketing_campanha_id,
+            patrocinio.marketing_criativo_id,
+            existing[0].id,
+          ],
+        );
+      }
     } else {
       await pool.query(
         `INSERT INTO arrecadacao
-           (evento_id, participante_id, tipo, status, espaco_id, descricao, valor_total, valor_pago, updated_at)
-         VALUES (?, ?, 'espaco', ?, ?, ?, ?, 0, CURRENT_TIMESTAMP(3))`,
-        [eventoId, e.participante_id, e.status, e.id, descricao + grupoSuffix, valorTotal],
+           (evento_id, participante_id, tipo, status, espaco_id, descricao, valor_total, valor_pago,
+            marketing_canal_id, marketing_campanha_id, marketing_criativo_id, updated_at)
+         VALUES (?, ?, 'espaco', ?, ?, ?, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+        [
+          eventoId,
+          e.participante_id,
+          arrecadacaoStatus,
+          e.id,
+          descricao + grupoSuffix,
+          valorTotal,
+          patrocinio?.marketing_canal_id ?? null,
+          patrocinio?.marketing_campanha_id ?? null,
+          patrocinio?.marketing_criativo_id ?? null,
+        ],
       );
+      if (espacoStatus !== e.status) {
+        await pool.query(
+          `UPDATE espacos SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+          [espacoStatus, e.id],
+        );
+      }
     }
   }
 
@@ -290,13 +398,15 @@ const ARRECADACAO_SELECT = `
          a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
          a.marketing_canal_id, a.marketing_campanha_id, a.marketing_criativo_id,
          a.created_at, a.updated_at, p.nome AS participante_nome,
-         e.tipo AS espaco_tipo,
+         e.tipo AS espaco_tipo, e.numero AS espaco_numero,
+         ge.slug AS espaco_grupo_slug,
          mc.nome AS marketing_canal_nome,
          mcp.nome AS marketing_campanha_nome,
          mcr.nome AS marketing_criativo_nome
   FROM arrecadacao a
   JOIN participantes p ON p.id = a.participante_id
   LEFT JOIN espacos e ON e.id = a.espaco_id
+  LEFT JOIN grupos_espacos ge ON ge.id = e.grupo_id
   LEFT JOIN marketing_canais mc ON mc.id = a.marketing_canal_id
   LEFT JOIN marketing_campanhas mcp ON mcp.id = a.marketing_campanha_id
   LEFT JOIN marketing_criativos mcr ON mcr.id = a.marketing_criativo_id`;
@@ -530,6 +640,19 @@ export async function updateArrecadacao(pool, id, raw) {
       id,
     ],
   );
+
+  if (raw.status !== undefined && status !== existing.status && participanteId) {
+    const [eventoRows] = await pool.query('SELECT evento_id FROM arrecadacao WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    await syncLinkedArrecadacaoStatus(
+      pool,
+      eventoRows[0]?.evento_id,
+      participanteId,
+      status,
+      id,
+    );
+  }
 
   return findArrecadacaoById(pool, id);
 }
@@ -822,4 +945,39 @@ export function summarizeArrecadacao(items, etapas = []) {
     falta: Math.max(0, total - pago),
     count,
   };
+}
+
+export async function findArrecadacaoForParticipante(pool, eventoId, participanteId) {
+  const [rows] = await pool.query(
+    `SELECT id, tipo FROM arrecadacao
+     WHERE evento_id = ? AND participante_id = ?
+     ORDER BY CASE tipo WHEN 'contato' THEN 1 ELSE 0 END, id ASC
+     LIMIT 1`,
+    [eventoId, participanteId],
+  );
+  if (!rows[0]) return null;
+  return { id: Number(rows[0].id), tipo: rows[0].tipo };
+}
+
+/** Garante vínculo de WhatsApp para contato sem lead comercial/artístico. */
+export async function ensureWhatsappContatoArrecadacao(
+  pool,
+  eventoId,
+  participanteId,
+  { descricao = 'Contato' } = {},
+) {
+  const id = Number(participanteId);
+  if (!Number.isInteger(id) || id < 1) return null;
+
+  const existing = await findArrecadacaoForParticipante(pool, eventoId, id);
+  if (existing) return existing.id;
+
+  const label = String(descricao || 'Contato').trim() || 'Contato';
+  const [result] = await pool.query(
+    `INSERT INTO arrecadacao
+       (evento_id, participante_id, tipo, status, descricao, valor_total, valor_pago, updated_at)
+     VALUES (?, ?, 'contato', 'neg', ?, 0, 0, CURRENT_TIMESTAMP(3))`,
+    [eventoId, id, label],
+  );
+  return Number(result.insertId);
 }

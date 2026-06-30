@@ -2,6 +2,7 @@ import { fetchSession, logout } from './lib/auth.js';
 import { setUnauthorizedHandler, fetchEventos, fetchParticipantes, fetchArrecadacaoByEspacoId } from './lib/api.js';
 import { initEventoContext, onEventoChange } from './lib/evento.js';
 import { createSpacesStore } from './lib/store.js';
+import { canAccessView, canAccessWhatsapp, canManageWhatsappConnection } from './lib/permissions.js';
 import { initSpacesModule } from './modules/spaces.js';
 import { initLoginScreen } from './modules/login.js';
 import { initNavigation } from './modules/navigation.js';
@@ -11,6 +12,10 @@ import { initTarefasModule } from './modules/tarefas.js';
 import { initTarefaEditor } from './modules/tarefa-editor.js';
 import { initEventosModule, initEventoSelector } from './modules/eventos.js';
 import { initMarketingModule } from './modules/marketing.js';
+import { initProducaoCronologiaModule } from './modules/producao-cronologia.js';
+import { initProducaoPremiacoesModule } from './modules/producao-premiacoes.js';
+import { initFinanceiroGestaoModule } from './modules/financeiro-gestao.js';
+import { initPermissoesModule } from './modules/permissoes.js';
 import { initWhatsappConnect } from './modules/whatsapp-connect.js';
 import { initWhatsappInbox } from './modules/whatsapp-inbox.js';
 import { initParticipantesModule } from './modules/participantes.js';
@@ -24,11 +29,24 @@ let participantesModule = null;
 let whatsappInboxModule = null;
 let tarefasModule = null;
 let marketingModule = null;
+let cronologiaModule = null;
+let premiacoesModule = null;
+let financeiroGestaoModule = null;
+let permissoesModule = null;
 let usersModule = null;
 let eventosModule = null;
 let eventoSelector = null;
 let navigation = null;
 let store = null;
+
+async function openLeadFromApp(arrecadacaoId, { tipo } = {}) {
+  if (!arrecadacaoId || !arrecadacaoModule) return false;
+  const view = tipo === 'artistico' ? 'artistico' : 'arrecadacao';
+  if (canAccessView(view)) {
+    navigation?.navigate(view);
+  }
+  return arrecadacaoModule.openLeadDetail(arrecadacaoId, { tipo });
+}
 
 function syncAppHeaderHeight() {
   const header = document.querySelector('.app-header');
@@ -49,6 +67,10 @@ function showLoginOnly() {
   arrecadacaoModule = null;
   tarefasModule = null;
   marketingModule = null;
+  cronologiaModule = null;
+  premiacoesModule = null;
+  financeiroGestaoModule = null;
+  permissoesModule = null;
   usersModule = null;
   eventosModule = null;
   eventoSelector = null;
@@ -68,7 +90,7 @@ async function syncParticipantesList() {
 }
 
 async function reloadEspacosFromServer() {
-  if (!store?.currentGrupo?.slug) return;
+  if (!canAccessView('espacos') || !store?.currentGrupo?.slug) return;
   await store.loadGrupo(store.currentGrupo.slug);
   spacesModule?.renderGrupoTabs();
   await spacesModule?.reloadFunilEtapas?.();
@@ -76,9 +98,17 @@ async function reloadEspacosFromServer() {
   spacesModule?.updateSyncStatus();
 }
 
+async function loadEspacosStore() {
+  if (!store || !canAccessView('espacos')) return;
+  if (store.ready) return;
+  await store.load();
+}
+
 async function reloadEventoData() {
   if (!store) return;
-  await store.load();
+  if (canAccessView('espacos')) {
+    await loadEspacosStore();
+  }
   spacesModule?.renderGrupoTabs();
   await spacesModule?.reloadFunilEtapas?.();
   spacesModule?.renderAll();
@@ -96,6 +126,18 @@ async function reloadEventoData() {
   if (navigation?.getCurrentView() === 'marketing') {
     marketingModule?.loadMarketing();
   }
+  if (navigation?.getCurrentView() === 'cronologia') {
+    cronologiaModule?.loadCronologia();
+  }
+  if (navigation?.getCurrentView() === 'premiacoes') {
+    premiacoesModule?.loadPremiacoes();
+  }
+  if (navigation?.getCurrentView() === 'financeiro-gestao') {
+    financeiroGestaoModule?.loadFinanceiroGestao();
+  }
+  if (navigation?.getCurrentView() === 'permissoes') {
+    permissoesModule?.loadPermissoes();
+  }
 }
 
 async function refreshEventoList() {
@@ -110,19 +152,22 @@ async function initApp(user) {
   initEventoContext(eventos);
 
   store = createSpacesStore();
-  await store.load();
-
   const spaceShortcuts = {};
-  spacesModule = initSpacesModule(store, spaceShortcuts);
-  spacesModule.renderGrupoTabs();
-  spacesModule.renderAll();
-  spacesModule.updateSyncStatus();
+
+  if (canAccessView('espacos')) {
+    await loadEspacosStore();
+    spacesModule = initSpacesModule(store, spaceShortcuts);
+    spacesModule.renderGrupoTabs();
+    spacesModule.renderAll();
+    spacesModule.updateSyncStatus();
+  }
 
   participantesModule = initParticipantesModule(store, {
     onSaved: () => {
       void syncParticipantesList();
       spacesModule?.renderParticipantesDatalist?.();
     },
+    onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
   });
 
   const tarefaEditor = initTarefaEditor({
@@ -137,19 +182,36 @@ async function initApp(user) {
     onNavigate: (view) => navigation?.navigate(view),
     openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
     onEspacosDataChanged: () => reloadEspacosFromServer(),
+    onOpenEspaco: async ({ numero, grupoSlug }) => {
+      navigation?.navigate('espacos');
+      if (grupoSlug && store?.currentGrupo?.slug !== grupoSlug) {
+        await store.switchGrupo(grupoSlug);
+        spacesModule?.renderGrupoTabs();
+        await spacesModule?.reloadFunilEtapas?.();
+        spacesModule?.renderAll();
+      }
+      if (numero) spacesModule?.openSpace?.(numero);
+    },
     currentUser: user,
     onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
   });
   tarefasModule = initTarefasModule({
     openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
-    onOpenLead: async (arrecadacaoId, { tipo } = {}) => {
-      const view = tipo === 'artistico' ? 'artistico' : 'arrecadacao';
-      navigation?.navigate(view);
-      await arrecadacaoModule.openLeadDetail(arrecadacaoId, { tipo });
-    },
+    onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
+    onOpenLead: (arrecadacaoId, opts) => openLeadFromApp(arrecadacaoId, opts),
   });
   await syncParticipantesList();
   marketingModule = initMarketingModule();
+  cronologiaModule = initProducaoCronologiaModule({
+    onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
+    onSaved: () => syncParticipantesList(),
+  });
+  premiacoesModule = initProducaoPremiacoesModule({
+    onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
+    onSaved: () => syncParticipantesList(),
+  });
+  financeiroGestaoModule = initFinanceiroGestaoModule();
+  permissoesModule = initPermissoesModule();
   usersModule = initUsersModule(user);
 
   eventoSelector = initEventoSelector({ onChange: reloadEventoData });
@@ -162,21 +224,35 @@ async function initApp(user) {
   navigation = initNavigation({
     onViewChange(view) {
       if (view === 'eventos') eventosModule.loadEventos();
-      if (view === 'espacos') reloadEspacosFromServer();
+      if (view === 'espacos') {
+        void loadEspacosStore().then(() => {
+          spacesModule?.renderGrupoTabs();
+          return spacesModule?.reloadFunilEtapas?.();
+        }).then(() => {
+          spacesModule?.renderAll();
+          spacesModule?.updateSyncStatus();
+        });
+      }
       if (view === 'arrecadacao') arrecadacaoModule.setLeadScope('comercial');
       if (view === 'artistico') arrecadacaoModule.setLeadScope('artistico');
       if (view === 'tarefas') tarefasModule.loadTarefas();
       if (view === 'marketing') marketingModule.loadMarketing();
+      if (view === 'cronologia') cronologiaModule.loadCronologia();
+      if (view === 'premiacoes') premiacoesModule.loadPremiacoes();
+      if (view === 'financeiro-gestao') financeiroGestaoModule.loadFinanceiroGestao();
+      if (view === 'permissoes') permissoesModule.loadPermissoes();
       if (view === 'usuarios') usersModule.loadUsers();
     },
   });
 
-  initWhatsappConnect();
-  whatsappInboxModule = initWhatsappInbox({
-    onOpenLead: async (arrecadacaoId) => {
-      await arrecadacaoModule?.openLeadDetail(arrecadacaoId);
-    },
-  });
+  if (canManageWhatsappConnection()) {
+    initWhatsappConnect();
+  }
+  if (canAccessWhatsapp()) {
+    whatsappInboxModule = initWhatsappInbox({
+      onOpenLead: (arrecadacaoId, opts) => openLeadFromApp(arrecadacaoId, opts),
+    });
+  }
 
   spaceShortcuts.onOpenParticipante = (participanteId) => {
     participantesModule?.openParticipante(participanteId);
@@ -199,8 +275,10 @@ async function initApp(user) {
       alert('Lead não encontrado para este espaço. Salve o espaço e tente novamente.');
       return;
     }
-    const opened = await arrecadacaoModule?.openLeadDetail(arrecadacaoId, { tipo: 'espaco' });
-    if (opened) navigation?.navigate('arrecadacao');
+    const opened = await openLeadFromApp(arrecadacaoId, { tipo: 'espaco' });
+    if (!opened) {
+      alert('Lead não encontrado para este espaço. Salve o espaço e tente novamente.');
+    }
   };
 }
 

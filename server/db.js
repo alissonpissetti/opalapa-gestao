@@ -17,6 +17,8 @@ export function createPool(databaseUrl) {
     waitForConnections: true,
     connectionLimit: 10,
     connectTimeout: 10000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
     timezone: 'Z',
   });
 }

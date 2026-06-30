@@ -81,6 +81,28 @@ import {
   deleteMarketingCriativo,
 } from './marketing.js';
 import {
+  migrateProducaoCronologia,
+  listProducaoCronologia,
+  createProducaoCronologia,
+  updateProducaoCronologia,
+  deleteProducaoCronologia,
+} from './producao-cronologia.js';
+import {
+  migrateProducaoPremiacoes,
+  listProducaoPremiacoes,
+  createProducaoPremiacao,
+  updateProducaoPremiacao,
+  deleteProducaoPremiacao,
+} from './producao-premiacoes.js';
+import {
+  migrateFinanceiroResultado,
+  listFinanceiroResultado,
+  createFinanceiroLinha,
+  updateFinanceiroLinha,
+  deleteFinanceiroLinha,
+  carregarModeloFinanceiroResultado,
+} from './financeiro-resultado.js';
+import {
   migrateWhatsapp,
   listWhatsappMessages,
   syncWhatsappHistory,
@@ -101,11 +123,13 @@ import {
   getWhatsappInboxThread,
   syncInboxParticipante,
   prepareWhatsappConversation,
+  getPrimaryArrecadacaoId,
 } from './whatsapp-inbox.js';
 import { attachWhatsappWebSocket } from './whatsapp-ws.js';
 import { configureInstanceWebhook, getEvolutionConfig } from './evolution.js';
 import { streamWhatsappMensagemMedia, attachMediaTokensToMensagens, attachMediaTokenToMensagem } from './whatsapp-media.js';
 import { attachAvatarUrlsToThreads, streamWhatsappAvatar, syncStaleParticipantAvatars, attachAvatarUrlsToParticipantes } from './whatsapp-avatars.js';
+import { fetchLinkPreview } from './link-preview.js';
 import {
   migrateSeguidoresHistorico,
   getSeguidoresHistoricoResumo,
@@ -122,6 +146,27 @@ import {
   authorizeWhatsappAvatar,
   publicUser,
 } from './auth.js';
+import {
+  migrateAuthOtp,
+  sendAuthOtp,
+  verifySmsLogin,
+  verifyPasswordResetOtp,
+} from './auth-otp.js';
+import {
+  migratePermissions,
+  PERMISSION_CATALOG,
+  listPermissionGroups,
+  findPermissionGroupById,
+  createPermissionGroup,
+  updatePermissionGroup,
+  deletePermissionGroup,
+  getUserAccess,
+  getDefaultPermissionGroupId,
+  isPublicApiRoute,
+  loadUserPermissions,
+  enforceApiPermission,
+  buildPublicAccess,
+} from './permissions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -157,6 +202,16 @@ app.use((req, res, next) => {
   return jsonDefault(req, res, next);
 });
 
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (isPublicApiRoute(req)) return next();
+  requireAuth(req, res, () => {
+    loadUserPermissions(pool)(req, res, () => {
+      enforceApiPermission(req, res, next);
+    });
+  });
+});
+
 app.get('/api/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
@@ -185,21 +240,23 @@ app.post('/api/auth/login', async (req, res) => {
 
     const token = signToken(user);
     setSessionCookie(res, token);
-    res.json({ user: publicUser(user) });
+    const access = await getUserAccess(pool, user.id);
+    res.json({ user: { ...publicUser(user), ...buildPublicAccess(user, access) } });
   } catch (err) {
     console.error('POST /api/auth/login', err);
     res.status(500).json({ error: 'Falha ao entrar' });
   }
 });
 
-app.get('/api/auth/me', requireAuth, async (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   try {
     const user = await findUserById(pool, req.user.id);
     if (!user) {
       clearSessionCookie(res);
       return res.status(401).json({ error: 'Usuário não encontrado' });
     }
-    res.json({ user: publicUser(user) });
+    const access = await getUserAccess(pool, user.id);
+    res.json({ user: publicUserRow(user, access) });
   } catch (err) {
     console.error('GET /api/auth/me', err);
     res.status(500).json({ error: 'Falha ao validar sessão' });
@@ -211,7 +268,78 @@ app.post('/api/auth/logout', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/tipos-comercio', requireAuth, async (_req, res) => {
+async function issueUserSession(res, user) {
+  const token = signToken(user);
+  setSessionCookie(res, token);
+  const access = await getUserAccess(pool, user.id);
+  return { user: { ...publicUser(user), ...buildPublicAccess(user, access) } };
+}
+
+app.post('/api/auth/otp/send', async (req, res) => {
+  try {
+    const result = await sendAuthOtp(pool, {
+      login: req.body?.login,
+      purpose: req.body?.purpose,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/auth/otp/send', err);
+    res.status(500).json({ error: 'Falha ao enviar código' });
+  }
+});
+
+app.post('/api/auth/otp/verify-login', async (req, res) => {
+  try {
+    const user = await verifySmsLogin(pool, {
+      login: req.body?.login,
+      code: req.body?.code,
+    });
+    const sessionUser = await findUserById(pool, user.id);
+    if (!sessionUser) return res.status(404).json({ error: 'Usuário não encontrado' });
+    const payload = await issueUserSession(res, sessionUser);
+    res.json(payload);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/auth/otp/verify-login', err);
+    res.status(500).json({ error: 'Falha ao validar código' });
+  }
+});
+
+app.post('/api/auth/password/reset', async (req, res) => {
+  try {
+    const login = req.body?.login;
+    const code = req.body?.code;
+    const password = req.body?.password;
+
+    if (!password || String(password).trim().length < 6) {
+      return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
+    }
+
+    const verified = await verifyPasswordResetOtp(pool, { login, code });
+    const sessionUser = await findUserById(pool, verified.id);
+    if (!sessionUser) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+    const passwordHash = await hashPassword(password);
+    await updateUser(pool, verified.id, {
+      name: sessionUser.name,
+      email: sessionUser.email,
+      phone: sessionUser.phone,
+      passwordHash,
+      permissionGroupId: sessionUser.permissionGroupId,
+    });
+
+    const updatedUser = await findUserById(pool, verified.id);
+    const payload = await issueUserSession(res, updatedUser);
+    res.json(payload);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/auth/password/reset', err);
+    res.status(500).json({ error: 'Falha ao redefinir senha' });
+  }
+});
+
+app.get('/api/tipos-comercio', async (_req, res) => {
   try {
     const tipos = await fetchTiposComercio(pool);
     res.json({ tipos });
@@ -221,7 +349,7 @@ app.get('/api/tipos-comercio', requireAuth, async (_req, res) => {
   }
 });
 
-app.get('/api/eventos', requireAuth, async (_req, res) => {
+app.get('/api/eventos', async (_req, res) => {
   try {
     const eventos = await listEventos(pool);
     res.json({ eventos });
@@ -231,7 +359,7 @@ app.get('/api/eventos', requireAuth, async (_req, res) => {
   }
 });
 
-app.post('/api/eventos', requireAuth, async (req, res) => {
+app.post('/api/eventos', async (req, res) => {
   try {
     const evento = await createEvento(pool, req.body);
     res.status(201).json({ evento });
@@ -242,7 +370,7 @@ app.post('/api/eventos', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/eventos/:id', requireAuth, async (req, res) => {
+app.put('/api/eventos/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -258,7 +386,7 @@ app.put('/api/eventos/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/eventos/:id', requireAuth, async (req, res) => {
+app.delete('/api/eventos/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -274,7 +402,7 @@ app.delete('/api/eventos/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/eventos/:id/comparacao', requireAuth, async (req, res) => {
+app.get('/api/eventos/:id/comparacao', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -289,7 +417,7 @@ app.get('/api/eventos/:id/comparacao', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/grupos', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/grupos', requireEvento, async (req, res) => {
   try {
     const grupos = await fetchGrupos(pool, req.eventoId);
     res.json({ grupos });
@@ -299,7 +427,7 @@ app.get('/api/grupos', requireAuth, requireEvento, async (req, res) => {
   }
 });
 
-app.get('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/grupos/:slug/espacos', requireEvento, async (req, res) => {
   try {
     const result = await fetchSpacesByGrupo(pool, req.params.slug, req.eventoId);
     const participantes = attachAvatarUrlsToParticipantes(
@@ -314,7 +442,7 @@ app.get('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res
   }
 });
 
-app.get('/api/participantes', requireAuth, async (req, res) => {
+app.get('/api/participantes', async (req, res) => {
   try {
     const eventoId = Number(req.headers['x-evento-id']);
     let participantes = await listParticipantes(pool);
@@ -328,7 +456,7 @@ app.get('/api/participantes', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/participantes', requireAuth, async (req, res) => {
+app.post('/api/participantes', async (req, res) => {
   try {
     const participante = await createParticipante(pool, req.body);
     res.status(201).json({ participante });
@@ -339,7 +467,7 @@ app.post('/api/participantes', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/participantes/:id', requireAuth, async (req, res) => {
+app.put('/api/participantes/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -355,7 +483,7 @@ app.put('/api/participantes/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/participantes/:id/seguidores-historico', requireAuth, async (req, res) => {
+app.get('/api/participantes/:id/seguidores-historico', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -369,7 +497,7 @@ app.get('/api/participantes/:id/seguidores-historico', requireAuth, async (req, 
   }
 });
 
-app.delete('/api/participantes/:id', requireAuth, requireEvento, async (req, res) => {
+app.delete('/api/participantes/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -393,7 +521,7 @@ app.delete('/api/participantes/:id', requireAuth, requireEvento, async (req, res
   }
 });
 
-app.get('/api/espacos-disponiveis', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/espacos-disponiveis', requireEvento, async (req, res) => {
   try {
     const espacos = await listEspacosDisponiveis(pool, req.eventoId);
     res.json({ espacos });
@@ -403,7 +531,7 @@ app.get('/api/espacos-disponiveis', requireAuth, requireEvento, async (req, res)
   }
 });
 
-app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/arrecadacao', requireEvento, async (req, res) => {
   try {
     const scope = String(req.query.scope || 'comercial');
     const allowedScopes = new Set(['comercial', 'artistico']);
@@ -431,7 +559,7 @@ app.get('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
   }
 });
 
-app.get('/api/arrecadacao/by-espaco/:espacoId', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/arrecadacao/by-espaco/:espacoId', requireEvento, async (req, res) => {
   try {
     const espacoId = Number(req.params.espacoId);
     if (!Number.isInteger(espacoId) || espacoId < 1) {
@@ -454,7 +582,7 @@ app.get('/api/arrecadacao/by-espaco/:espacoId', requireAuth, requireEvento, asyn
   }
 });
 
-app.get('/api/arrecadacao/:id', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/arrecadacao/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -474,7 +602,7 @@ app.get('/api/arrecadacao/:id', requireAuth, requireEvento, async (req, res) => 
   }
 });
 
-app.get('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/funil-etapas', requireEvento, async (req, res) => {
   try {
     const escopo = String(req.query.escopo || 'comercial');
     const etapas = await listFunilEtapas(pool, req.eventoId, { escopo });
@@ -486,11 +614,11 @@ app.get('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
   }
 });
 
-app.get('/api/funil-escopos', requireAuth, async (_req, res) => {
+app.get('/api/funil-escopos', async (_req, res) => {
   res.json({ escopos: FUNIL_ESCOPOS });
 });
 
-app.put('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
+app.put('/api/funil-etapas', requireEvento, async (req, res) => {
   try {
     const escopo = String(req.body?.escopo || 'comercial');
     const etapas = await saveFunilEtapas(pool, req.eventoId, req.body?.etapas, { escopo });
@@ -502,7 +630,7 @@ app.put('/api/funil-etapas', requireAuth, requireEvento, async (req, res) => {
   }
 });
 
-app.get('/api/tarefas-contato', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/tarefas-contato', requireEvento, async (req, res) => {
   try {
     const status = String(req.query.status || 'pendentes');
     const allowed = new Set(['pendentes', 'concluidas', 'todas']);
@@ -517,7 +645,7 @@ app.get('/api/tarefas-contato', requireAuth, requireEvento, async (req, res) => 
   }
 });
 
-app.post('/api/tarefas-contato', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/tarefas-contato', requireEvento, async (req, res) => {
   try {
     const tarefa = await createTarefaContato(pool, req.eventoId, req.body);
     res.status(201).json({ tarefa });
@@ -528,7 +656,7 @@ app.post('/api/tarefas-contato', requireAuth, requireEvento, async (req, res) =>
   }
 });
 
-app.put('/api/tarefas-contato/:id', requireAuth, requireEvento, async (req, res) => {
+app.put('/api/tarefas-contato/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -544,7 +672,7 @@ app.put('/api/tarefas-contato/:id', requireAuth, requireEvento, async (req, res)
   }
 });
 
-app.post('/api/tarefas-contato/:id/concluir', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/tarefas-contato/:id/concluir', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -560,7 +688,7 @@ app.post('/api/tarefas-contato/:id/concluir', requireAuth, requireEvento, async 
   }
 });
 
-app.post('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/arrecadacao', requireEvento, async (req, res) => {
   try {
     const item = await createPatrocinio(pool, req.eventoId, req.body);
     res.status(201).json({ item });
@@ -571,7 +699,7 @@ app.post('/api/arrecadacao', requireAuth, requireEvento, async (req, res) => {
   }
 });
 
-app.get('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
+app.get('/api/arrecadacao/:id/interacoes', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -587,7 +715,7 @@ app.get('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/arrecadacao/:id/tarefas-contato', requireAuth, async (req, res) => {
+app.get('/api/arrecadacao/:id/tarefas-contato', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -603,7 +731,7 @@ app.get('/api/arrecadacao/:id/tarefas-contato', requireAuth, async (req, res) =>
   }
 });
 
-app.post('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/interacoes', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -620,7 +748,7 @@ app.post('/api/arrecadacao/:id/interacoes', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/whatsapp/status', requireAuth, async (_req, res) => {
+app.get('/api/whatsapp/status', async (_req, res) => {
   try {
     const status = await getWhatsappStatus();
     res.json(status);
@@ -630,7 +758,7 @@ app.get('/api/whatsapp/status', requireAuth, async (_req, res) => {
   }
 });
 
-app.post('/api/whatsapp/connect', requireAuth, async (req, res) => {
+app.post('/api/whatsapp/connect', async (req, res) => {
   try {
     const result = await connectWhatsapp({ phone: req.body?.phone || req.body?.number });
     res.json(result);
@@ -641,7 +769,7 @@ app.post('/api/whatsapp/connect', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/whatsapp/disconnect', requireAuth, async (_req, res) => {
+app.post('/api/whatsapp/disconnect', async (_req, res) => {
   try {
     const status = await disconnectWhatsapp();
     res.json(status);
@@ -652,7 +780,18 @@ app.post('/api/whatsapp/disconnect', requireAuth, async (_req, res) => {
   }
 });
 
-app.get('/api/whatsapp/inbox', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/link-preview', async (req, res) => {
+  try {
+    const preview = await fetchLinkPreview(req.query.url);
+    res.json(preview);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('GET /api/link-preview', err);
+    res.status(500).json({ error: 'Falha ao carregar prévia do link' });
+  }
+});
+
+app.get('/api/whatsapp/inbox', requireEvento, async (req, res) => {
   try {
     const threads = attachAvatarUrlsToThreads(
       await listWhatsappInbox(pool, req.eventoId),
@@ -680,7 +819,7 @@ app.get('/api/whatsapp/avatar/:participanteId', authorizeWhatsappAvatar, async (
   }
 });
 
-app.get('/api/whatsapp/inbox/:participanteId', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/whatsapp/inbox/:participanteId', requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     if (!Number.isInteger(participanteId) || participanteId < 1) {
@@ -692,7 +831,7 @@ app.get('/api/whatsapp/inbox/:participanteId', requireAuth, requireEvento, async
     )[0];
     if (!thread) {
       return res.status(404).json({
-        error: 'Contato sem WhatsApp cadastrado ou sem lead vinculado neste evento.',
+        error: 'Contato sem WhatsApp cadastrado.',
       });
     }
     res.json({ thread });
@@ -702,7 +841,7 @@ app.get('/api/whatsapp/inbox/:participanteId', requireAuth, requireEvento, async
   }
 });
 
-app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/whatsapp/inbox/:participanteId/messages', requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     if (!Number.isInteger(participanteId) || participanteId < 1) {
@@ -720,7 +859,7 @@ app.get('/api/whatsapp/inbox/:participanteId/messages', requireAuth, requireEven
   }
 });
 
-app.post('/api/whatsapp/inbox/:participanteId/sync', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/whatsapp/inbox/:participanteId/sync', requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     if (!Number.isInteger(participanteId) || participanteId < 1) {
@@ -737,7 +876,7 @@ app.post('/api/whatsapp/inbox/:participanteId/sync', requireAuth, requireEvento,
   }
 });
 
-app.post('/api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     const mensagemId = Number(req.params.mensagemId);
@@ -760,19 +899,13 @@ app.post('/api/whatsapp/inbox/:participanteId/messages/:mensagemId/reaction', re
   }
 });
 
-app.post('/api/whatsapp/inbox/:participanteId/send', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/whatsapp/inbox/:participanteId/send', requireEvento, async (req, res) => {
   try {
     const participanteId = Number(req.params.participanteId);
     if (!Number.isInteger(participanteId) || participanteId < 1) {
       return res.status(400).json({ error: 'Participante inválido' });
     }
-    const [rows] = await pool.query(
-      `SELECT id FROM arrecadacao
-       WHERE evento_id = ? AND participante_id = ?
-       ORDER BY id ASC LIMIT 1`,
-      [req.eventoId, participanteId],
-    );
-    const arrecadacaoId = rows[0]?.id ? Number(rows[0].id) : null;
+    const arrecadacaoId = await getPrimaryArrecadacaoId(pool, req.eventoId, participanteId);
     if (!arrecadacaoId) {
       return res.status(404).json({ error: 'Lead não encontrado para este participante' });
     }
@@ -790,15 +923,20 @@ app.get('/api/whatsapp/media/:mensagemId', authorizeWhatsappMedia, async (req, r
     const mensagemId = Number(req.params.mensagemId);
     await streamWhatsappMensagemMedia(pool, mensagemId, res, {
       preview: req.query.preview === '1',
+      req,
     });
   } catch (err) {
+    if (res.headersSent || res.writableEnded) {
+      console.warn(`GET /api/whatsapp/media/${req.params.mensagemId} (resposta já enviada):`, err.message);
+      return;
+    }
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('GET /api/whatsapp/media/:mensagemId', err);
     res.status(500).json({ error: 'Falha ao carregar mídia' });
   }
 });
 
-app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
+app.get('/api/arrecadacao/:id/whatsapp', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -821,7 +959,7 @@ app.get('/api/arrecadacao/:id/whatsapp', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/arrecadacao/:id/whatsapp/sync', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/whatsapp/sync', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -841,7 +979,7 @@ app.post('/api/arrecadacao/:id/whatsapp/sync', requireAuth, async (req, res) => 
   }
 });
 
-app.post('/api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', async (req, res) => {
   try {
     const arrecadacaoId = Number(req.params.id);
     const mensagemId = Number(req.params.mensagemId);
@@ -863,7 +1001,7 @@ app.post('/api/arrecadacao/:id/whatsapp/messages/:mensagemId/reaction', requireA
   }
 });
 
-app.post('/api/arrecadacao/:id/whatsapp/send', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/whatsapp/send', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -893,7 +1031,7 @@ app.post('/api/webhooks/evolution', async (req, res) => {
   }
 });
 
-app.put('/api/arrecadacao/:id', requireAuth, async (req, res) => {
+app.put('/api/arrecadacao/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -909,7 +1047,7 @@ app.put('/api/arrecadacao/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/arrecadacao/:id/migrar-artistico', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/migrar-artistico', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -925,7 +1063,7 @@ app.post('/api/arrecadacao/:id/migrar-artistico', requireAuth, async (req, res) 
   }
 });
 
-app.get('/api/arrecadacao/:id/pagamentos', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/arrecadacao/:id/pagamentos', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -939,7 +1077,7 @@ app.get('/api/arrecadacao/:id/pagamentos', requireAuth, requireEvento, async (re
   }
 });
 
-app.delete('/api/arrecadacao/:id/pagamentos/:pagamentoId', requireAuth, requireEvento, async (req, res) => {
+app.delete('/api/arrecadacao/:id/pagamentos/:pagamentoId', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const pagamentoId = Number(req.params.pagamentoId);
@@ -956,7 +1094,7 @@ app.delete('/api/arrecadacao/:id/pagamentos/:pagamentoId', requireAuth, requireE
   }
 });
 
-app.post('/api/arrecadacao/:id/pagamentos', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/arrecadacao/:id/pagamentos', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -972,7 +1110,7 @@ app.post('/api/arrecadacao/:id/pagamentos', requireAuth, requireEvento, async (r
   }
 });
 
-app.get('/api/participantes/:id/pagamentos', requireAuth, async (req, res) => {
+app.get('/api/participantes/:id/pagamentos', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -986,7 +1124,7 @@ app.get('/api/participantes/:id/pagamentos', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/arrecadacao/:id/perda-lead', requireAuth, async (req, res) => {
+app.post('/api/arrecadacao/:id/perda-lead', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -1002,7 +1140,7 @@ app.post('/api/arrecadacao/:id/perda-lead', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/arrecadacao/:id', requireAuth, async (req, res) => {
+app.delete('/api/arrecadacao/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -1018,7 +1156,7 @@ app.delete('/api/arrecadacao/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/marketing', requireAuth, requireEvento, async (req, res) => {
+app.get('/api/marketing', requireEvento, async (req, res) => {
   try {
     const data = await listMarketingTree(pool, req.eventoId);
     res.json(data);
@@ -1028,7 +1166,7 @@ app.get('/api/marketing', requireAuth, requireEvento, async (req, res) => {
   }
 });
 
-app.post('/api/marketing/canais', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/marketing/canais', requireEvento, async (req, res) => {
   try {
     const canal = await createMarketingCanal(pool, req.eventoId, req.body);
     res.status(201).json({ canal });
@@ -1039,7 +1177,7 @@ app.post('/api/marketing/canais', requireAuth, requireEvento, async (req, res) =
   }
 });
 
-app.put('/api/marketing/canais/:id', requireAuth, requireEvento, async (req, res) => {
+app.put('/api/marketing/canais/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const canal = await updateMarketingCanal(pool, id, req.eventoId, req.body);
@@ -1052,7 +1190,7 @@ app.put('/api/marketing/canais/:id', requireAuth, requireEvento, async (req, res
   }
 });
 
-app.delete('/api/marketing/canais/:id', requireAuth, requireEvento, async (req, res) => {
+app.delete('/api/marketing/canais/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const ok = await deleteMarketingCanal(pool, id, req.eventoId);
@@ -1064,7 +1202,7 @@ app.delete('/api/marketing/canais/:id', requireAuth, requireEvento, async (req, 
   }
 });
 
-app.post('/api/marketing/campanhas', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/marketing/campanhas', requireEvento, async (req, res) => {
   try {
     const campanha = await createMarketingCampanha(pool, req.eventoId, req.body);
     res.status(201).json({ campanha });
@@ -1075,7 +1213,7 @@ app.post('/api/marketing/campanhas', requireAuth, requireEvento, async (req, res
   }
 });
 
-app.put('/api/marketing/campanhas/:id', requireAuth, requireEvento, async (req, res) => {
+app.put('/api/marketing/campanhas/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const campanha = await updateMarketingCampanha(pool, id, req.eventoId, req.body);
@@ -1088,7 +1226,7 @@ app.put('/api/marketing/campanhas/:id', requireAuth, requireEvento, async (req, 
   }
 });
 
-app.delete('/api/marketing/campanhas/:id', requireAuth, requireEvento, async (req, res) => {
+app.delete('/api/marketing/campanhas/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const ok = await deleteMarketingCampanha(pool, id, req.eventoId);
@@ -1100,7 +1238,7 @@ app.delete('/api/marketing/campanhas/:id', requireAuth, requireEvento, async (re
   }
 });
 
-app.post('/api/marketing/criativos', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/marketing/criativos', requireEvento, async (req, res) => {
   try {
     const criativo = await createMarketingCriativo(pool, req.eventoId, req.body);
     res.status(201).json({ criativo });
@@ -1111,7 +1249,7 @@ app.post('/api/marketing/criativos', requireAuth, requireEvento, async (req, res
   }
 });
 
-app.put('/api/marketing/criativos/:id', requireAuth, requireEvento, async (req, res) => {
+app.put('/api/marketing/criativos/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const criativo = await updateMarketingCriativo(pool, id, req.eventoId, req.body);
@@ -1124,7 +1262,7 @@ app.put('/api/marketing/criativos/:id', requireAuth, requireEvento, async (req, 
   }
 });
 
-app.delete('/api/marketing/criativos/:id', requireAuth, requireEvento, async (req, res) => {
+app.delete('/api/marketing/criativos/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const ok = await deleteMarketingCriativo(pool, id, req.eventoId);
@@ -1136,7 +1274,214 @@ app.delete('/api/marketing/criativos/:id', requireAuth, requireEvento, async (re
   }
 });
 
-app.get('/api/users', requireAuth, async (_req, res) => {
+app.get('/api/producao/cronologia', requireEvento, async (req, res) => {
+  try {
+    const data = await listProducaoCronologia(pool, req.eventoId);
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/producao/cronologia', err);
+    res.status(500).json({ error: 'Falha ao carregar cronologia' });
+  }
+});
+
+app.post('/api/producao/cronologia', requireEvento, async (req, res) => {
+  try {
+    const item = await createProducaoCronologia(pool, req.eventoId, req.body);
+    res.status(201).json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/producao/cronologia', err);
+    res.status(500).json({ error: 'Falha ao criar registro' });
+  }
+});
+
+app.put('/api/producao/cronologia/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const item = await updateProducaoCronologia(pool, id, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Registro não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/producao/cronologia/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar registro' });
+  }
+});
+
+app.delete('/api/producao/cronologia/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteProducaoCronologia(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Registro não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/producao/cronologia/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir registro' });
+  }
+});
+
+app.get('/api/producao/premiacoes', requireEvento, async (req, res) => {
+  try {
+    const data = await listProducaoPremiacoes(pool, req.eventoId);
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/producao/premiacoes', err);
+    res.status(500).json({ error: 'Falha ao carregar premiações' });
+  }
+});
+
+app.post('/api/producao/premiacoes', requireEvento, async (req, res) => {
+  try {
+    const item = await createProducaoPremiacao(pool, req.eventoId, req.body);
+    res.status(201).json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/producao/premiacoes', err);
+    res.status(500).json({ error: 'Falha ao criar prêmio' });
+  }
+});
+
+app.put('/api/producao/premiacoes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const item = await updateProducaoPremiacao(pool, id, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Prêmio não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/producao/premiacoes/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar prêmio' });
+  }
+});
+
+app.delete('/api/producao/premiacoes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteProducaoPremiacao(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Prêmio não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/producao/premiacoes/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir prêmio' });
+  }
+});
+
+app.get('/api/financeiro/resultado', requireEvento, async (req, res) => {
+  try {
+    const linhas = await listFinanceiroResultado(pool, req.eventoId);
+    res.json({ linhas });
+  } catch (err) {
+    console.error('GET /api/financeiro/resultado', err);
+    res.status(500).json({ error: 'Falha ao carregar resultado financeiro' });
+  }
+});
+
+app.post('/api/financeiro/resultado/carregar-modelo', requireEvento, async (req, res) => {
+  try {
+    const substituir = req.body?.substituir === true;
+    const linhas = await carregarModeloFinanceiroResultado(pool, req.eventoId, { substituir });
+    res.json({ linhas });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/resultado/carregar-modelo', err);
+    res.status(500).json({ error: 'Falha ao carregar modelo' });
+  }
+});
+
+app.post('/api/financeiro/resultado/linhas', requireEvento, async (req, res) => {
+  try {
+    const linha = await createFinanceiroLinha(pool, req.eventoId, req.body);
+    res.status(201).json({ linha });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/resultado/linhas', err);
+    res.status(500).json({ error: 'Falha ao criar linha' });
+  }
+});
+
+app.put('/api/financeiro/resultado/linhas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const linha = await updateFinanceiroLinha(pool, id, req.eventoId, req.body);
+    if (!linha) return res.status(404).json({ error: 'Linha não encontrada' });
+    res.json({ linha });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/financeiro/resultado/linhas/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar linha' });
+  }
+});
+
+app.delete('/api/financeiro/resultado/linhas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteFinanceiroLinha(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Linha não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/financeiro/resultado/linhas/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir linha' });
+  }
+});
+
+app.get('/api/permission-groups/catalog', async (_req, res) => {
+  res.json({ catalog: PERMISSION_CATALOG });
+});
+
+app.get('/api/permission-groups', async (_req, res) => {
+  try {
+    const groups = await listPermissionGroups(pool);
+    res.json({ groups });
+  } catch (err) {
+    console.error('GET /api/permission-groups', err);
+    res.status(500).json({ error: 'Falha ao carregar grupos de permissão' });
+  }
+});
+
+app.post('/api/permission-groups', async (req, res) => {
+  try {
+    const group = await createPermissionGroup(pool, req.body);
+    res.status(201).json({ group });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Já existe um grupo com este nome' });
+    }
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/permission-groups', err);
+    res.status(500).json({ error: err.sqlMessage || 'Falha ao criar grupo' });
+  }
+});
+
+app.put('/api/permission-groups/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const group = await updatePermissionGroup(pool, id, req.body);
+    if (!group) return res.status(404).json({ error: 'Grupo não encontrado' });
+    res.json({ group });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Já existe um grupo com este nome' });
+    }
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/permission-groups/:id', err);
+    res.status(500).json({ error: err.sqlMessage || 'Falha ao atualizar grupo' });
+  }
+});
+
+app.delete('/api/permission-groups/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deletePermissionGroup(pool, id);
+    if (!ok) return res.status(404).json({ error: 'Grupo não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/permission-groups/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir grupo' });
+  }
+});
+
+app.get('/api/users', async (_req, res) => {
   try {
     const users = await listUsers(pool);
     res.json({ users });
@@ -1146,11 +1491,15 @@ app.get('/api/users', requireAuth, async (_req, res) => {
   }
 });
 
-app.post('/api/users', requireAuth, async (req, res) => {
+app.post('/api/users', async (req, res) => {
   try {
     const input = normalizeUserInput(req.body, { requirePassword: true });
     const passwordHash = await hashPassword(input.password);
-    const user = await createUser(pool, { ...input, passwordHash });
+    let permissionGroupId = input.permissionGroupId;
+    if (!permissionGroupId) {
+      permissionGroupId = await getDefaultPermissionGroupId(pool);
+    }
+    const user = await createUser(pool, { ...input, passwordHash, permissionGroupId });
     res.status(201).json({ user: publicUserRow(user) });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -1162,7 +1511,7 @@ app.post('/api/users', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', requireAuth, async (req, res) => {
+app.put('/api/users/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -1178,7 +1527,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
       passwordHash = await hashPassword(input.password);
     }
 
-    const user = await updateUser(pool, id, { ...input, passwordHash });
+    const user = await updateUser(pool, id, { ...input, passwordHash, permissionGroupId: input.permissionGroupId });
     res.json({ user: publicUserRow(user) });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -1190,7 +1539,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', requireAuth, async (req, res) => {
+app.delete('/api/users/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
@@ -1216,7 +1565,7 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/grupos/:slug/espacos/mover-grupo', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/grupos/:slug/espacos/mover-grupo', requireEvento, async (req, res) => {
   try {
     const movimentos = req.body?.movimentos;
     if (!Array.isArray(movimentos) || movimentos.length === 0) {
@@ -1239,7 +1588,7 @@ app.post('/api/grupos/:slug/espacos/mover-grupo', requireAuth, requireEvento, as
   }
 });
 
-app.post('/api/grupos/:slug/espacos/:numero/mover', requireAuth, requireEvento, async (req, res) => {
+app.post('/api/grupos/:slug/espacos/:numero/mover', requireEvento, async (req, res) => {
   try {
     const destinoNumero = req.body?.destinoNumero;
     if (destinoNumero == null) {
@@ -1268,7 +1617,7 @@ app.post('/api/grupos/:slug/espacos/:numero/mover', requireAuth, requireEvento, 
   }
 });
 
-app.put('/api/grupos/:slug/espacos', requireAuth, requireEvento, async (req, res) => {
+app.put('/api/grupos/:slug/espacos', requireEvento, async (req, res) => {
   try {
     const updates = req.body?.updates;
     if (!Array.isArray(updates) || updates.length === 0) {
@@ -1326,10 +1675,15 @@ async function start() {
   await migrateFunil(pool);
   await migrateInteracoes(pool);
   await migrateMarketing(pool);
+  await migrateProducaoCronologia(pool);
+  await migrateProducaoPremiacoes(pool);
+  await migrateFinanceiroResultado(pool);
   await migrateWhatsapp(pool);
   await migrateSeguidoresHistorico(pool);
   await migrateTiposComercio(pool);
   await migrateUsers(pool);
+  await migrateAuthOtp(pool);
+  await migratePermissions(pool);
 
   const server = http.createServer(app);
   attachWhatsappWebSocket(server);

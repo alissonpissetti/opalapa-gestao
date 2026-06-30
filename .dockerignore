@@ -9,5 +9,5 @@ dist
 .DS_Store
 *.md
 .cursor
-map.png
+/map.png
 agent-tools

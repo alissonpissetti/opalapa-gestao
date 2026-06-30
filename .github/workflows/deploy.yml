@@ -24,12 +24,13 @@ jobs:
           file: ./Dockerfile
           push: false
           tags: opalapa-gestao:ci
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy:
     name: Disparar deploy no Coolify
-    needs: docker-build
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via webhook
@@ -38,9 +39,10 @@ jobs:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
           if [ -z "$COOLIFY_WEBHOOK" ]; then
-            echo "::error::Configure o secret COOLIFY_WEBHOOK em GitHub → Settings → Secrets and variables → Actions."
-            echo "Copie a URL em Coolify → Application → Webhooks → Deploy Webhook."
-            exit 1
+            echo "::warning::COOLIFY_WEBHOOK não configurado."
+            echo "O deploy depende do Auto Deploy do Coolify (GitHub App) ou do secret COOLIFY_WEBHOOK."
+            echo "Coolify → Application → General → Auto Deploy (ON) e Build Pack = Dockerfile."
+            exit 0
           fi
 
           args=(-fsS --request GET "$COOLIFY_WEBHOOK")

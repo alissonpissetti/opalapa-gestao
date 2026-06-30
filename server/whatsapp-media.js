@@ -550,7 +550,7 @@ async function fetchMediaBuffer(rawRecord, tipo) {
 
   try {
     const response = await getBase64FromMediaMessage(rawRecord, {
-      convertToMp4: tipo === 'video',
+      convertToMp4: tipo === 'video' || tipo === 'audio',
     });
     const payload = extractBase64Payload(response);
     if (payload?.buffer?.length && isValidMediaBuffer(payload.buffer, payload.mimetype, tipo)) {
@@ -731,43 +731,110 @@ function normalizeStreamMimetype(mimetype, tipo) {
   const mime = String(mimetype || '').split(';')[0].trim().toLowerCase();
   if (tipo === 'audio') {
     if (!mime || mime === 'application/octet-stream') return 'audio/ogg';
+    if (mime === 'video/mp4') return 'audio/mp4';
     if (mime.startsWith('audio/')) return mime;
     return 'audio/ogg';
   }
   return mimetype || 'application/octet-stream';
 }
 
-function sendMediaBuffer(res, buffer, mimetype, tipo) {
-  res.setHeader('Content-Type', normalizeStreamMimetype(mimetype, tipo));
+function sendMediaBuffer(res, buffer, mimetype, tipo, req = null) {
+  if (res.headersSent || res.writableEnded) return false;
+
+  const body = cloneMediaBuffer(buffer);
+  const contentType = normalizeStreamMimetype(mimetype, tipo);
+  const total = body.length;
+  const range = req?.headers?.range;
+
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(String(range));
+    if (match) {
+      let start = match[1] ? Number.parseInt(match[1], 10) : 0;
+      let end = match[2] ? Number.parseInt(match[2], 10) : total - 1;
+      if (Number.isNaN(start)) start = 0;
+      if (Number.isNaN(end) || end >= total) end = total - 1;
+      if (start <= end && start < total) {
+        const chunk = body.subarray(start, end + 1);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', String(chunk.length));
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        res.send(chunk);
+        return true;
+      }
+      res.status(416).setHeader('Content-Range', `bytes */${total}`);
+      res.end();
+      return false;
+    }
+  }
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Length', String(total));
   res.setHeader('Cache-Control', 'private, max-age=300');
-  res.send(cloneMediaBuffer(buffer));
+  res.send(body);
+  return true;
 }
 
-async function tryEvolutionMediaStream(pool, row, res) {
+async function fetchRemoteMediaUrl(url, { timeoutMs = 15000 } = {}) {
+  if (!url || isWhatsappCdnUrl(url)) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const remote = await fetch(url, { redirect: 'follow', signal: controller.signal });
+    if (!remote.ok) return null;
+    const buffer = Buffer.from(await remote.arrayBuffer());
+    if (!buffer.length) return null;
+    return {
+      buffer,
+      mimetype: remote.headers.get('content-type') || null,
+    };
+  } catch (err) {
+    const msg = String(err?.cause?.message || err?.message || err);
+    if (!msg.includes('aborted')) {
+      console.warn('fetchRemoteMediaUrl:', msg);
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function tryEvolutionMediaStream(pool, row, res, req = null) {
   const candidates = await resolveEvolutionMediaRecords(pool, row);
   for (const rawRecord of candidates) {
     const media = await fetchMediaBuffer(rawRecord, row.tipo);
     if (!media?.buffer?.length) continue;
 
     const mimetype = media.mimetype || row.midia_mimetype || 'application/octet-stream';
-    sendMediaBuffer(res, media.buffer, mimetype, row.tipo);
-    await clearMirrorError(pool, row.id);
-    await storeMediaBuffer(pool, {
-      mensagemId: row.id,
-      arrecadacaoId: row.arrecadacao_id,
-      evolutionMessageId: row.evolution_message_id,
-      tipo: row.tipo,
-      mimetype,
-      fileName: media.fileName,
-      buffer: media.buffer,
-      rawRecord,
-    });
+    try {
+      await clearMirrorError(pool, row.id);
+      await storeMediaBuffer(pool, {
+        mensagemId: row.id,
+        arrecadacaoId: row.arrecadacao_id,
+        evolutionMessageId: row.evolution_message_id,
+        tipo: row.tipo,
+        mimetype,
+        fileName: media.fileName,
+        buffer: media.buffer,
+        rawRecord,
+      });
+    } catch (err) {
+      console.warn(`storeMediaBuffer ${row.id}:`, err.message);
+    }
+
+    if (res.headersSent || res.writableEnded) return true;
+
+    sendMediaBuffer(res, media.buffer, mimetype, row.tipo, req);
     return true;
   }
   return false;
 }
 
-export async function streamWhatsappMensagemMedia(pool, mensagemId, res, { preview = false } = {}) {
+export async function streamWhatsappMensagemMedia(pool, mensagemId, res, { preview = false, req = null } = {}) {
   const row = await getWhatsappMensagemMedia(pool, mensagemId);
   if (!row) {
     throw Object.assign(new Error('Mídia não encontrada'), { status: 404 });
@@ -781,7 +848,7 @@ export async function streamWhatsappMensagemMedia(pool, mensagemId, res, { previ
     if (!buffer?.length) {
       throw Object.assign(new Error('Prévia não disponível'), { status: 404 });
     }
-    sendMediaBuffer(res, buffer, 'image/jpeg', 'image');
+    sendMediaBuffer(res, buffer, 'image/jpeg', 'image', req);
     return;
   }
 
@@ -790,11 +857,8 @@ export async function streamWhatsappMensagemMedia(pool, mensagemId, res, { previ
       const buffer = await readValidatedStoredMedia(row);
       if (buffer?.length) {
         await maybeMigrateStoragePathToRemote(pool, row, buffer);
-        res.setHeader('Content-Type', normalizeStreamMimetype(row.midia_mimetype, row.tipo));
         res.setHeader('Cache-Control', 'private, max-age=86400');
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Length', String(buffer.length));
-        res.send(buffer);
+        sendMediaBuffer(res, buffer, row.midia_mimetype, row.tipo, req);
         return;
       }
     } catch (err) {
@@ -802,31 +866,30 @@ export async function streamWhatsappMensagemMedia(pool, mensagemId, res, { previ
     }
   }
 
+  if (res.headersSent || res.writableEnded) return;
+
   if (isWhatsappMediaTipo(row.tipo)) {
-    const streamed = await tryEvolutionMediaStream(pool, row, res);
+    const streamed = await tryEvolutionMediaStream(pool, row, res, req);
     if (streamed) return;
   }
 
-  if (row.midia_url) {
-    try {
-      const remote = await fetch(row.midia_url);
-      if (remote.ok) {
-        const buffer = Buffer.from(await remote.arrayBuffer());
-        res.setHeader(
-          'Content-Type',
-          normalizeStreamMimetype(
-            row.midia_mimetype || remote.headers.get('content-type') || 'application/octet-stream',
-            row.tipo,
-          ),
-        );
-        res.setHeader('Cache-Control', 'private, max-age=300');
-        res.send(buffer);
-        return;
-      }
-    } catch (err) {
-      console.warn(`fetch midia_url ${mensagemId}:`, err.message);
+  if (res.headersSent || res.writableEnded) return;
+
+  if (row.midia_url && !isWhatsappCdnUrl(row.midia_url)) {
+    const remote = await fetchRemoteMediaUrl(row.midia_url);
+    if (remote?.buffer?.length) {
+      sendMediaBuffer(
+        res,
+        remote.buffer,
+        row.midia_mimetype || remote.mimetype || 'application/octet-stream',
+        row.tipo,
+        req,
+      );
+      return;
     }
   }
+
+  if (res.headersSent || res.writableEnded) return;
 
   throw Object.assign(new Error('Mídia não disponível'), { status: 404 });
 }

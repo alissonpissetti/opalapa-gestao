@@ -1,4 +1,4 @@
-import { fetchUsers, createUser, updateUser, deleteUser } from '../lib/api.js';
+import { fetchUsers, createUser, updateUser, deleteUser, fetchPermissionGroups } from '../lib/api.js';
 import { fmtDate, escapeHtml } from '../lib/format.js';
 
 function formatPhone(phone) {
@@ -22,13 +22,26 @@ export function initUsersModule(currentUser) {
     phone: document.getElementById('u-phone'),
     password: document.getElementById('u-password'),
     passwordHint: document.getElementById('u-password-hint'),
+    permissionGroup: document.getElementById('u-permission-group'),
     btnCancel: document.getElementById('user-btn-cancel'),
     btnSave: document.getElementById('user-btn-save'),
     btnDelete: document.getElementById('user-btn-delete'),
   };
 
   let users = [];
+  let permissionGroups = [];
   let editId = null;
+
+  function renderPermissionGroupOptions(selectedId = '') {
+    if (!els.permissionGroup) return;
+    const opts = ['<option value="">Selecione um grupo</option>'];
+    for (const group of permissionGroups) {
+      opts.push(
+        `<option value="${group.id}"${String(group.id) === String(selectedId) ? ' selected' : ''}>${escapeHtml(group.name)}</option>`,
+      );
+    }
+    els.permissionGroup.innerHTML = opts.join('');
+  }
 
   function maskPhoneInput(el) {
     const digits = el.value.replace(/\D/g, '').slice(0, 11);
@@ -68,6 +81,7 @@ export function initUsersModule(currentUser) {
     els.passwordHint.textContent = isEdit
       ? 'Preencha apenas se quiser alterar a senha.'
       : 'Mínimo recomendado: 6 caracteres.';
+    renderPermissionGroupOptions(user?.permissionGroupId || '');
 
     const isSelf = isEdit && editId === currentUser.id;
     els.btnDelete.classList.toggle('hidden', !isEdit || isSelf);
@@ -87,19 +101,22 @@ export function initUsersModule(currentUser) {
       email: els.email.value.trim(),
       phone: els.phone.value.replace(/\D/g, ''),
       password: els.password.value,
+      permissionGroupId: els.permissionGroup?.value ? Number(els.permissionGroup.value) : null,
     };
   }
 
   async function loadUsers() {
-    const data = await fetchUsers();
-    users = data.users;
+    const [usersRes, groupsRes] = await Promise.all([fetchUsers(), fetchPermissionGroups()]);
+    users = usersRes.users;
+    permissionGroups = groupsRes.groups || [];
+    renderPermissionGroupOptions();
     renderTable();
   }
 
   function renderTable() {
     if (!users.length) {
       els.table.innerHTML =
-        '<tr><td colspan="6" class="cell-empty">Nenhum usuário cadastrado.</td></tr>';
+        '<tr><td colspan="5" class="cell-empty">Nenhum usuário cadastrado.</td></tr>';
       els.summary.textContent = '0 usuário(s)';
       return;
     }
@@ -112,6 +129,7 @@ export function initUsersModule(currentUser) {
             <td><strong>${escapeHtml(user.name)}</strong>${isSelf ? ' <span class="badge disp">você</span>' : ''}</td>
             <td class="${user.email ? '' : 'cell-empty'}">${user.email ? escapeHtml(user.email) : '—'}</td>
             <td class="${user.phone ? '' : 'cell-empty'}">${user.phone ? formatPhone(user.phone) : '—'}</td>
+            <td class="${user.permissionGroupName ? '' : 'cell-empty'}">${user.permissionGroupName ? escapeHtml(user.permissionGroupName) : '—'}</td>
             <td class="cell-muted">${fmtDate(user.createdAt)}</td>
             <td class="row-actions">
               <button class="tbtn" type="button" data-action="edit" data-id="${user.id}">Editar</button>
@@ -157,6 +175,10 @@ export function initUsersModule(currentUser) {
 
   async function saveUser() {
     const form = readForm();
+    if (!editId && !form.permissionGroupId) {
+      alert('Selecione um grupo de permissão.');
+      return;
+    }
     els.btnSave.disabled = true;
     els.btnSave.textContent = 'Salvando…';
 

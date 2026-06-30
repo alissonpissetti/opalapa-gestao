@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createPool } from '../server/db.js';
 import { migrateUsers, createUser } from '../server/users.js';
+import { migratePermissions, getDefaultPermissionGroupId } from '../server/permissions.js';
 import { hashPassword } from '../server/auth.js';
 
 function usage() {
@@ -49,14 +50,17 @@ const pool = createPool(process.env.DATABASE_URL);
 
 try {
   await migrateUsers(pool);
+  await migratePermissions(pool);
   const passwordHash = await hashPassword(args.password);
-  const id = await createUser(pool, {
+  const permissionGroupId = await getDefaultPermissionGroupId(pool);
+  const user = await createUser(pool, {
     name: args.name.trim(),
     email,
     phone,
     passwordHash,
+    permissionGroupId,
   });
-  console.log(`Usuário criado (id ${id}): ${args.name}`);
+  console.log(`Usuário criado (id ${user.id}): ${args.name}`);
   if (email) console.log(`  E-mail: ${email}`);
   if (phone) console.log(`  Celular: ${phone}`);
 } catch (err) {

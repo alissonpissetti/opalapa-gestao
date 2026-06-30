@@ -1,3 +1,5 @@
+import { canAccessView, getDefaultView, applyNavPermissions } from '../lib/permissions.js';
+
 const VIEWS = {
   eventos: { viewId: 'view-eventos', navId: 'nav-eventos' },
   espacos: { viewId: 'view-espacos', navId: 'nav-espacos' },
@@ -5,7 +7,15 @@ const VIEWS = {
   artistico: { viewId: 'view-artistico', navId: 'nav-artistico' },
   tarefas: { viewId: 'view-tarefas', navId: 'nav-tarefas' },
   marketing: { viewId: 'view-marketing', navId: 'nav-marketing' },
+  cronologia: { viewId: 'view-cronologia', navId: 'nav-cronologia', parentId: 'nav-producao' },
+  premiacoes: { viewId: 'view-premiacoes', navId: 'nav-premiacoes', parentId: 'nav-producao' },
+  'financeiro-gestao': {
+    viewId: 'view-financeiro-gestao',
+    navId: 'nav-financeiro-gestao',
+    parentId: 'nav-financeiro',
+  },
   usuarios: { viewId: 'view-usuarios', navId: 'nav-usuarios', parentId: 'nav-acessos' },
+  permissoes: { viewId: 'view-permissoes', navId: 'nav-permissoes', parentId: 'nav-acessos' },
 };
 
 const MOBILE_NAV_MQ = window.matchMedia('(max-width: 768px)');
@@ -22,13 +32,19 @@ function isMobileNav() {
 
 export function initNavigation({ onViewChange }) {
   let currentView = 'espacos';
-  const dropdown = document.getElementById('nav-acessos');
-  const dropdownToggle = document.getElementById('nav-acessos-toggle');
+  const navDropdowns = [...document.querySelectorAll('.nav-dropdown')];
   const navDrawer = document.getElementById('nav-drawer') || document.querySelector('.nav');
   const navEl = document.querySelector('.nav-drawer-links') || navDrawer;
   const navScrollEl = document.querySelector('.nav-scroll');
   const navMenuToggle = document.getElementById('nav-menu-toggle');
   const navDrawerBackdrop = document.getElementById('nav-drawer-backdrop');
+
+  function closeAllDropdowns() {
+    navDropdowns.forEach((dropdown) => {
+      dropdown.classList.remove('open');
+      dropdown.querySelector('.nav-dropdown-toggle')?.setAttribute('aria-expanded', 'false');
+    });
+  }
 
   function updateNavScrollHints() {
     if (!navEl || !navScrollEl || isMobileNav()) return;
@@ -76,8 +92,7 @@ export function initNavigation({ onViewChange }) {
     navMenuToggle?.setAttribute('aria-expanded', 'false');
     navMenuToggle?.setAttribute('aria-label', 'Abrir menu de navegação');
     navDrawerBackdrop?.setAttribute('hidden', '');
-    dropdown?.classList.remove('open');
-    dropdownToggle?.setAttribute('aria-expanded', 'false');
+    closeAllDropdowns();
   }
 
   function toggleNavDrawer() {
@@ -87,6 +102,7 @@ export function initNavigation({ onViewChange }) {
 
   function bindNavDrawer() {
     navMenuToggle?.addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       toggleNavDrawer();
     });
@@ -174,17 +190,23 @@ export function initNavigation({ onViewChange }) {
       else el.removeAttribute('aria-current');
     });
 
+    navDropdowns.forEach((dd) => dd.classList.remove('active'));
     if (VIEWS[view]?.parentId) {
       document.getElementById(VIEWS[view].parentId)?.classList.add('active');
-    } else {
-      dropdown?.classList.remove('active');
     }
 
     scrollActiveNavIntoView(view);
   }
 
-  function navigate(view, { replace = false } = {}) {
+  function navigate(view, { replace = false, force = false } = {}) {
     if (!VIEWS[view]) return;
+    if (!force && !canAccessView(view)) {
+      const fallback = getDefaultView();
+      if (fallback) {
+        navigate(fallback, { replace, force: true });
+      }
+      return;
+    }
     currentView = view;
 
     Object.values(VIEWS).forEach(({ viewId }) => {
@@ -193,8 +215,7 @@ export function initNavigation({ onViewChange }) {
     document.getElementById(VIEWS[view].viewId)?.classList.remove('hidden');
 
     setActiveNav(view);
-    dropdown?.classList.remove('open');
-    dropdownToggle?.setAttribute('aria-expanded', 'false');
+    closeAllDropdowns();
     closeNavDrawer();
 
     const hash = `#${view}`;
@@ -214,32 +235,49 @@ export function initNavigation({ onViewChange }) {
 
   document.getElementById('btn-logout-drawer')?.addEventListener('click', closeNavDrawer);
 
-  dropdownToggle?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (isMobileNav()) return;
-    const open = !dropdown?.classList.contains('open');
-    dropdown?.classList.toggle('open', open);
-    dropdownToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  navDropdowns.forEach((dropdown) => {
+    const toggle = dropdown.querySelector('.nav-dropdown-toggle');
+    toggle?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isMobileNav()) return;
+      const open = !dropdown.classList.contains('open');
+      closeAllDropdowns();
+      if (open) {
+        dropdown.classList.add('open');
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+    });
   });
 
   document.addEventListener('click', () => {
     if (isMobileNav()) return;
-    dropdown?.classList.remove('open');
+    closeAllDropdowns();
   });
 
   window.addEventListener('popstate', (e) => {
-    let view = e.state?.view || location.hash.replace('#', '') || 'espacos';
+    let view = e.state?.view || location.hash.replace('#', '') || getDefaultView();
     if (view === 'participantes') view = 'arrecadacao';
-    if (VIEWS[view]) navigate(view, { replace: true });
+    if (view && VIEWS[view] && canAccessView(view)) navigate(view, { replace: true });
+    else {
+      const fallback = getDefaultView();
+      if (fallback) navigate(fallback, { replace: true, force: true });
+    }
   });
 
   const initial = location.hash.replace('#', '');
-  const initialView =
-    initial === 'participantes' ? 'arrecadacao' : VIEWS[initial] ? initial : 'espacos';
+  let initialView = getDefaultView();
+  if (initial === 'participantes') {
+    initialView = canAccessView('arrecadacao') ? 'arrecadacao' : getDefaultView();
+  } else if (initial && VIEWS[initial] && canAccessView(initial)) {
+    initialView = initial;
+  }
 
+  applyNavPermissions();
   bindNavDrawer();
   bindNavDragScroll();
-  navigate(initialView, { replace: true });
+  if (initialView) {
+    navigate(initialView, { replace: true, force: true });
+  }
 
-  return { navigate, getCurrentView: () => currentView };
+  return { navigate, getCurrentView: () => currentView, applyNavPermissions };
 }

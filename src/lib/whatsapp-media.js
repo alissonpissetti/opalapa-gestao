@@ -1,5 +1,6 @@
 import { escapeHtml } from './format.js';
 import { hydrateLinkPreviews } from './whatsapp-bubble-text.js';
+import { getActiveEventoId } from './evento.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const mediaBlobCache = new Map();
@@ -34,6 +35,19 @@ function mediaTipoFromNode(node) {
     node?.closest('[data-midia-tipo]')?.dataset?.midiaTipo ||
     ''
   );
+}
+
+function mediaFetchHeaders() {
+  const eventoId = getActiveEventoId();
+  return eventoId ? { 'X-Evento-Id': String(eventoId) } : {};
+}
+
+function browserPrefersAudioBlob() {
+  if (typeof document === 'undefined') return true;
+  const probe = document.createElement('audio');
+  const canOgg = probe.canPlayType('audio/ogg; codecs=opus') || probe.canPlayType('audio/ogg');
+  const canMp4 = probe.canPlayType('audio/mp4') || probe.canPlayType('audio/aac');
+  return !canOgg && Boolean(canMp4);
 }
 
 function rememberObjectUrl(key, objectUrl) {
@@ -170,14 +184,28 @@ function bindAudioShell(shell) {
 
   shell.dataset.audioBound = '1';
 
-  playBtn.addEventListener('click', () => {
-    if (!shell.classList.contains('is-ready')) return;
+  playBtn.addEventListener('click', async () => {
+    if (!shell.classList.contains('is-ready')) {
+      playBtn.disabled = true;
+      try {
+        await applyMediaToNode(shell, 0, { force: true });
+      } catch {
+        /* hydrate tenta novamente abaixo */
+      }
+      if (!shell.classList.contains('is-ready')) {
+        playBtn.disabled = false;
+        return;
+      }
+    }
     if (audio.paused) {
       if (activeAudioElement && activeAudioElement !== audio) {
         activeAudioElement.pause();
         syncAudioUi(activeAudioElement);
       }
-      void audio.play().catch(async () => {
+      try {
+        await audio.play();
+        activeAudioElement = audio;
+      } catch {
         if (audio.dataset.playRetried) {
           shell.classList.add('is-error');
           alert('Não foi possível reproduzir o áudio.');
@@ -187,24 +215,25 @@ function bindAudioShell(shell) {
         delete audio.dataset.hydrated;
         shell.classList.remove('is-ready', 'is-error');
         playBtn.disabled = true;
-        await applyMediaToNode(shell);
+        await applyMediaToNode(shell, 0, { force: true });
         if (!shell.classList.contains('is-ready')) {
           shell.classList.add('is-error');
+          playBtn.disabled = true;
           alert('Não foi possível reproduzir o áudio.');
           return;
         }
         try {
           await audio.play();
           activeAudioElement = audio;
-          syncAudioUi(audio);
         } catch {
           shell.classList.add('is-error');
+          playBtn.disabled = true;
           alert('Não foi possível reproduzir o áudio.');
         }
-      });
-      activeAudioElement = audio;
+      }
     } else {
       audio.pause();
+      if (activeAudioElement === audio) activeAudioElement = null;
     }
     syncAudioUi(audio);
   });
@@ -495,6 +524,7 @@ async function fetchMediaBlob(url) {
   try {
     const res = await fetch(resolveMediaFetchUrl(url), {
       credentials: 'include',
+      headers: mediaFetchHeaders(),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -541,6 +571,9 @@ async function blobForNode(node, blob) {
     const fromBlob = normalizeAudioMime(blob.type);
     const fromMeta = normalizeAudioMime(node.dataset.midiaMimetype);
     const type = sniffed || fromBlob || fromMeta || 'audio/ogg';
+    if (sniffed === 'audio/mp4' || fromMeta === 'audio/mp4' || fromBlob === 'audio/mp4') {
+      return new Blob([await blob.arrayBuffer()], { type: 'audio/mp4' });
+    }
     if (!blob.type || blob.type === type) {
       return blob.type === type ? blob : new Blob([blob], { type });
     }
@@ -584,6 +617,7 @@ function tryDirectMediaSrc(mediaNode, directUrl) {
     const onError = () => finish(false);
 
     if (isAudio) {
+      mediaNode.addEventListener('loadedmetadata', onReady);
       mediaNode.addEventListener('canplay', onReady);
       mediaNode.addEventListener('canplaythrough', onReady);
     } else {
@@ -594,7 +628,10 @@ function tryDirectMediaSrc(mediaNode, directUrl) {
     mediaNode.preload = isAudio ? 'auto' : mediaNode.preload;
     mediaNode.src = directUrl;
     mediaNode.load();
-    const timer = setTimeout(() => finish(!isAudio && mediaNode.readyState >= 1), isAudio ? 20000 : 6000);
+    const timer = setTimeout(
+      () => finish(mediaNode.readyState >= (isAudio ? 1 : 1)),
+      isAudio ? 15000 : 6000,
+    );
   });
 }
 
@@ -609,7 +646,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function applyMediaToNode(node, attempt = 0) {
+async function loadAudioMedia(mediaNode, url, key) {
+  const blob = await blobForNode(mediaNode, await fetchMediaBlob(url));
+  const objectUrl = URL.createObjectURL(blob);
+  rememberObjectUrl(key, objectUrl);
+  return tryDirectMediaSrc(mediaNode, objectUrl);
+}
+
+async function applyMediaToNode(node, attempt = 0, { force = false } = {}) {
   const mediaNode = node.matches('audio,video,img') ? node : node.querySelector('audio,video,img');
   if (!mediaNode) return;
 
@@ -617,7 +661,7 @@ async function applyMediaToNode(node, attempt = 0) {
   if (!url || mediaNode.dataset.fallbackShown) return;
 
   if (attempt === 0) {
-    if (mediaHydrationLocks.has(mediaNode)) return;
+    if (!force && mediaHydrationLocks.has(mediaNode)) return;
     mediaHydrationLocks.add(mediaNode);
   }
 
@@ -630,12 +674,26 @@ async function applyMediaToNode(node, attempt = 0) {
     if (tag === 'AUDIO' || tag === 'VIDEO') {
       const cached = key ? mediaBlobCache.get(key) : null;
       if (cached) {
-        mediaNode.src = cached;
-        mediaNode.load();
         if (await tryDirectMediaSrc(mediaNode, cached)) return;
       }
 
-      if (tag === 'AUDIO' && attempt === 0 && (await tryDirectMediaSrc(mediaNode, directUrl))) return;
+      if (tag === 'AUDIO') {
+        try {
+          if (await loadAudioMedia(mediaNode, url, key)) return;
+          if (!browserPrefersAudioBlob() && attempt === 0 && (await tryDirectMediaSrc(mediaNode, directUrl))) {
+            return;
+          }
+          throw Object.assign(new Error('decode failed'), { status: 404 });
+        } catch (err) {
+          if (attempt < 2) {
+            await sleep(1000 * (attempt + 1));
+            return applyMediaToNode(node, attempt + 1, { force });
+          }
+          showWhatsappMediaPending(mediaNode, mediaErrorMessage(err.status, tipo), tipo);
+        }
+        return;
+      }
+
       if (tag === 'VIDEO' && attempt === 0 && (await tryDirectMediaSrc(mediaNode, directUrl))) return;
 
       try {
@@ -645,9 +703,9 @@ async function applyMediaToNode(node, attempt = 0) {
         if (await tryDirectMediaSrc(mediaNode, objectUrl)) return;
         throw Object.assign(new Error('decode failed'), { status: 404 });
       } catch (err) {
-        if (attempt < 4) {
-          await sleep(800 * (attempt + 1));
-          return applyMediaToNode(node, attempt + 1);
+        if (attempt < 2) {
+          await sleep(1000 * (attempt + 1));
+          return applyMediaToNode(node, attempt + 1, { force });
         }
         showWhatsappMediaPending(mediaNode, mediaErrorMessage(err.status, tipo), tipo);
       }
@@ -668,9 +726,9 @@ async function applyMediaToNode(node, attempt = 0) {
       mediaNode.src = objectUrl;
       markMediaReady(mediaNode);
     } catch (err) {
-      if (attempt < 4) {
-        await sleep(600 * (attempt + 1));
-        return applyMediaToNode(node, attempt + 1);
+      if (attempt < 2) {
+        await sleep(1000 * (attempt + 1));
+        return applyMediaToNode(node, attempt + 1, { force });
       }
       showWhatsappMediaPending(mediaNode, mediaErrorMessage(err.status, tipo), tipo);
     }
@@ -727,16 +785,17 @@ export async function hydrateWhatsappMedia(container) {
   const candidates = container.querySelectorAll(
     [
       'img[data-midia-url]:not([data-hydrated]):not([data-fallback-shown])',
-      '.wa-bubble-audio-shell:not(.is-ready):not(:has([data-fallback-shown]))',
-      '.lw-whatsapp-bubble-audio-shell:not(.is-ready):not(:has([data-fallback-shown]))',
-      '.wa-bubble-video-shell:not(.is-ready):not(:has([data-fallback-shown]))',
-      '.lw-whatsapp-bubble-video-shell:not(.is-ready):not(:has([data-fallback-shown]))',
+      '.wa-bubble-audio-shell:not(.is-ready)',
+      '.lw-whatsapp-bubble-audio-shell:not(.is-ready)',
+      '.wa-bubble-video-shell:not(.is-ready)',
+      '.lw-whatsapp-bubble-video-shell:not(.is-ready)',
     ].join(', '),
   );
 
   const seen = new Set();
   const nodes = [];
   for (const node of candidates) {
+    if (node.querySelector?.('[data-fallback-shown]')) continue;
     const mediaNode = node.matches('audio,video,img')
       ? node
       : node.querySelector('audio,video,img');
@@ -817,7 +876,7 @@ export async function hydrateDocumentPreviews(container) {
 
 const mediaRetryTimers = new WeakMap();
 
-export function retryPendingWhatsappMedia(container, { delays = [800, 2000, 5000, 12000, 25000, 45000] } = {}) {
+export function retryPendingWhatsappMedia(container, { delays = [1500, 5000, 15000] } = {}) {
   if (!container) return;
 
   const prev = mediaRetryTimers.get(container);

@@ -206,11 +206,66 @@ textarea {
   margin-bottom: 14px;
 }
 
+.login-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 1rem;
+  padding: 4px;
+  background: #141414;
+  border-radius: 10px;
+  border: 1px solid #333;
+}
+
+.login-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.login-tab.active {
+  background: #2a2a2a;
+  color: #eee;
+}
+
+.login-panel .btn + .btn,
+.login-panel .btn + .login-submit,
+.login-panel .login-submit + .btn {
+  margin-top: 8px;
+}
+
+.login-forgot-wrap {
+  margin: 4px 0 10px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.login-forgot-wrap a {
+  color: #5dcaa5;
+  text-decoration: none;
+}
+
+.login-forgot-wrap a:hover {
+  text-decoration: underline;
+}
+
+.login-hint {
+  font-size: 12px;
+  color: #5dcaa5;
+  margin-top: 12px;
+  line-height: 1.45;
+}
+
 .login-error {
   min-height: 18px;
   font-size: 12px;
   color: #e24b4a;
-  margin-bottom: 10px;
+  margin-top: 10px;
 }
 
 .login-submit {
@@ -2230,6 +2285,10 @@ body.lead-workspace-open {
   overflow: hidden;
 }
 
+body.lead-workspace-open .lead-workspace {
+  z-index: 1300;
+}
+
 .lead-workspace {
   position: fixed;
   inset: 0;
@@ -2442,6 +2501,84 @@ body.lead-workspace-open {
 .lw-deal-hint {
   margin: 0 0 12px;
   font-size: 12px;
+}
+
+.lw-vinculos {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--content-border);
+}
+
+.lw-vinculos-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.lw-vinculos-hint {
+  margin: 0 0 10px;
+}
+
+.lw-vinculos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lw-vinculo-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.lw-vinculo-btn {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--content-border);
+  border-radius: 10px;
+  background: var(--content-surface-2, #f8faf9);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.lw-vinculo-btn:hover {
+  border-color: #5dcaa5;
+  background: rgba(93, 202, 165, 0.08);
+}
+
+.lw-vinculo-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.lw-vinculo-map {
+  flex-shrink: 0;
+  padding: 0 10px;
+  border: 1px solid var(--content-border);
+  border-radius: 10px;
+  background: var(--content-surface);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3d9b7a;
+}
+
+.lw-vinculo-map:hover {
+  border-color: #5dcaa5;
+  background: rgba(93, 202, 165, 0.1);
 }
 
 .lw-ext-link {
@@ -3408,7 +3545,29 @@ body.lead-workspace-open {
 
 
 .modal.modal-wide {
-  width: 400px;
+  width: min(640px, 94vw);
+}
+
+.modal.modal-form-xl {
+  width: min(760px, 94vw);
+  max-height: min(92vh, 920px);
+  overflow-y: auto;
+}
+
+.modal-form-xl .permissoes-views {
+  max-height: min(52vh, 520px);
+}
+
+#financeiro-modal-bg.modal-bg.open,
+#permissoes-modal-bg.modal-bg.open {
+  align-items: flex-start;
+  padding: 1.5rem 0;
+  overflow-y: auto;
+}
+
+#financeiro-modal-bg .modal-form-xl,
+#permissoes-modal-bg .modal-form-xl {
+  margin: auto;
 }
 
 .chk {
@@ -3651,6 +3810,59 @@ tbody tr .chk-cell {
   flex-wrap: wrap;
 }
 
+.cronologia-filters {
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 0.5rem;
+}
+
+.cronologia-filters .field-inline {
+  margin: 0;
+  min-width: 140px;
+}
+
+.cronologia-filters .field-inline label {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.cronologia-filters .field-inline select {
+  width: 100%;
+}
+
+.field-optional {
+  font-weight: 400;
+  color: #666;
+  font-size: 12px;
+}
+
+.form-errors {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 6px;
+  background: rgba(226, 75, 74, 0.12);
+  border: 1px solid rgba(226, 75, 74, 0.35);
+  color: #f0a0a0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.form-errors.hidden {
+  display: none;
+}
+
+.field.is-invalid label {
+  color: #e87878;
+}
+
+.field.is-invalid input,
+.field.is-invalid select,
+.field.is-invalid textarea {
+  border-color: #e24b4a;
+  box-shadow: 0 0 0 1px rgba(226, 75, 74, 0.28);
+}
+
 .report-summary {
   font-size: 12px;
   color: #888;
@@ -3861,39 +4073,208 @@ tbody tr .chk-cell {
   opacity: 0.92;
 }
 
-.pagamento-resumo {
+.modal.modal-pagamento {
+  width: min(560px, 94vw);
+  max-height: min(92vh, 880px);
+  overflow-y: auto;
+}
+
+.modal-pagamento .msub {
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.modal-pagamento .pagamento-resumo {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.1rem;
+  background: var(--content-surface-muted);
+  border: 1px solid var(--content-border);
+  border-radius: 12px;
+}
+
+.modal-pagamento .pagamento-resumo-item {
   display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
-.pagamento-resumo span {
-  color: #aaa;
+.modal-pagamento .pagamento-resumo-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-text-muted);
 }
 
-.pagamento-resumo strong {
-  color: #eee;
-  margin-left: 0.25rem;
+.modal-pagamento .pagamento-resumo-valor {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-text);
 }
 
-.pagamento-historico {
+.modal-pagamento .pagamento-resumo-valor--pago {
+  color: var(--accent);
+}
+
+.modal-pagamento .pagamento-resumo-valor--falta {
+  color: #d97706;
+}
+
+.modal-pagamento .pagamento-resumo-valor--quitado {
+  color: var(--accent);
+}
+
+.modal-pagamento .pagamento-form {
+  display: grid;
+  gap: 12px;
+}
+
+.modal-pagamento .pagamento-field-valor {
+  max-width: 220px;
+  margin-bottom: 0;
+}
+
+.modal-pagamento .pagamento-form .field {
+  margin-bottom: 0;
+}
+
+.modal-pagamento .pagamento-btns {
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.modal-pagamento .pagamento-historico {
   margin-top: 1.25rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--content-border);
 }
 
-.pagamento-historico-head {
-  margin-bottom: 0.5rem;
+.modal-pagamento .pagamento-historico-head {
+  margin-bottom: 0.65rem;
 }
 
-.pagamento-historico h3 {
-  font-size: 14px;
-  font-weight: 500;
+.modal-pagamento .pagamento-historico h3 {
+  font-size: 13px;
+  font-weight: 600;
   margin: 0;
+  color: var(--content-text);
+}
+
+.modal-pagamento .pagamento-historico-head .field-hint {
+  margin: 3px 0 0;
+  font-size: 12px;
+}
+
+.modal-pagamento .pagamento-table-wrap {
+  border: 1px solid var(--content-border);
+  border-radius: 10px;
+  background: var(--content-surface);
+  overflow: hidden;
+}
+
+.modal-pagamento .pagamento-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.modal-pagamento .pagamento-table th,
+.modal-pagamento .pagamento-table td {
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--content-border);
+}
+
+.modal-pagamento .pagamento-table th {
+  background: var(--content-surface-muted);
+  color: var(--content-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modal-pagamento .pagamento-table td {
+  color: var(--content-text);
+}
+
+.modal-pagamento .pagamento-table tr:last-child td {
+  border-bottom: none;
+}
+
+.modal-pagamento .pagamento-table tbody tr {
+  cursor: default;
+}
+
+.modal-pagamento .pagamento-table tbody tr:hover {
+  background: var(--content-surface-muted);
+}
+
+.modal-pagamento .pagamento-table .col-data {
+  width: 92px;
+}
+
+.modal-pagamento .pagamento-table .col-valor {
+  width: 88px;
+  text-align: right;
+}
+
+.modal-pagamento .pagamento-table td.col-valor {
+  text-align: right;
+}
+
+.modal-pagamento .pagamento-table .col-acao {
+  width: 44px;
+  padding-left: 4px;
+  padding-right: 6px;
+  text-align: center;
+}
+
+.modal-pagamento .pagamento-table .col-ref {
+  width: 34%;
+}
+
+.modal-pagamento .pagamento-table .col-obs {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-pagamento .pagamento-table .cell-ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-pagamento .pagamento-table .cell-money {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-pagamento .pagamento-table .cell-empty {
+  text-align: center;
+}
+
+.modal-pagamento .pagamento-table .col-acao .icon-btn {
+  margin: 0 auto;
+}
+
+@media (max-width: 520px) {
+  .modal-pagamento .pagamento-resumo {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-pagamento .pagamento-field-valor {
+    max-width: none;
+  }
 }
 
 .table-wrap {
@@ -5005,6 +5386,28 @@ a.lw-whatsapp-bubble-doc:hover {
   text-overflow: ellipsis;
 }
 
+.wa-bubble-link-preview-desc,
+.lw-whatsapp-bubble-link-preview-desc {
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.72);
+  margin-top: 2px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wa-bubble--in .wa-bubble-link-preview-desc,
+.lw-whatsapp-bubble--in .lw-whatsapp-bubble-link-preview-desc {
+  color: rgba(233, 237, 239, 0.72);
+}
+
+.wa-bubble-link-preview-thumb[hidden],
+.lw-whatsapp-bubble-link-preview-thumb[hidden] {
+  display: none !important;
+}
+
 .wa-bubble--has-link-preview,
 .lw-whatsapp-bubble--has-link-preview {
   min-width: min(100%, 280px);
@@ -5813,6 +6216,8 @@ body.wa-inbox-open {
     grid-area: brand;
     font-size: 14px;
     min-width: 0;
+    position: relative;
+    z-index: 502;
   }
 
   .nav-menu-toggle {
@@ -5820,6 +6225,10 @@ body.wa-inbox-open {
     grid-area: menu;
     justify-self: end;
     margin-left: 2px;
+    position: relative;
+    z-index: 502;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .user-menu {
@@ -5829,6 +6238,8 @@ body.wa-inbox-open {
     flex-wrap: wrap;
     gap: 6px;
     min-width: 0;
+    position: relative;
+    z-index: 502;
   }
 
   .user-menu #btn-logout {
@@ -5847,6 +6258,12 @@ body.wa-inbox-open {
     flex: none;
     overflow: visible;
     pointer-events: none;
+    visibility: hidden;
+  }
+
+  body.nav-drawer-open .nav-scroll {
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .nav-scroll::before,
@@ -5862,10 +6279,6 @@ body.wa-inbox-open {
     opacity: 0;
     transition: opacity 0.2s ease;
     pointer-events: none;
-  }
-
-  body.nav-drawer-open .nav-scroll {
-    pointer-events: auto;
   }
 
   body.nav-drawer-open .nav-drawer-backdrop {
@@ -6331,6 +6744,8 @@ body.wa-inbox-open {
   .page .table-wrap:has(.table-arrecadacao),
   .page .table-wrap:has(.table-artistico),
   .page .table-wrap:has(.table-tarefas),
+  .page .table-wrap:has(.table-cronologia),
+  .page .table-wrap:has(.table-premiacoes),
   .page .table-wrap:has(.table-espacos),
   .page .table-wrap:has(.table-eventos),
   #view-eventos .table-wrap,
@@ -6346,6 +6761,8 @@ body.wa-inbox-open {
   .table-arrecadacao,
   .table-artistico,
   .table-tarefas,
+  .table-cronologia,
+  .table-premiacoes,
   .table-espacos,
   .table-eventos,
   #arrecadacao-disponiveis-section table {
@@ -6356,6 +6773,8 @@ body.wa-inbox-open {
   .table-arrecadacao thead,
   .table-artistico thead,
   .table-tarefas thead,
+  .table-cronologia thead,
+  .table-premiacoes thead,
   .table-espacos thead,
   .table-eventos thead,
   #arrecadacao-disponiveis-section thead {
@@ -6971,6 +7390,224 @@ body.wa-inbox-open {
     background: rgba(226, 75, 74, 0.06);
   }
 
+  .table-cronologia tbody tr.cronologia-card-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'ano acoes'
+      'nome nome'
+      'veiculo veiculo'
+      'telefone telefone'
+      'cidade cidade'
+      'situacao situacao';
+    gap: 4px 8px;
+    padding: 10px 12px;
+    background: var(--content-surface);
+    border: 1px solid var(--content-border);
+    border-radius: 10px;
+    box-shadow: var(--content-shadow);
+    cursor: pointer;
+  }
+
+  .table-cronologia tbody tr.cronologia-empty-row {
+    display: block;
+    padding: 1.25rem 1rem;
+    background: var(--content-surface);
+    border: 1px solid var(--content-border);
+    border-radius: 10px;
+    box-shadow: var(--content-shadow);
+    cursor: default;
+    text-align: center;
+  }
+
+  .table-cronologia tbody tr.cronologia-empty-row td {
+    display: block;
+    padding: 0;
+    border: none;
+  }
+
+  .table-cronologia tbody td {
+    display: block;
+    padding: 0;
+    border: none;
+    font-size: 12px;
+  }
+
+  .table-cronologia .cronologia-cell-ano {
+    grid-area: ano;
+    font-size: 13px;
+    color: #bbb;
+  }
+
+  .table-cronologia .cronologia-cell-nome {
+    grid-area: nome;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .table-cronologia .cronologia-cell-veiculo {
+    grid-area: veiculo;
+    font-size: 12px;
+    color: #aaa;
+    line-height: 1.35;
+  }
+
+  .table-cronologia .cronologia-cell-telefone {
+    grid-area: telefone;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.35;
+  }
+
+  .table-cronologia .cronologia-cell-cidade {
+    grid-area: cidade;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.35;
+  }
+
+  .table-cronologia .cronologia-cell-telefone--empty,
+  .table-cronologia .cronologia-cell-cidade--empty {
+    display: none;
+  }
+
+  .table-cronologia .cronologia-cell-situacao {
+    grid-area: situacao;
+  }
+
+  .table-cronologia .cronologia-cell-acoes {
+    grid-area: acoes;
+    align-self: start;
+    justify-self: end;
+  }
+
+  .table-cronologia .row-actions--cronologia {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .table-cronologia .row-actions--cronologia .tbtn {
+    padding: 5px 8px;
+    font-size: 11px;
+    text-align: center;
+    justify-content: center;
+  }
+
+  .table-cronologia .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .table-premiacoes tbody tr.premiacoes-card-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'nome acoes'
+      'descricao descricao'
+      'vencedor vencedor'
+      'telefone telefone';
+    gap: 4px 8px;
+    padding: 10px 12px;
+    background: var(--content-surface);
+    border: 1px solid var(--content-border);
+    border-radius: 10px;
+    box-shadow: var(--content-shadow);
+    cursor: pointer;
+  }
+
+  .table-premiacoes tbody tr.premiacoes-empty-row {
+    display: block;
+    padding: 1.25rem 1rem;
+    background: var(--content-surface);
+    border: 1px solid var(--content-border);
+    border-radius: 10px;
+    box-shadow: var(--content-shadow);
+    cursor: default;
+    text-align: center;
+  }
+
+  .table-premiacoes tbody tr.premiacoes-empty-row td {
+    display: block;
+    padding: 0;
+    border: none;
+  }
+
+  .table-premiacoes tbody td {
+    display: block;
+    padding: 0;
+    border: none;
+    font-size: 12px;
+  }
+
+  .table-premiacoes .premiacoes-cell-nome {
+    grid-area: nome;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .table-premiacoes .premiacoes-cell-descricao {
+    grid-area: descricao;
+    font-size: 12px;
+    color: #aaa;
+    line-height: 1.35;
+  }
+
+  .table-premiacoes .premiacoes-cell-vencedor {
+    grid-area: vencedor;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .table-premiacoes .premiacoes-cell-telefone {
+    grid-area: telefone;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .table-premiacoes .premiacoes-cell-acoes {
+    grid-area: acoes;
+    align-self: start;
+    justify-self: end;
+  }
+
+  .table-premiacoes .row-actions--premiacoes {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .table-premiacoes .row-actions--premiacoes .tbtn {
+    padding: 5px 8px;
+    font-size: 11px;
+    text-align: center;
+    justify-content: center;
+  }
+
+  #premiacoes-modal-bg .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  #view-cronologia .cronologia-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 0.65rem;
+  }
+
+  #view-cronologia .cronologia-filters .field-inline {
+    min-width: 0;
+    width: 100%;
+  }
+
+  #view-cronologia .report-summary {
+    margin-bottom: 0.5rem;
+  }
+
+  #cronologia-modal-bg .field-row {
+    grid-template-columns: 1fr;
+  }
+
   #view-tarefas .report-filters {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7084,5 +7721,190 @@ body.wa-inbox-open {
 
   .badge {
     border: 1px solid #999;
+  }
+}
+
+/* Financeiro — Gestão (aba Resultado) */
+.financeiro-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-financeiro {
+  min-width: 1200px;
+  font-size: 0.8125rem;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-financeiro th,
+.table-financeiro td {
+  padding: 0.35rem 0.5rem;
+  white-space: nowrap;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.table-financeiro th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-elevated, #f9fafb);
+  font-weight: 600;
+  text-align: left;
+}
+
+.table-financeiro .fin-col-money,
+.table-financeiro td.fin-col-money {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-financeiro .fin-col-item {
+  min-width: 7rem;
+  max-width: 10rem;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: inherit;
+}
+
+.table-financeiro thead .fin-col-item {
+  z-index: 3;
+}
+
+.table-financeiro .fin-col-sub {
+  min-width: 8rem;
+  max-width: 12rem;
+  white-space: normal;
+}
+
+.table-financeiro tbody tr.fin-row {
+  cursor: pointer;
+}
+
+.table-financeiro tbody tr.fin-row:hover {
+  filter: brightness(0.97);
+}
+
+.table-financeiro tbody tr.fin-row--categoria {
+  font-weight: 700;
+  background: #eef2ff;
+}
+
+.table-financeiro tbody tr.fin-row--categoria .fin-col-item,
+.table-financeiro tbody tr.fin-row--categoria .fin-col-sub {
+  background: #eef2ff;
+}
+
+.table-financeiro tbody tr.fin-row--secao {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: #fef3c7;
+}
+
+.table-financeiro tbody tr.fin-row--secao .fin-col-item,
+.table-financeiro tbody tr.fin-row--secao .fin-col-sub {
+  background: #fef3c7;
+}
+
+.table-financeiro tbody tr.fin-row--resumo {
+  font-weight: 700;
+  background: #ecfdf5;
+}
+
+.table-financeiro tbody tr.fin-row--resumo .fin-col-item,
+.table-financeiro tbody tr.fin-row--resumo .fin-col-sub {
+  background: #ecfdf5;
+}
+
+.table-financeiro tbody tr.fin-row--linha:nth-child(even) {
+  background: #fafafa;
+}
+
+.table-financeiro tbody tr.fin-row--linha:nth-child(even) .fin-col-item,
+.table-financeiro tbody tr.fin-row--linha:nth-child(even) .fin-col-sub {
+  background: #fafafa;
+}
+
+.financeiro-empty {
+  margin: 2rem 0;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  border: 1px dashed var(--border, #d1d5db);
+  border-radius: 8px;
+  background: var(--surface-elevated, #f9fafb);
+}
+
+.financeiro-empty p {
+  margin: 0 0 1rem;
+  color: var(--text-muted, #6b7280);
+}
+
+#financeiro-modal-bg .field-row {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.nav-hidden {
+  display: none !important;
+}
+
+.permissoes-views {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: min(44vh, 420px);
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--surface-elevated, #f9fafb);
+}
+
+.permissoes-area {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.permissoes-area legend {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.permissoes-area-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.35rem 0.75rem;
+}
+
+.permissoes-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.permissoes-check input {
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .permissoes-area-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #view-financeiro-gestao .report-head-actions--split {
+    width: 100%;
+  }
+
+  #view-financeiro-gestao .report-head-actions--split .tbtn {
+    flex: 1;
+  }
+
+  #financeiro-modal-bg .field-row {
+    grid-template-columns: 1fr;
   }
 }

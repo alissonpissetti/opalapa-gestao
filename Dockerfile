@@ -1,4 +1,10 @@
 # syntax=docker/dockerfile:1
+#
+# Coolify (Build Pack: Dockerfile)
+#   - Dockerfile location: /Dockerfile
+#   - Port exposes: 3000
+#   - Health check: GET /api/health (porta 3000)
+#   - Auto Deploy: ative no Coolify (GitHub App) ou use o webhook no GitHub Actions
 
 # --- Build do frontend (Vite) ---
 FROM node:22-alpine AS build
@@ -22,7 +28,11 @@ WORKDIR /app
 LABEL org.opencontainers.image.title="opalapa-gestao"
 LABEL org.opencontainers.image.source="https://github.com/alissonpissetti/opalapa-gestao"
 
+ARG GIT_COMMIT=unknown
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+
 ENV NODE_ENV=production
+ENV HOST=0.0.0.0
 ENV PORT=3000
 
 COPY package.json package-lock.json ./
@@ -38,7 +48,7 @@ USER app
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "server/index.js"]

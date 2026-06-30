@@ -1404,5 +1404,6 @@ export function initSpacesModule(store, shortcuts = {}) {
     renderGrupoTabs,
     renderParticipantesDatalist,
     reloadFunilEtapas: loadFunilEtapas,
+    openSpace,
   };
 }

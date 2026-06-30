@@ -1,20 +1,6 @@
 import { fetchTarefasContato, concluirTarefaContato } from '../lib/api.js';
 import { escapeHtml, fmtAgendado, fmtDate, isTarefaAtrasada } from '../lib/format.js';
-
-function formatPhoneDisplay(phone) {
-  if (!phone) return '';
-  const d = String(phone).replace(/\D/g, '');
-  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
-  return d;
-}
-
-function whatsappLink(phone) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (!digits) return '';
-  const full = digits.startsWith('55') ? digits : `55${digits}`;
-  return `https://wa.me/${full}`;
-}
+import { bindWhatsappChatButtons, renderWhatsappPhoneButton } from '../lib/whatsapp-chat.js';
 
 function truncateText(text, max = 42) {
   const s = String(text || '').trim();
@@ -39,7 +25,7 @@ function readStoredFilter() {
   return FILTERS.has(stored) ? stored : 'pendentes';
 }
 
-export function initTarefasModule({ onOpenLead, openTarefaEditor } = {}) {
+export function initTarefasModule({ onOpenLead, openTarefaEditor, onOpenWhatsappChat } = {}) {
   const els = {
     summary: document.getElementById('tarefas-summary'),
     table: document.getElementById('tarefas-table'),
@@ -74,15 +60,14 @@ export function initTarefasModule({ onOpenLead, openTarefaEditor } = {}) {
             : `@${t.participanteInstagram}`,
         )
       : '';
-    const wa = t.participanteWhatsapp ? formatPhoneDisplay(t.participanteWhatsapp) : '';
-    const waUrl = whatsappLink(t.participanteWhatsapp);
     const parts = [];
     if (ig) parts.push(`<span>${ig}</span>`);
-    if (wa) {
+    if (t.participanteWhatsapp) {
       parts.push(
-        waUrl
-          ? `<a href="${waUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(wa)}</a>`
-          : escapeHtml(wa),
+        renderWhatsappPhoneButton({
+          participanteId: t.participanteId,
+          phone: t.participanteWhatsapp,
+        }),
       );
     }
     return parts.length ? parts.join('<br>') : '—';
@@ -198,12 +183,14 @@ export function initTarefasModule({ onOpenLead, openTarefaEditor } = {}) {
     els.table.querySelectorAll('tr[data-arrecadacao-id]').forEach((row) => {
       row.addEventListener('click', (e) => {
         if (e.target.closest('[data-action]')) return;
-        if (e.target.closest('a')) return;
+        if (e.target.closest('button')) return;
         const id = Number(row.dataset.arrecadacaoId);
         if (!id || !onOpenLead) return;
         onOpenLead(id, { tipo: row.dataset.arrecadacaoTipo || undefined });
       });
     });
+
+    bindWhatsappChatButtons(els.table, onOpenWhatsappChat);
   }
 
   async function concluirTarefa(id) {

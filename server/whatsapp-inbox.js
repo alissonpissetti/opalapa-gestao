@@ -70,7 +70,8 @@ export async function listWhatsappInbox(pool, eventoId) {
   const participanteIds = rows.map((r) => r.participante_id);
   const placeholders = participanteIds.map(() => '?').join(', ');
   const [lastMsgs] = await pool.query(
-    `SELECT w.arrecadacao_id, w.direcao, w.tipo, w.texto, w.enviado_em, a.participante_id
+    `SELECT w.arrecadacao_id, w.direcao, w.tipo, w.texto, w.enviado_em, a.participante_id,
+            a.tipo AS lead_tipo, a.status AS lead_status
      FROM whatsapp_mensagens w
      JOIN arrecadacao a ON a.id = w.arrecadacao_id
      JOIN (
@@ -106,15 +107,18 @@ export async function listWhatsappInbox(pool, eventoId) {
 
   return rows.map((row) => {
     const last = lastByParticipante.get(row.participante_id);
-    const leadTipo = row.lead_tipo || '';
-    const leadStatus = row.lead_status || '';
+    const primaryArrecadacaoId = last?.arrecadacao_id
+      ? Number(last.arrecadacao_id)
+      : Number(row.primary_arrecadacao_id);
+    const leadTipo = last?.lead_tipo || row.lead_tipo || '';
+    const leadStatus = last?.lead_status || row.lead_status || '';
     const etapas = leadTipo === 'artistico' ? etapasArtistico : etapasComercial;
     const etapa = etapaByStatus(etapas, leadStatus);
     return {
       participanteId: Number(row.participante_id),
       participanteNome: row.participante_nome,
       telefone: row.contato_telefone || '',
-      primaryArrecadacaoId: Number(row.primary_arrecadacao_id),
+      primaryArrecadacaoId,
       arrecadacaoIds: String(row.arrecadacao_ids || '')
         .split(',')
         .map((id) => Number(id))
@@ -199,7 +203,7 @@ export async function getPrimaryArrecadacaoId(pool, eventoId, participanteId) {
   const [rows] = await pool.query(
     `SELECT id FROM arrecadacao
      WHERE evento_id = ? AND participante_id = ?
-     ORDER BY id ASC
+     ORDER BY CASE tipo WHEN 'contato' THEN 1 ELSE 0 END, id ASC
      LIMIT 1`,
     [eventoId, participanteId],
   );
