@@ -119,6 +119,7 @@ import {
   createContaPagar,
   updateContaPagar,
   deleteContaPagar,
+  bulkUpdateContasPagar,
   bulkUpdateContasPagarFase,
   summarizeContasPagar,
 } from './financeiro-contas-pagar.js';
@@ -1513,6 +1514,17 @@ app.patch('/api/financeiro/contas-pagar/fase', requireEvento, async (req, res) =
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PATCH /api/financeiro/contas-pagar/fase', err);
     res.status(500).json({ error: 'Falha ao atualizar fase das contas' });
+  }
+});
+
+app.patch('/api/financeiro/contas-pagar/bulk', requireEvento, async (req, res) => {
+  try {
+    const result = await bulkUpdateContasPagar(pool, req.eventoId, req.body);
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/financeiro/contas-pagar/bulk', err);
+    res.status(500).json({ error: 'Falha na alteração em massa das contas' });
   }
 });
 

@@ -8,6 +8,7 @@ import {
   updateContaPagar,
   deleteContaPagar,
   bulkUpdateContasPagarFase,
+  bulkUpdateContasPagar,
 } from '../lib/api.js';
 import {
   escapeHtml,
@@ -131,7 +132,15 @@ export function initContasPagarModule() {
     chkAll: document.getElementById('contas-pagar-chk-all'),
     btnFasePre: document.getElementById('btn-contas-pagar-fase-pre'),
     btnFasePos: document.getElementById('btn-contas-pagar-fase-pos'),
+    btnBulkValores: document.getElementById('btn-contas-pagar-bulk-valores'),
     btnClearSelection: document.getElementById('btn-contas-pagar-clear-selection'),
+    bulkModalBg: document.getElementById('contas-pagar-bulk-modal-bg'),
+    bulkModalSub: document.getElementById('contas-pagar-bulk-modal-sub'),
+    bulkModalErrors: document.getElementById('contas-pagar-bulk-modal-errors'),
+    bulkValorPrevisto: document.getElementById('contas-pagar-bulk-valor-previsto'),
+    bulkQuantidade: document.getElementById('contas-pagar-bulk-quantidade'),
+    btnBulkCancel: document.getElementById('contas-pagar-bulk-modal-cancel'),
+    btnBulkApply: document.getElementById('contas-pagar-bulk-modal-apply'),
     modalBg: document.getElementById('contas-pagar-modal-bg'),
     modalTitle: document.getElementById('contas-pagar-modal-title'),
     modalSub: document.getElementById('contas-pagar-modal-sub'),
@@ -155,7 +164,7 @@ export function initContasPagarModule() {
     btnDelete: document.getElementById('contas-pagar-modal-delete'),
   };
 
-  [els.fieldValorPrevisto, els.fieldValorPago].filter(Boolean).forEach((input) => {
+  [els.fieldValorPrevisto, els.fieldValorPago, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
     input.addEventListener('input', () => maskValorInput(input));
   });
 
@@ -168,7 +177,7 @@ export function initContasPagarModule() {
   let loading = false;
   let duplicating = false;
   let faseManualOverride = false;
-  let bulkFaseUpdating = false;
+  let bulkUpdating = false;
   const selectedIds = new Set();
 
   function isSelectable(conta) {
@@ -205,9 +214,10 @@ export function initContasPagarModule() {
       els.chkAll.indeterminate = checked.length > 0 && checked.length < visible.length;
     }
 
-    const disabled = bulkFaseUpdating || selected.length === 0;
+    const disabled = bulkUpdating || selected.length === 0;
     els.btnFasePre?.toggleAttribute('disabled', disabled);
     els.btnFasePos?.toggleAttribute('disabled', disabled);
+    els.btnBulkValores?.toggleAttribute('disabled', disabled);
   }
 
   function toggleSelect(id, force) {
@@ -807,9 +817,115 @@ export function initContasPagarModule() {
     }
   }
 
+  function showBulkErrors(messages) {
+    if (!els.bulkModalErrors) return;
+    const list = Array.isArray(messages) ? messages : [messages];
+    const text = list
+      .map((m) => (typeof m === 'string' ? m : m?.message))
+      .filter(Boolean)
+      .join(' ');
+    if (!text) {
+      els.bulkModalErrors.classList.add('hidden');
+      els.bulkModalErrors.textContent = '';
+      return;
+    }
+    els.bulkModalErrors.textContent = text;
+    els.bulkModalErrors.classList.remove('hidden');
+  }
+
+  function openBulkValoresModal() {
+    const ids = [...selectedIds];
+    if (!ids.length || bulkUpdating) return;
+
+    if (els.bulkModalSub) {
+      els.bulkModalSub.textContent =
+        ids.length === 1
+          ? '1 conta selecionada — preencha um ou ambos os campos.'
+          : `${ids.length} contas selecionadas — preencha um ou ambos os campos.`;
+    }
+    if (els.bulkValorPrevisto) els.bulkValorPrevisto.value = '';
+    if (els.bulkQuantidade) els.bulkQuantidade.value = '';
+    showBulkErrors(null);
+    els.bulkModalBg?.classList.add('open');
+    els.bulkValorPrevisto?.focus();
+  }
+
+  function closeBulkValoresModal() {
+    showBulkErrors(null);
+    els.bulkModalBg?.classList.remove('open');
+  }
+
+  async function applyBulkValores() {
+    const ids = [...selectedIds];
+    if (!ids.length || bulkUpdating) return;
+
+    const valorRaw = els.bulkValorPrevisto?.value?.trim() || '';
+    const qtdRaw = els.bulkQuantidade?.value?.trim() || '';
+    const fields = {};
+
+    if (valorRaw) {
+      const valorPrevisto = parseValor(valorRaw);
+      if (!valorPrevisto || valorPrevisto <= 0) {
+        showBulkErrors('Informe um valor previsto maior que zero.');
+        els.bulkValorPrevisto?.focus();
+        return;
+      }
+      fields.valorPrevisto = valorPrevisto;
+    }
+
+    if (qtdRaw) {
+      const quantidadePrevista = readQtyInput(els.bulkQuantidade);
+      if (!quantidadePrevista || quantidadePrevista <= 0) {
+        showBulkErrors('Informe uma quantidade prevista maior que zero.');
+        els.bulkQuantidade?.focus();
+        return;
+      }
+      fields.quantidadePrevista = quantidadePrevista;
+    }
+
+    if (!Object.keys(fields).length) {
+      showBulkErrors('Informe o valor previsto e/ou a quantidade para aplicar.');
+      els.bulkValorPrevisto?.focus();
+      return;
+    }
+
+    const parts = [];
+    if (fields.valorPrevisto != null) parts.push(`valor previsto ${fmtMoney(fields.valorPrevisto)}`);
+    if (fields.quantidadePrevista != null) parts.push(`quantidade ${fields.quantidadePrevista}`);
+    const detail = parts.join(' e ');
+
+    if (ids.length > 5) {
+      const ok = window.confirm(`Aplicar ${detail} em ${ids.length} contas?`);
+      if (!ok) return;
+    }
+
+    bulkUpdating = true;
+    if (els.btnBulkApply) els.btnBulkApply.disabled = true;
+    updateSelectionUi();
+    try {
+      const result = await bulkUpdateContasPagar(ids, fields);
+      contas = result?.contas || contas;
+      totais = result?.totais || summarizeFromContas(contas);
+      inlineEditId = null;
+      clearSelection();
+      closeBulkValoresModal();
+      renderTable();
+      if (els.summary && result?.updated != null) {
+        const n = result.updated;
+        els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} atualizada${n === 1 ? '' : 's'} — ${detail}.`;
+      }
+    } catch (err) {
+      showBulkErrors(err.message || 'Não foi possível aplicar a alteração.');
+    } finally {
+      bulkUpdating = false;
+      if (els.btnBulkApply) els.btnBulkApply.disabled = false;
+      updateSelectionUi();
+    }
+  }
+
   async function bulkSetFase(fase) {
     const ids = [...selectedIds];
-    if (!ids.length || bulkFaseUpdating) return;
+    if (!ids.length || bulkUpdating) return;
 
     const label = FASE_LABEL[fase] || fase;
     if (ids.length > 5) {
@@ -817,7 +933,7 @@ export function initContasPagarModule() {
       if (!ok) return;
     }
 
-    bulkFaseUpdating = true;
+    bulkUpdating = true;
     updateSelectionUi();
     try {
       const result = await bulkUpdateContasPagarFase(ids, fase);
@@ -833,7 +949,7 @@ export function initContasPagarModule() {
     } catch (err) {
       if (els.summary) els.summary.textContent = err.message || 'Não foi possível alterar a fase.';
     } finally {
-      bulkFaseUpdating = false;
+      bulkUpdating = false;
       updateSelectionUi();
     }
   }
@@ -861,6 +977,12 @@ export function initContasPagarModule() {
   els.btnClearSelection?.addEventListener('click', clearSelection);
   els.btnFasePre?.addEventListener('click', () => void bulkSetFase('pre'));
   els.btnFasePos?.addEventListener('click', () => void bulkSetFase('pos'));
+  els.btnBulkValores?.addEventListener('click', openBulkValoresModal);
+  els.btnBulkCancel?.addEventListener('click', closeBulkValoresModal);
+  els.btnBulkApply?.addEventListener('click', () => void applyBulkValores());
+  els.bulkModalBg?.addEventListener('click', (e) => {
+    if (e.target === els.bulkModalBg) closeBulkValoresModal();
+  });
   els.btnCancel?.addEventListener('click', closeModal);
   els.btnSave?.addEventListener('click', () => void saveConta());
   els.btnDelete?.addEventListener('click', () => void removeConta());

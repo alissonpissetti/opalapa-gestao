@@ -502,6 +502,13 @@ export function bulkUpdateContasPagarFase(ids, fase) {
   });
 }
 
+export function bulkUpdateContasPagar(ids, fields = {}) {
+  return apiRequest('/api/financeiro/contas-pagar/bulk', {
+    method: 'PATCH',
+    body: JSON.stringify({ ids, ...fields }),
+  });
+}
+
 export function fetchWhatsappStatus() {
   return apiRequest('/api/whatsapp/status');
 }

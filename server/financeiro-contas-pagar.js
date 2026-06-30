@@ -675,27 +675,83 @@ export async function deleteContaPagar(pool, id, eventoId) {
   return result.affectedRows > 0;
 }
 
-export async function bulkUpdateContasPagarFase(pool, eventoId, raw) {
+function parseBulkIds(raw) {
   const ids = Array.isArray(raw?.ids) ? raw.ids : [];
-  const fase = normalizeFase(raw?.fase);
-  const validIds = [
-    ...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)),
-  ];
+  return [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+}
 
+export async function bulkUpdateContasPagar(pool, eventoId, raw) {
+  const validIds = parseBulkIds(raw);
   if (!validIds.length) {
     throw Object.assign(new Error('Informe ao menos uma conta'), { status: 400 });
   }
 
+  const sets = [];
+  const params = [];
+  let recalcStatus = false;
+
+  if (raw?.fase !== undefined && raw?.fase !== null && raw?.fase !== '') {
+    sets.push('fase = ?');
+    params.push(normalizeFase(raw.fase));
+  }
+
+  const hasValor =
+    raw?.valorPrevisto !== undefined ||
+    raw?.valor_previsto !== undefined;
+  if (hasValor) {
+    const valorPrevisto = parseMoney(raw.valorPrevisto ?? raw.valor_previsto, 'Valor previsto');
+    if (valorPrevisto <= 0) {
+      throw Object.assign(new Error('Valor previsto deve ser maior que zero'), { status: 400 });
+    }
+    sets.push('valor_previsto = ?');
+    params.push(valorPrevisto);
+    recalcStatus = true;
+  }
+
+  const hasQtd =
+    raw?.quantidadePrevista !== undefined ||
+    raw?.quantidade_prevista !== undefined;
+  if (hasQtd) {
+    const quantidadePrevista = parseQuantidade(
+      raw.quantidadePrevista ?? raw.quantidade_prevista,
+      'Quantidade prevista',
+    );
+    if (quantidadePrevista == null || quantidadePrevista <= 0) {
+      throw Object.assign(new Error('Quantidade prevista deve ser maior que zero'), { status: 400 });
+    }
+    sets.push('quantidade_prevista = ?');
+    params.push(quantidadePrevista);
+  }
+
+  if (!sets.length) {
+    throw Object.assign(new Error('Informe ao menos um campo para atualizar'), { status: 400 });
+  }
+
+  if (recalcStatus) {
+    sets.push(`status = CASE
+      WHEN status = 'cancelado' THEN status
+      WHEN valor_pago <= 0 THEN 'pendente'
+      WHEN valor_previsto > 0 AND valor_pago >= valor_previsto THEN 'pago'
+      ELSE 'parcial'
+    END`);
+  }
+
+  sets.push('updated_at = CURRENT_TIMESTAMP(3)');
+
   const placeholders = validIds.map(() => '?').join(',');
   const [result] = await pool.query(
-    `UPDATE financeiro_contas_pagar SET fase = ?, updated_at = CURRENT_TIMESTAMP(3)
+    `UPDATE financeiro_contas_pagar SET ${sets.join(', ')}
      WHERE evento_id = ? AND id IN (${placeholders}) AND status != 'cancelado'`,
-    [fase, eventoId, ...validIds],
+    [...params, eventoId, ...validIds],
   );
 
   const contas = await listContasPagar(pool, eventoId);
   const { totais } = summarizeContasPagar(contas);
   return { updated: result.affectedRows, contas, totais };
+}
+
+export async function bulkUpdateContasPagarFase(pool, eventoId, raw) {
+  return bulkUpdateContasPagar(pool, eventoId, { ids: raw?.ids, fase: raw?.fase });
 }
 
 export function summarizeContasPagar(contas) {

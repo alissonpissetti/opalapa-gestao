@@ -714,6 +714,7 @@
         </span>
         <button class="tbtn primary" type="button" id="btn-contas-pagar-fase-pre">Marcar como Pré-evento</button>
         <button class="tbtn primary" type="button" id="btn-contas-pagar-fase-pos">Marcar como Pós-evento</button>
+        <button class="tbtn primary" type="button" id="btn-contas-pagar-bulk-valores">Alterar valores…</button>
         <button class="tbtn" type="button" id="btn-contas-pagar-clear-selection">Limpar seleção</button>
       </div>
       <div class="financeiro-empty hidden" id="contas-pagar-empty">
@@ -1518,6 +1519,40 @@
           <button class="btn" type="button" id="fin-plano-modal-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="fin-plano-modal-delete">Excluir</button>
           <button class="btn primary" type="button" id="fin-plano-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="contas-pagar-bulk-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="contas-pagar-bulk-modal-title">
+        <h2 id="contas-pagar-bulk-modal-title">Alteração em massa</h2>
+        <p class="msub" id="contas-pagar-bulk-modal-sub"></p>
+        <p class="form-errors hidden" id="contas-pagar-bulk-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="contas-pagar-bulk-valor-previsto">Valor previsto (R$)</label>
+          <input
+            id="contas-pagar-bulk-valor-previsto"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            placeholder="Deixe em branco para não alterar"
+          />
+        </div>
+        <div class="field">
+          <label for="contas-pagar-bulk-quantidade">Quantidade prevista</label>
+          <input
+            id="contas-pagar-bulk-quantidade"
+            type="number"
+            step="0.001"
+            min="0.001"
+            inputmode="decimal"
+            autocomplete="off"
+            placeholder="Deixe em branco para não alterar"
+          />
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="contas-pagar-bulk-modal-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="contas-pagar-bulk-modal-apply">Aplicar</button>
         </div>
       </div>
     </div>
