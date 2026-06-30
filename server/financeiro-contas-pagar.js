@@ -635,6 +635,29 @@ export async function deleteContaPagar(pool, id, eventoId) {
   return result.affectedRows > 0;
 }
 
+export async function bulkUpdateContasPagarFase(pool, eventoId, raw) {
+  const ids = Array.isArray(raw?.ids) ? raw.ids : [];
+  const fase = normalizeFase(raw?.fase);
+  const validIds = [
+    ...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)),
+  ];
+
+  if (!validIds.length) {
+    throw Object.assign(new Error('Informe ao menos uma conta'), { status: 400 });
+  }
+
+  const placeholders = validIds.map(() => '?').join(',');
+  const [result] = await pool.query(
+    `UPDATE financeiro_contas_pagar SET fase = ?, updated_at = CURRENT_TIMESTAMP(3)
+     WHERE evento_id = ? AND id IN (${placeholders}) AND status != 'cancelado'`,
+    [fase, eventoId, ...validIds],
+  );
+
+  const contas = await listContasPagar(pool, eventoId);
+  const { totais } = summarizeContasPagar(contas);
+  return { updated: result.affectedRows, contas, totais };
+}
+
 export function summarizeContasPagar(contas) {
   const ativas = contas.filter((c) => c.status !== 'cancelado');
   const byCategoria = new Map();

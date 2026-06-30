@@ -708,6 +708,14 @@
       <div class="financeiro-kpis financeiro-kpis--contas-pagar hidden" id="contas-pagar-kpis" aria-label="Totais por fase"></div>
 
       <p class="report-summary" id="contas-pagar-summary"></p>
+      <div class="select-bar" id="contas-pagar-select-bar">
+        <span>
+          <strong id="contas-pagar-sel-count">0</strong> conta(s) selecionada(s)
+        </span>
+        <button class="tbtn primary" type="button" id="btn-contas-pagar-fase-pre">Marcar como Pré-evento</button>
+        <button class="tbtn primary" type="button" id="btn-contas-pagar-fase-pos">Marcar como Pós-evento</button>
+        <button class="tbtn" type="button" id="btn-contas-pagar-clear-selection">Limpar seleção</button>
+      </div>
       <div class="financeiro-empty hidden" id="contas-pagar-empty">
         <p>Nenhuma conta cadastrada. Use <strong>Nova conta</strong> para lançar um custo — ex.: categoria RH, plano de contas, descrição e valor previsto.</p>
       </div>
@@ -715,6 +723,9 @@
         <table class="table-financeiro-custos table-contas-pagar">
           <thead>
             <tr>
+              <th class="chk-cell">
+                <input class="chk" type="checkbox" id="contas-pagar-chk-all" title="Selecionar todas (exc. canceladas)" />
+              </th>
               <th>Categoria</th>
               <th>Plano de contas</th>
               <th>Fornecedor</th>

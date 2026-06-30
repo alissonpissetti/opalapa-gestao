@@ -495,6 +495,13 @@ export function deleteContaPagar(id) {
   return apiRequest(`/api/financeiro/contas-pagar/${id}`, { method: 'DELETE' });
 }
 
+export function bulkUpdateContasPagarFase(ids, fase) {
+  return apiRequest('/api/financeiro/contas-pagar/fase', {
+    method: 'PATCH',
+    body: JSON.stringify({ ids, fase }),
+  });
+}
+
 export function fetchWhatsappStatus() {
   return apiRequest('/api/whatsapp/status');
 }

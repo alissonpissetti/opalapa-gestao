@@ -7,6 +7,7 @@ import {
   createContaPagar,
   updateContaPagar,
   deleteContaPagar,
+  bulkUpdateContasPagarFase,
 } from '../lib/api.js';
 import {
   escapeHtml,
@@ -104,6 +105,12 @@ export function initContasPagarModule() {
     table: document.getElementById('contas-pagar-table'),
     tableFoot: document.getElementById('contas-pagar-table-foot'),
     btnNew: document.getElementById('btn-contas-pagar-new'),
+    selectBar: document.getElementById('contas-pagar-select-bar'),
+    selCount: document.getElementById('contas-pagar-sel-count'),
+    chkAll: document.getElementById('contas-pagar-chk-all'),
+    btnFasePre: document.getElementById('btn-contas-pagar-fase-pre'),
+    btnFasePos: document.getElementById('btn-contas-pagar-fase-pos'),
+    btnClearSelection: document.getElementById('btn-contas-pagar-clear-selection'),
     modalBg: document.getElementById('contas-pagar-modal-bg'),
     modalTitle: document.getElementById('contas-pagar-modal-title'),
     modalSub: document.getElementById('contas-pagar-modal-sub'),
@@ -139,6 +146,78 @@ export function initContasPagarModule() {
   let loading = false;
   let duplicating = false;
   let faseManualOverride = false;
+  let bulkFaseUpdating = false;
+  const selectedIds = new Set();
+
+  function isSelectable(conta) {
+    return conta.status !== 'cancelado';
+  }
+
+  function selectableContas() {
+    return contas.filter(isSelectable);
+  }
+
+  function pruneSelection() {
+    const validIds = new Set(contas.map((c) => c.id));
+    for (const id of selectedIds) {
+      if (!validIds.has(id)) selectedIds.delete(id);
+    }
+  }
+
+  function updateSelectionUi() {
+    const selected = contas.filter((c) => selectedIds.has(c.id));
+    els.selectBar?.classList.toggle('visible', selected.length > 0);
+    if (els.selCount) els.selCount.textContent = selected.length;
+
+    els.table?.querySelectorAll('tr[data-id]').forEach((row) => {
+      const id = Number(row.dataset.id);
+      row.classList.toggle('selected-row', selectedIds.has(id));
+      const chk = row.querySelector('.row-chk');
+      if (chk) chk.checked = selectedIds.has(id);
+    });
+
+    const visible = selectableContas();
+    const checked = visible.filter((c) => selectedIds.has(c.id));
+    if (els.chkAll) {
+      els.chkAll.checked = visible.length > 0 && checked.length === visible.length;
+      els.chkAll.indeterminate = checked.length > 0 && checked.length < visible.length;
+    }
+
+    const disabled = bulkFaseUpdating || selected.length === 0;
+    els.btnFasePre?.toggleAttribute('disabled', disabled);
+    els.btnFasePos?.toggleAttribute('disabled', disabled);
+  }
+
+  function toggleSelect(id, force) {
+    const conta = contas.find((c) => c.id === id);
+    if (!conta || !isSelectable(conta)) return;
+    const on = force !== undefined ? force : !selectedIds.has(id);
+    if (on) selectedIds.add(id);
+    else selectedIds.delete(id);
+    updateSelectionUi();
+  }
+
+  function clearSelection() {
+    selectedIds.clear();
+    updateSelectionUi();
+  }
+
+  function toggleSelectAll(checked) {
+    selectableContas().forEach((c) => {
+      if (checked) selectedIds.add(c.id);
+      else selectedIds.delete(c.id);
+    });
+    updateSelectionUi();
+  }
+
+  function renderRowCheckbox(c) {
+    const selectable = isSelectable(c);
+    const checked = selectedIds.has(c.id);
+    if (!selectable) {
+      return '<td class="chk-cell"><input class="chk row-chk" type="checkbox" disabled title="Conta cancelada"></td>';
+    }
+    return `<td class="chk-cell"><input class="chk row-chk" type="checkbox" data-id="${c.id}" ${checked ? 'checked' : ''}></td>`;
+  }
 
   function applyAutoFase() {
     if (faseManualOverride || !els.fieldFase) return;
@@ -276,6 +355,7 @@ export function initContasPagarModule() {
     const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
     return `
       <tr class="fin-custo-row fin-custo-row--editing" data-id="${c.id}">
+        ${renderRowCheckbox(c)}
         <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
         <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
         <td><input type="text" class="fin-inline-input" data-field="fornecedor" value="${escapeHtml(c.fornecedor || '')}" placeholder="Fornecedor" autocomplete="off" /></td>
@@ -301,7 +381,8 @@ export function initContasPagarModule() {
     const falta = Math.max(0, prev - pago);
     const plano = [c.planoContaCodigo, c.planoContaNome].filter(Boolean).join(' — ');
     return `
-      <tr class="fin-custo-row" data-id="${c.id}" tabindex="0" role="button" title="Clique para editar">
+      <tr class="fin-custo-row${selectedIds.has(c.id) ? ' selected-row' : ''}" data-id="${c.id}" tabindex="0" role="button" title="Clique para editar">
+        ${renderRowCheckbox(c)}
         <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
         <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
         <td>${escapeHtml(c.fornecedor || '—')}</td>
@@ -383,9 +464,12 @@ export function initContasPagarModule() {
       if (els.tableFoot) els.tableFoot.innerHTML = '';
       if (els.summary) els.summary.textContent = '';
       totais = summarizeFromContas([]);
+      clearSelection();
       renderKpis();
       return;
     }
+
+    pruneSelection();
 
     let totalPrev = 0;
     let totalPago = 0;
@@ -406,7 +490,7 @@ export function initContasPagarModule() {
     if (els.tableFoot) {
       els.tableFoot.innerHTML = `
         <tr class="fin-custo-total">
-          <td colspan="5">Total (exc. canceladas)</td>
+          <td colspan="6">Total (exc. canceladas)</td>
           <td class="fin-col-money">${cellMoney(totalPrev)}</td>
           <td class="fin-col-money fin-val--pos">${cellMoney(totalPago)}</td>
           <td class="fin-col-money fin-val--warn">${cellMoney(Math.max(0, totalPrev - totalPago))}</td>
@@ -416,12 +500,14 @@ export function initContasPagarModule() {
 
     const n = ativas.length;
     if (els.summary) {
+      const selHint = selectedIds.size ? ` — ${selectedIds.size} selecionada(s)` : '';
       const editHint = inlineEditId ? ' — ajuste fornecedor e valores na linha destacada' : '';
-      els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} ativa${n === 1 ? '' : 's'} — clique na linha para editar ou use Duplicar${editHint}`;
+      els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} ativa${n === 1 ? '' : 's'} — clique na linha para editar ou use Duplicar${selHint}${editHint}`;
     }
 
     totais = summarizeFromContas(contas);
     renderKpis();
+    updateSelectionUi();
   }
 
   async function openModal(conta = null) {
@@ -671,6 +757,37 @@ export function initContasPagarModule() {
     }
   }
 
+  async function bulkSetFase(fase) {
+    const ids = [...selectedIds];
+    if (!ids.length || bulkFaseUpdating) return;
+
+    const label = FASE_LABEL[fase] || fase;
+    if (ids.length > 5) {
+      const ok = window.confirm(`Alterar a fase de ${ids.length} contas para ${label}?`);
+      if (!ok) return;
+    }
+
+    bulkFaseUpdating = true;
+    updateSelectionUi();
+    try {
+      const result = await bulkUpdateContasPagarFase(ids, fase);
+      contas = result?.contas || contas;
+      totais = result?.totais || summarizeFromContas(contas);
+      inlineEditId = null;
+      clearSelection();
+      renderTable();
+      if (els.summary && result?.updated != null) {
+        const n = result.updated;
+        els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} marcada${n === 1 ? '' : 's'} como ${label}.`;
+      }
+    } catch (err) {
+      if (els.summary) els.summary.textContent = err.message || 'Não foi possível alterar a fase.';
+    } finally {
+      bulkFaseUpdating = false;
+      updateSelectionUi();
+    }
+  }
+
   els.fieldCategoria?.addEventListener('input', () => {
     refreshPlanoDatalist(els.fieldCategoria.value);
   });
@@ -690,6 +807,10 @@ export function initContasPagarModule() {
   });
 
   els.btnNew?.addEventListener('click', () => void openModal());
+  els.chkAll?.addEventListener('change', (e) => toggleSelectAll(e.target.checked));
+  els.btnClearSelection?.addEventListener('click', clearSelection);
+  els.btnFasePre?.addEventListener('click', () => void bulkSetFase('pre'));
+  els.btnFasePos?.addEventListener('click', () => void bulkSetFase('pos'));
   els.btnCancel?.addEventListener('click', closeModal);
   els.btnSave?.addEventListener('click', () => void saveConta());
   els.btnDelete?.addEventListener('click', () => void removeConta());
@@ -698,7 +819,18 @@ export function initContasPagarModule() {
     if (e.target === els.modalBg) closeModal();
   });
 
+  els.table?.addEventListener('change', (e) => {
+    if (e.target.matches('.row-chk')) {
+      toggleSelect(Number(e.target.dataset.id), e.target.checked);
+    }
+  });
+
   els.table?.addEventListener('click', (e) => {
+    if (e.target.closest('.chk-cell')) {
+      e.stopPropagation();
+      return;
+    }
+
     const actionBtn = e.target.closest('[data-action]');
     if (actionBtn) {
       e.stopPropagation();

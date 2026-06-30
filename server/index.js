@@ -119,6 +119,7 @@ import {
   createContaPagar,
   updateContaPagar,
   deleteContaPagar,
+  bulkUpdateContasPagarFase,
   summarizeContasPagar,
 } from './financeiro-contas-pagar.js';
 import {
@@ -1501,6 +1502,17 @@ app.post('/api/financeiro/contas-pagar', requireEvento, async (req, res) => {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/financeiro/contas-pagar', err);
     res.status(500).json({ error: 'Falha ao criar conta a pagar' });
+  }
+});
+
+app.patch('/api/financeiro/contas-pagar/fase', requireEvento, async (req, res) => {
+  try {
+    const result = await bulkUpdateContasPagarFase(pool, req.eventoId, req.body);
+    res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/financeiro/contas-pagar/fase', err);
+    res.status(500).json({ error: 'Falha ao atualizar fase das contas' });
   }
 });
 
