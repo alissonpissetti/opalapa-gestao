@@ -1,5 +1,7 @@
 import {
   fetchMarketing,
+  fetchGrupos,
+  fetchGrupoSpaces,
   createMarketingCanal,
   updateMarketingCanal,
   deleteMarketingCanal,
@@ -9,8 +11,55 @@ import {
   createMarketingCriativo,
   updateMarketingCriativo,
   deleteMarketingCriativo,
+  previewMarketingComunicacao,
+  enviarMarketingComunicacaoItem,
 } from '../lib/api.js';
 import { escapeHtml } from '../lib/format.js';
+
+function normalizeInstagramHandle(value) {
+  const handle = String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+    .replace(/\/.*$/, '')
+    .split('/')[0];
+  if (!handle) return '';
+  return `@${handle}`;
+}
+
+function instagramHandleKey(value) {
+  return normalizeInstagramHandle(value).slice(1).toLowerCase();
+}
+
+async function collectInstagramMentionsFromEspacos() {
+  const { grupos = [] } = await fetchGrupos();
+  if (!grupos.length) return [];
+
+  const gruposData = await Promise.all(grupos.map((g) => fetchGrupoSpaces(g.slug)));
+  const participanteById = new Map();
+
+  for (const data of gruposData) {
+    for (const p of data.participantes || []) {
+      participanteById.set(p.id, p);
+    }
+  }
+
+  const handles = new Map();
+  for (const data of gruposData) {
+    for (const space of Object.values(data.spaces || {})) {
+      if (!space?.participanteId) continue;
+      const participante = participanteById.get(space.participanteId);
+      const mention = normalizeInstagramHandle(participante?.instagram);
+      if (!mention) continue;
+      const key = instagramHandleKey(mention);
+      if (!handles.has(key)) handles.set(key, mention);
+    }
+  }
+
+  return [...handles.values()].sort((a, b) =>
+    a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }),
+  );
+}
 
 function getCampanhaOrigemIds(campanha) {
   if (campanha?.canalIds?.length) return campanha.canalIds;
@@ -56,9 +105,27 @@ export function initMarketingModule() {
   const els = {
     summary: document.getElementById('marketing-summary'),
     tabs: document.getElementById('marketing-tabs'),
+    panelInicio: document.getElementById('marketing-panel-inicio'),
     panelCanais: document.getElementById('marketing-panel-canais'),
     panelCampanhas: document.getElementById('marketing-panel-campanhas'),
     panelCriativos: document.getElementById('marketing-panel-criativos'),
+    btnIgGenerate: document.getElementById('btn-marketing-ig-generate'),
+    igOutput: document.getElementById('marketing-ig-output'),
+    igResult: document.getElementById('marketing-ig-result'),
+    igMeta: document.getElementById('marketing-ig-meta'),
+    btnIgCopy: document.getElementById('btn-marketing-ig-copy'),
+    comFilters: document.getElementById('marketing-com-filters'),
+    comTemplate: document.getElementById('marketing-com-template'),
+    comIntervalMin: document.getElementById('marketing-com-interval-min'),
+    comIntervalMax: document.getElementById('marketing-com-interval-max'),
+    btnComPreview: document.getElementById('btn-marketing-com-preview'),
+    comPreview: document.getElementById('marketing-com-preview'),
+    comMeta: document.getElementById('marketing-com-meta'),
+    comTable: document.getElementById('marketing-com-table'),
+    btnComStart: document.getElementById('btn-marketing-com-start'),
+    btnComPause: document.getElementById('btn-marketing-com-pause'),
+    comProgress: document.getElementById('marketing-com-progress'),
+    comErrors: document.getElementById('marketing-com-errors'),
     tableCanais: document.getElementById('marketing-table-canais'),
     tableCampanhas: document.getElementById('marketing-table-campanhas'),
     tableCriativos: document.getElementById('marketing-table-criativos'),
@@ -82,15 +149,21 @@ export function initMarketingModule() {
   };
 
   let data = { canais: [], campanhas: [], criativos: [] };
-  let activeTab = 'canais';
+  let activeTab = 'inicio';
   let editKind = null;
   let editId = null;
+  let comQueue = [];
+  let comDispatching = false;
+  let comPaused = false;
+  let comSent = 0;
+  let comAbort = false;
 
   function setTab(tab) {
     activeTab = tab;
     els.tabs?.querySelectorAll('[data-marketing-tab]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.marketingTab === tab);
     });
+    els.panelInicio?.classList.toggle('hidden', tab !== 'inicio');
     els.panelCanais?.classList.toggle('hidden', tab !== 'canais');
     els.panelCampanhas?.classList.toggle('hidden', tab !== 'campanhas');
     els.panelCriativos?.classList.toggle('hidden', tab !== 'criativos');
@@ -270,10 +343,218 @@ export function initMarketingModule() {
     }
 
     if (els.summary) {
-      els.summary.textContent = `${canais.length} origem(ns) · ${campanhas.length} campanha(s) · ${criativos.length} criativo(s)`;
+      if (activeTab === 'inicio') {
+        els.summary.textContent = 'Ferramentas para agilizar postagens e acompanhar origens de leads.';
+      } else {
+        els.summary.textContent = `${canais.length} origem(ns) · ${campanhas.length} campanha(s) · ${criativos.length} criativo(s)`;
+      }
     }
 
     bindTableActions();
+  }
+
+  async function generateInstagramList() {
+    if (!els.btnIgGenerate || !els.igResult) return;
+    els.btnIgGenerate.disabled = true;
+    const prevLabel = els.btnIgGenerate.textContent;
+    els.btnIgGenerate.textContent = 'Gerando…';
+    if (els.igMeta) els.igMeta.textContent = '';
+
+    try {
+      const mentions = await collectInstagramMentionsFromEspacos();
+      const text = mentions.join(' ');
+      els.igResult.value = text;
+      els.igOutput?.classList.remove('hidden');
+      if (els.igMeta) {
+        els.igMeta.textContent = mentions.length
+          ? `${mentions.length} perfil(is) · evento atual`
+          : 'Nenhum espaço com Instagram cadastrado no evento.';
+      }
+    } catch (err) {
+      alert(err.message || 'Não foi possível gerar a lista.');
+    } finally {
+      els.btnIgGenerate.disabled = false;
+      els.btnIgGenerate.textContent = prevLabel;
+    }
+  }
+
+  async function copyInstagramList() {
+    const text = els.igResult?.value?.trim() || '';
+    if (!text) {
+      alert('Gere a lista antes de copiar.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.btnIgCopy) {
+        const prev = els.btnIgCopy.textContent;
+        els.btnIgCopy.textContent = 'Copiado!';
+        setTimeout(() => {
+          if (els.btnIgCopy) els.btnIgCopy.textContent = prev;
+        }, 1600);
+      }
+    } catch (_) {
+      els.igResult?.select();
+      document.execCommand('copy');
+    }
+  }
+
+  function getSelectedComTipos() {
+    if (!els.comFilters) return [];
+    return [...els.comFilters.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.value);
+  }
+
+  function getComIntervalBounds() {
+    let min = Number(els.comIntervalMin?.value) || 15;
+    let max = Number(els.comIntervalMax?.value) || 45;
+    min = Math.min(Math.max(min, 5), 600);
+    max = Math.min(Math.max(max, 5), 600);
+    if (min > max) [min, max] = [max, min];
+    return { min, max };
+  }
+
+  function randomDelayMs(minSec, maxSec) {
+    const sec = minSec + Math.random() * (maxSec - minSec);
+    return Math.round(sec * 1000);
+  }
+
+  function updateComProgressUI() {
+    const total = comQueue.length;
+    if (els.comProgress) {
+      els.comProgress.textContent = total
+        ? `${comSent} de ${total} enviado(s)${comPaused ? ' · pausado' : comDispatching ? ' · enviando…' : ''}`
+        : '';
+    }
+    els.btnComStart?.classList.toggle('hidden', comDispatching && !comPaused);
+    els.btnComPause?.classList.toggle('hidden', !comDispatching || comPaused);
+    if (els.btnComStart && !comDispatching) {
+      els.btnComStart.disabled = !comQueue.length;
+      els.btnComStart.textContent = comSent > 0 && comSent < total ? 'Retomar disparo' : 'Iniciar disparo';
+    }
+  }
+
+  function appendComError(msg) {
+    if (!els.comErrors) return;
+    els.comErrors.classList.remove('hidden');
+    const li = document.createElement('li');
+    li.textContent = msg;
+    els.comErrors.appendChild(li);
+  }
+
+  function renderComPreviewTable(items) {
+    if (!els.comTable) return;
+    els.comTable.innerHTML = items.length
+      ? items
+          .map(
+            (item) => `
+        <tr>
+          <td><strong>${escapeHtml(item.nome)}</strong></td>
+          <td>${escapeHtml(item.telefone)}</td>
+          <td>${escapeHtml(item.tipoLabel || item.tipo)}</td>
+          <td>${escapeHtml(item.mensagem)}</td>
+        </tr>`,
+          )
+          .join('')
+      : '<tr><td colspan="4" class="cell-empty">Nenhum contato com WhatsApp nos filtros selecionados.</td></tr>';
+  }
+
+  async function generateComunicacaoPreview() {
+    const tipos = getSelectedComTipos();
+    if (!tipos.length) {
+      alert('Selecione ao menos um tipo de lead.');
+      return;
+    }
+    const template = els.comTemplate?.value?.trim() || '';
+    if (!template) {
+      alert('Informe o template da mensagem.');
+      return;
+    }
+
+    els.btnComPreview.disabled = true;
+    const prevLabel = els.btnComPreview.textContent;
+    els.btnComPreview.textContent = 'Gerando…';
+    comAbort = true;
+    comDispatching = false;
+    comPaused = false;
+    comSent = 0;
+    comQueue = [];
+    if (els.comErrors) {
+      els.comErrors.innerHTML = '';
+      els.comErrors.classList.add('hidden');
+    }
+
+    try {
+      const data = await previewMarketingComunicacao({ template, tipos });
+      comQueue = data.items || [];
+      renderComPreviewTable(comQueue);
+      els.comPreview?.classList.remove('hidden');
+      if (els.comMeta) {
+        els.comMeta.textContent = comQueue.length
+          ? `${comQueue.length} destinatário(s) · tipos: ${(data.tipos || tipos).join(', ')}`
+          : 'Nenhum contato encontrado com telefone válido.';
+      }
+      updateComProgressUI();
+    } catch (err) {
+      alert(err.message || 'Não foi possível gerar a lista.');
+    } finally {
+      els.btnComPreview.disabled = false;
+      els.btnComPreview.textContent = prevLabel;
+    }
+  }
+
+  async function runComunicacaoDispatch() {
+    if (!comQueue.length || comDispatching) return;
+
+    const pending = comQueue.slice(comSent);
+    if (!pending.length) {
+      alert('Todos os envios desta lista já foram concluídos. Gere a lista novamente para um novo disparo.');
+      return;
+    }
+
+    const total = comQueue.length;
+    const confirmMsg = `Enviar WhatsApp para ${pending.length} contato(s)?\n\nIntervalo aleatório entre envios para reduzir risco de bloqueio.`;
+    if (!confirm(confirmMsg)) return;
+
+    comDispatching = true;
+    comPaused = false;
+    comAbort = false;
+    updateComProgressUI();
+
+    const { min, max } = getComIntervalBounds();
+
+    for (let i = comSent; i < comQueue.length; i += 1) {
+      if (comAbort || comPaused) break;
+
+      const item = comQueue[i];
+      try {
+        await enviarMarketingComunicacaoItem({
+          arrecadacaoId: item.arrecadacaoId,
+          texto: item.mensagem,
+        });
+        comSent += 1;
+        updateComProgressUI();
+      } catch (err) {
+        appendComError(`${item.nome}: ${err.message || 'falha no envio'}`);
+      }
+
+      if (comAbort || comPaused || i >= comQueue.length - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, randomDelayMs(min, max)));
+    }
+
+    comDispatching = false;
+    updateComProgressUI();
+
+    if (!comPaused && comSent >= total && els.comProgress) {
+      els.comProgress.textContent = `Concluído: ${comSent} de ${total} enviado(s).`;
+    }
+  }
+
+  function pauseComunicacaoDispatch() {
+    if (!comDispatching) return;
+    comPaused = true;
+    comAbort = true;
+    comDispatching = false;
+    updateComProgressUI();
   }
 
   function openModal(kind, item = null) {
@@ -406,8 +687,16 @@ export function initMarketingModule() {
   }
 
   els.tabs?.querySelectorAll('[data-marketing-tab]').forEach((btn) => {
-    btn.addEventListener('click', () => setTab(btn.dataset.marketingTab));
+    btn.addEventListener('click', () => {
+      setTab(btn.dataset.marketingTab);
+      renderTables();
+    });
   });
+  els.btnIgGenerate?.addEventListener('click', () => void generateInstagramList());
+  els.btnIgCopy?.addEventListener('click', () => void copyInstagramList());
+  els.btnComPreview?.addEventListener('click', () => void generateComunicacaoPreview());
+  els.btnComStart?.addEventListener('click', () => void runComunicacaoDispatch());
+  els.btnComPause?.addEventListener('click', pauseComunicacaoDispatch);
   els.btnNewCanal?.addEventListener('click', () => openModal('canal'));
   els.btnNewCampanha?.addEventListener('click', () => openModal('campanha'));
   els.btnNewCriativo?.addEventListener('click', () => openModal('criativo'));
@@ -431,7 +720,8 @@ export function initMarketingModule() {
     if (e.target === els.modalBg) closeModal();
   });
 
-  setTab('canais');
+  setTab('inicio');
+  renderTables();
 
   return { loadMarketing, getMarketingData: () => data };
 }

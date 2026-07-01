@@ -177,6 +177,23 @@ function shortRef(descricao, max = 28) {
   return truncateText(head, max);
 }
 
+function isComercialPlanoTipo(tipo) {
+  return tipo === 'espaco' || tipo === 'patrocinio';
+}
+
+/** Lead principal do plano: patrocínio se existir, senão primeiro espaço. */
+function pickPrimaryPlanoItem(items) {
+  return items.find((i) => isComercialPlanoTipo(i.tipo)) || null;
+}
+
+function resolveGroupProdutoId(items) {
+  const planoItems = items.filter((i) => isComercialPlanoTipo(i.tipo));
+  const primary = pickPrimaryPlanoItem(planoItems);
+  if (!primary) return { primary: null, produtoId: null };
+  const produtoId = primary.produtoId ?? planoItems.find((i) => i.produtoId)?.produtoId ?? null;
+  return { primary, produtoId };
+}
+
 function groupItemsForTable(list) {
   const map = new Map();
   for (const item of list) {
@@ -348,11 +365,16 @@ export function initArrecadacaoModule(
     leadOrigemCriativo: document.getElementById('lead-origem-criativo'),
     migrateArtisticoPanel: document.getElementById('a-migrate-artistico-panel'),
     migrateArtisticoBtn: document.getElementById('a-migrate-artistico-btn'),
+    produtoField: document.getElementById('a-produto-field'),
+    produto: document.getElementById('a-produto'),
   };
 
   let items = [];
   let espacosDisponiveis = [];
   let participantes = [];
+  let produtos = [];
+  let beneficiosDef = [];
+  let espacosTipos = [];
   let funilEtapas = [];
   let funilEscopoAtual = 'comercial';
   let leadDetailTarefas = [];
@@ -367,6 +389,9 @@ export function initArrecadacaoModule(
     artistico: true,
   };
   let loadSeq = 0;
+  let tableContatoEdit = null;
+  let tableContatoSaving = false;
+  let tableProdutoSaving = false;
 
   function applyLeadScope(scope) {
     leadScope = PAGE_CONFIG[scope] ? scope : 'comercial';
@@ -699,6 +724,37 @@ export function initArrecadacaoModule(
     if (selected) selectEl.value = selected;
   }
 
+  function produtoLabel(p) {
+    if (!p) return '';
+    const valor =
+      p.valor != null && p.valor > 0 ? ` — ${fmtMoney(p.valor)}` : '';
+    return `${p.nome}${valor}`;
+  }
+
+  function fillProdutoSelect(selectedId = '') {
+    if (!els.produto) return;
+    const active = produtos.filter((p) => p.ativo !== false);
+    els.produto.innerHTML =
+      '<option value="">Sem plano definido</option>' +
+      active
+        .map(
+          (p) =>
+            `<option value="${p.id}"${Number(selectedId) === p.id ? ' selected' : ''}>${escapeHtml(produtoLabel(p))}</option>`,
+        )
+        .join('');
+  }
+
+  function produtoNomeById(id) {
+    if (!id) return '';
+    return produtos.find((p) => p.id === id)?.nome || '';
+  }
+
+  function produtoValorById(id) {
+    if (!id) return null;
+    const p = produtos.find((x) => x.id === id);
+    return p?.valor != null && p.valor > 0 ? p.valor : null;
+  }
+
   function openModal(item = null, mode = 'edit') {
     const isCreate = mode === 'create' && !item;
     if (!isCreate && item?.id) {
@@ -753,6 +809,11 @@ export function initArrecadacaoModule(
     els.descricao.value =
       item?.descricao || (isCreate && !isArtistico ? etapaAcionamento.titulo : '');
     els.descricaoField.classList.toggle('hidden', isEspaco || (isCreate && !isArtistico));
+    const showProduto = !isEspaco && !isArtistico;
+    els.produtoField?.classList.toggle('hidden', !showProduto);
+    if (showProduto) {
+      fillProdutoSelect(item?.produtoId || '');
+    }
     if (isArtistico) {
       if (els.descricao) els.descricao.placeholder = 'Ex.: Banda XYZ — show de abertura';
       const descLabel = els.descricaoField?.querySelector('label');
@@ -797,6 +858,7 @@ export function initArrecadacaoModule(
     els.status.disabled = false;
     els.statusField?.classList.remove('hidden');
     els.descricaoField?.classList.remove('hidden');
+    els.produtoField?.classList.add('hidden');
     if (els.participanteLabel) els.participanteLabel.textContent = 'Participante / Patrocinador';
     if (els.valorTotalLabel) els.valorTotalLabel.textContent = 'Valor total (R$)';
     els.valoresRow?.classList.remove('hidden');
@@ -1022,6 +1084,10 @@ export function initArrecadacaoModule(
       valorTotal: parseValor(els.valorTotal.value) ?? 0,
       obs: els.obs.value.trim(),
     };
+    if (editTipo === 'patrocinio' || (!editTipo && !isArtisticoScope(leadScope))) {
+      const produtoVal = els.produto?.value;
+      form.produtoId = produtoVal ? Number(produtoVal) : null;
+    }
     if (isArtistico) {
       form.participanteInstagram = els.instagram?.value.trim() || '';
       form.participanteWhatsapp = els.whatsapp?.value.replace(/\D/g, '') || '';
@@ -1385,6 +1451,18 @@ export function initArrecadacaoModule(
     if (viewMode === 'lista') renderDisponiveisTable();
   }
 
+  function planoBadgesHtml(groupItems, nomeResolver) {
+    const { produtoId } = resolveGroupProdutoId(groupItems);
+    if (!produtoId) return '';
+    const primary = pickPrimaryPlanoItem(groupItems);
+    const nome =
+      primary?.produtoNome?.trim() ||
+      groupItems.find((i) => i.produtoId === produtoId)?.produtoNome?.trim() ||
+      nomeResolver(produtoId);
+    if (!nome) return '';
+    return `<span class="badge arr-plano-badge">${escapeHtml(nome)}</span>`;
+  }
+
   function renderKanbanGroupCard(group) {
     const primary = group.items[0];
     const falta = group.valorFalta;
@@ -1422,6 +1500,7 @@ export function initArrecadacaoModule(
         <div class="arr-kanban-card-head">
           <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
           ${renderTipoBadges(group.tipos || [group.tipo])}
+          ${planoBadgesHtml(group.items, produtoNomeById)}
         </div>
         ${refsHtml}
         <div class="arr-kanban-card-valores">
@@ -1598,6 +1677,12 @@ export function initArrecadacaoModule(
         return formatSeguidores(p?.seguidores);
       case 'tipoComercio':
         return item.espacoTipo?.trim() || '—';
+      case 'produto': {
+        const nome = item.produtoNome?.trim() || produtoNomeById(item.produtoId);
+        if (!nome) return '—';
+        const valor = produtoValorById(item.produtoId);
+        return valor != null ? `${nome} (${fmtMoney(valor)})` : nome;
+      }
       case 'whatsapp':
         return p?.contatoTelefone ? formatPhoneDisplay(p.contatoTelefone) : '—';
       case 'status':
@@ -1628,6 +1713,9 @@ export function initArrecadacaoModule(
     if (field === 'tipoComercio') {
       return item.tipo === 'espaco' && Boolean(item.espacoId);
     }
+    if (field === 'produto') {
+      return isComercialPlanoTipo(item.tipo);
+    }
     return true;
   }
 
@@ -1639,6 +1727,7 @@ export function initArrecadacaoModule(
       instagram: 'Instagram',
       seguidores: 'Seguidores',
       tipoComercio: 'Tipo de comércio',
+      produto: 'Plano / Cota',
       whatsapp: 'WhatsApp',
       status: 'Status',
       descricao: isArtistico ? 'Atração' : 'Referência',
@@ -1813,6 +1902,9 @@ export function initArrecadacaoModule(
     }
     if (isEspaco && item.espacoId) {
       fields.push('tipoComercio');
+    }
+    if (isComercialPlanoTipo(item.tipo)) {
+      fields.push('produto');
     }
     if (!isEspaco) {
       fields.push('descricao');
@@ -2276,6 +2368,22 @@ export function initArrecadacaoModule(
       input.setAttribute('list', 'tipos-comercio');
       input.placeholder = 'Ex.: Alimentação';
       input.value = item.espacoTipo || '';
+    } else if (field === 'produto') {
+      input = document.createElement('select');
+      input.className = 'lw-field-editor';
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = 'Sem plano definido';
+      input.appendChild(empty);
+      produtos
+        .filter((p) => p.ativo !== false)
+        .forEach((p) => {
+          const opt = document.createElement('option');
+          opt.value = String(p.id);
+          opt.textContent = produtoLabel(p);
+          if (item.produtoId === p.id) opt.selected = true;
+          input.appendChild(opt);
+        });
     } else {
       input = document.createElement('input');
       input.type = 'text';
@@ -2311,6 +2419,8 @@ export function initArrecadacaoModule(
         patch.participanteSeguidores = raw ? Number(raw) : null;
       } else if (field === 'tipoComercio') {
         patch.espacoTipo = input.value.trim();
+      } else if (field === 'produto') {
+        patch.produtoId = input.value ? Number(input.value) : null;
       } else if (field === 'status') {
         patch.status = input.value;
       } else if (field === 'descricao') {
@@ -2342,6 +2452,11 @@ export function initArrecadacaoModule(
     };
 
     if (field === 'status') {
+      input.addEventListener('change', () => saveEdit(buildPatch()));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') cancel();
+      });
+    } else if (field === 'produto') {
       input.addEventListener('change', () => saveEdit(buildPatch()));
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') cancel();
@@ -3230,6 +3345,9 @@ export function initArrecadacaoModule(
     items = itemsForScope(data.items || [], scope);
     espacosDisponiveis = scope === 'comercial' ? data.espacosDisponiveis || [] : [];
     participantes = data.participantes || [];
+    produtos = data.produtos || [];
+    beneficiosDef = data.beneficiosDef || [];
+    espacosTipos = data.espacosTipos || [];
     funilEtapas = data.funilEtapas || [];
     funilEscopoAtual = data.funilEscopo || funilEscopoForLeadScope(scope);
     store?.setParticipantes(participantes);
@@ -3247,6 +3365,257 @@ export function initArrecadacaoModule(
         e.stopPropagation();
         const item = items.find((x) => x.id === Number(btn.dataset.id));
         if (item) handler(item);
+      });
+    });
+  }
+
+  function renderTableProdutoSelect(item, produtoId) {
+    const options = [
+      '<option value="">—</option>',
+      ...produtos
+        .filter((p) => p.ativo !== false)
+        .map(
+          (p) =>
+            `<option value="${p.id}"${produtoId === p.id ? ' selected' : ''}>${escapeHtml(p.nome)}</option>`,
+        ),
+    ].join('');
+    const valor = produtoValorById(produtoId);
+    const valorHint =
+      valor != null
+        ? `<span class="arr-produto-valor" title="Valor do plano">${fmtMoney(valor)}</span>`
+        : '';
+    return `<div class="arr-produto-inline">
+      <select class="arr-produto-select" data-arrecadacao-id="${item.id}" aria-label="Produto">${options}</select>
+      ${valorHint}
+    </div>`;
+  }
+
+  function renderTableProdutoCell(group) {
+    const label = 'Produto';
+    const { primary, produtoId } = resolveGroupProdutoId(group.items);
+    if (!primary) {
+      return `<td class="arr-cell-produto cell-empty" data-label="${label}">—</td>`;
+    }
+    const mergedClass = group.merged ? ' arr-cell-produto--merged' : '';
+    return `<td class="arr-cell-produto${mergedClass}" data-label="${label}">${renderTableProdutoSelect(primary, produtoId)}</td>`;
+  }
+
+  function applyProdutoToParticipanteLeads(participanteId, produtoPatch) {
+    items = items.map((x) =>
+      x.participanteId === participanteId && isComercialPlanoTipo(x.tipo)
+        ? { ...x, ...produtoPatch }
+        : x,
+    );
+    if (
+      leadDetailItem?.participanteId === participanteId &&
+      isComercialPlanoTipo(leadDetailItem.tipo)
+    ) {
+      leadDetailItem = { ...leadDetailItem, ...produtoPatch };
+      renderLeadDealPanel(leadDetailItem);
+    }
+  }
+
+  async function saveTableProduto(arrecadacaoId, produtoId) {
+    if (tableProdutoSaving) return;
+    const item = items.find((x) => x.id === arrecadacaoId);
+    if (!item) return;
+
+    const siblings = items.filter(
+      (x) => x.participanteId === item.participanteId && isComercialPlanoTipo(x.tipo),
+    );
+    if (siblings.every((s) => (s.produtoId ?? null) === produtoId)) return;
+
+    tableProdutoSaving = true;
+    try {
+      const data = await updateArrecadacao(arrecadacaoId, { produtoId });
+      const updated = data?.item;
+      if (updated) {
+        applyProdutoToParticipanteLeads(updated.participanteId, {
+          produtoId: updated.produtoId,
+          produtoNome: updated.produtoNome,
+          produtoValor: updated.produtoValor,
+        });
+        renderStats(summarizeItems(items, funilEtapas));
+        if (viewMode === 'kanban') renderKanban();
+        else renderTable();
+      }
+    } catch (err) {
+      alert(err.message);
+      renderTable();
+    } finally {
+      tableProdutoSaving = false;
+    }
+  }
+
+  function bindTableProdutoEdits() {
+    els.table.querySelectorAll('.arr-produto-select').forEach((select) => {
+      select.addEventListener('click', (e) => e.stopPropagation());
+      select.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const id = Number(select.dataset.arrecadacaoId);
+        const produtoId = select.value ? Number(select.value) : null;
+        void saveTableProduto(id, produtoId);
+      });
+    });
+  }
+
+  function renderTableContatoLine(participanteId, field) {
+    const isEditing =
+      tableContatoEdit?.participanteId === participanteId && tableContatoEdit?.field === field;
+    const lineClass =
+      field === 'instagram' ? 'arr-contato-line arr-contato-line--ig' : 'arr-contato-line arr-contato-line--wa';
+
+    if (isEditing) {
+      const placeholder = field === 'instagram' ? '@usuario' : '(00) 00000-0000';
+      return `<div class="${lineClass} arr-contato-line--editing" data-participante-id="${participanteId}" data-contato-field="${field}">
+        <input type="text" class="arr-contato-input" data-contato-input="${field}" placeholder="${placeholder}" autocomplete="off" />
+      </div>`;
+    }
+
+    const p = getParticipanteById(participanteId);
+
+    if (field === 'instagram') {
+      const ig = String(p?.instagram || '').trim();
+      if (ig) {
+        const display = formatInstagram(ig);
+        const url = instagramProfileUrl(ig);
+        return `<div class="${lineClass}">
+          <a href="${url}" class="arr-contato-link" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${escapeHtml(display)}</a>
+        </div>`;
+      }
+      return `<div class="${lineClass} cell-empty">
+        <button type="button" class="arr-contato-add" data-contato-field="instagram" data-participante-id="${participanteId}">Adicionar</button>
+      </div>`;
+    }
+
+    const phone = String(p?.contatoTelefone || '').trim();
+    if (phone) {
+      return `<div class="${lineClass}" onclick="event.stopPropagation()">
+        ${renderWhatsappPhoneButton({
+          participanteId,
+          phone,
+          className: 'tbtn linkish wa-phone-btn arr-wa-btn',
+        })}
+      </div>`;
+    }
+    return `<div class="${lineClass} cell-empty">
+      <button type="button" class="arr-contato-add" data-contato-field="whatsapp" data-participante-id="${participanteId}">Adicionar</button>
+    </div>`;
+  }
+
+  function renderTableContatoCell(participanteId) {
+    const label = 'Contato';
+
+    if (!participanteId) {
+      return `<td class="arr-cell-contato cell-empty" data-label="${label}">—</td>`;
+    }
+
+    const isEditing = tableContatoEdit?.participanteId === participanteId;
+    const editingClass = isEditing ? ' arr-cell-contato--editing' : '';
+
+    return `<td class="arr-cell-contato${editingClass}" data-label="${label}" data-participante-id="${participanteId}">
+      <div class="arr-contato-stack">
+        ${renderTableContatoLine(participanteId, 'instagram')}
+        <span class="arr-contato-sep" aria-hidden="true">|</span>
+        ${renderTableContatoLine(participanteId, 'whatsapp')}
+      </div>
+    </td>`;
+  }
+
+  async function saveTableContatoEdit(participanteId, field, rawValue) {
+    if (tableContatoSaving || !participanteId) return;
+
+    const patch = {};
+    if (field === 'instagram') {
+      const ig = String(rawValue || '').trim();
+      if (!ig) {
+        tableContatoEdit = null;
+        renderTable();
+        return;
+      }
+      patch.participanteInstagram = ig;
+    } else {
+      const phone = String(rawValue || '').replace(/\D/g, '');
+      if (!phone) {
+        tableContatoEdit = null;
+        renderTable();
+        return;
+      }
+      patch.participanteWhatsapp = phone;
+    }
+
+    tableContatoSaving = true;
+    try {
+      const { participante } = await updateParticipante(participanteId, {
+        ...buildParticipanteContactBody(participanteId, patch),
+      });
+      if (participante) {
+        const idx = participantes.findIndex((x) => x.id === participanteId);
+        if (idx >= 0) participantes[idx] = participante;
+        else participantes.push(participante);
+        store?.setParticipantes(participantes);
+        renderParticipantesDatalist();
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      tableContatoEdit = null;
+      tableContatoSaving = false;
+      renderTable();
+    }
+  }
+
+  function bindTableContatoEdits() {
+    els.table.querySelectorAll('.arr-contato-add').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        tableContatoEdit = {
+          participanteId: Number(btn.dataset.participanteId),
+          field: btn.dataset.contatoField,
+        };
+        renderTable();
+        const input = els.table.querySelector(`input[data-contato-input="${tableContatoEdit.field}"]`);
+        input?.focus();
+      });
+    });
+
+    els.table.querySelectorAll('.arr-contato-input').forEach((input) => {
+      const field = input.dataset.contatoInput;
+      const host = input.closest('[data-participante-id]');
+      const participanteId = Number(host?.dataset.participanteId);
+      let cancelled = false;
+
+      if (field === 'whatsapp') {
+        input.addEventListener('input', (e) => maskPhoneInput(e.target));
+      }
+
+      const commit = () => {
+        if (
+          cancelled ||
+          tableContatoSaving ||
+          tableContatoEdit?.participanteId !== participanteId ||
+          tableContatoEdit?.field !== field
+        ) {
+          return;
+        }
+        void saveTableContatoEdit(participanteId, field, input.value);
+      };
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          commit();
+        }
+        if (e.key === 'Escape') {
+          cancelled = true;
+          tableContatoEdit = null;
+          renderTable();
+        }
+      });
+
+      input.addEventListener('blur', () => {
+        window.setTimeout(commit, 120);
       });
     });
   }
@@ -3344,7 +3713,7 @@ export function initArrecadacaoModule(
 
     if (!items.length) {
       els.table.innerHTML =
-        '<tr><td colspan="5" class="cell-empty">Nenhum registro de arrecadação.</td></tr>';
+        '<tr><td colspan="7" class="cell-empty">Nenhum registro de arrecadação.</td></tr>';
       els.summary.textContent =
         'Crie leads na arrecadação ou vincule participantes aos espaços para acompanhar os pagamentos.';
       return;
@@ -3404,6 +3773,8 @@ export function initArrecadacaoModule(
             <div class="arr-nome" title="${escapeHtml(group.participanteNome)}">${escapeHtml(group.participanteNome)}</div>
             ${refsHtml}
           </td>
+          ${renderTableContatoCell(group.participanteId)}
+          ${renderTableProdutoCell(group)}
           <td class="arr-cell-situacao">
             <div class="arr-situacao-stack">
               ${renderTipoBadges(group.tipos || [group.tipo])}
@@ -3454,6 +3825,13 @@ export function initArrecadacaoModule(
     els.table.querySelectorAll('tr[data-id]').forEach((row) => {
       row.addEventListener('click', (e) => {
         if (e.target.closest('.arr-ref-chip')) return;
+        if (
+          e.target.closest(
+            '.arr-cell-contato, .arr-cell-produto, .arr-contato-add, .arr-contato-input, .arr-produto-select, .wa-phone-btn',
+          )
+        ) {
+          return;
+        }
         openLeadFromListClick(e, Number(row.dataset.id));
       });
     });
@@ -3462,6 +3840,13 @@ export function initArrecadacaoModule(
       row.addEventListener('click', (e) => {
         if (e.target.closest('[data-action]')) return;
         if (e.target.closest('.arr-ref-chip')) return;
+        if (
+          e.target.closest(
+            '.arr-cell-contato, .arr-cell-produto, .arr-contato-add, .arr-contato-input, .arr-produto-select, .wa-phone-btn',
+          )
+        ) {
+          return;
+        }
         const firstChip = row.querySelector('.arr-ref-chip');
         if (firstChip) openLeadFromListClick(e, Number(firstChip.dataset.id));
       });
@@ -3473,6 +3858,10 @@ export function initArrecadacaoModule(
         openLeadDetailModal(Number(btn.dataset.id));
       });
     });
+
+    bindTableContatoEdits();
+    bindTableProdutoEdits();
+    bindWhatsappChatButtons(els.table, handleOpenWhatsappChat);
   }
 
   function renderDisponiveisTable() {
@@ -3642,8 +4031,24 @@ export function initArrecadacaoModule(
     if (leadDetailId) await loadLeadDetailTarefas(leadDetailId);
   }
 
+  async function reloadProdutos() {
+    if (leadScope !== 'comercial') return produtos;
+    try {
+      const data = await fetchArrecadacao({ scope: 'comercial' });
+      produtos = data.produtos || [];
+      beneficiosDef = data.beneficiosDef || [];
+      espacosTipos = data.espacosTipos || [];
+      fillProdutoSelect(leadDetailItem?.produtoId || '');
+      if (leadDetailItem) renderLeadDealPanel(leadDetailItem);
+    } catch (_) {
+      /* mantém cache anterior */
+    }
+    return produtos;
+  }
+
   return {
     loadArrecadacao,
+    reloadProdutos,
     openLeadDetail,
     refreshLeadTarefas,
     setLeadScope: (scope, opts) => switchLeadScope(scope, opts),

@@ -144,7 +144,16 @@
           <div class="nav-drawer-links">
           <a href="#eventos" class="nav-link" data-view="eventos" id="nav-eventos">Eventos</a>
           <a href="#espacos" class="nav-link active" data-view="espacos" id="nav-espacos" aria-current="page">Espaços</a>
-          <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao">Arrecadação</a>
+          <div class="nav-dropdown" id="nav-arrecadacao">
+            <button type="button" class="nav-dropdown-toggle" id="nav-arrecadacao-toggle" aria-expanded="false" aria-haspopup="true">
+              Arrecadação
+              <span class="nav-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="nav-dropdown-menu" role="menu">
+              <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao-lista" role="menuitem">Leads</a>
+              <a href="#arrecadacao-planos" class="nav-link" data-view="arrecadacao-planos" id="nav-arrecadacao-planos" role="menuitem">Planos e Produtos</a>
+            </div>
+          </div>
           <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico">Artístico</a>
           <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas">Tarefas</a>
           <a href="#marketing" class="nav-link" data-view="marketing" id="nav-marketing">Marketing</a>
@@ -156,6 +165,7 @@
             <div class="nav-dropdown-menu" role="menu">
               <a href="#cronologia" class="nav-link" data-view="cronologia" id="nav-cronologia" role="menuitem">Cronologia</a>
               <a href="#premiacoes" class="nav-link" data-view="premiacoes" id="nav-premiacoes" role="menuitem">Premiações</a>
+              <a href="#entregas" class="nav-link" data-view="entregas" id="nav-entregas" role="menuitem">Entrega</a>
             </div>
           </div>
           <div class="nav-dropdown" id="nav-financeiro">
@@ -427,6 +437,7 @@
         </div>
         <div class="arrecadacao-toolbar-actions">
           <button class="tbtn" type="button" id="btn-arrecadacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
+          <a href="#arrecadacao-planos" class="tbtn" data-view="arrecadacao-planos">Planos e Produtos</a>
           <button class="tbtn" type="button" id="btn-funil-config">Configurar funil</button>
         </div>
       </div>
@@ -438,6 +449,8 @@
             <thead>
               <tr>
                 <th>Registro</th>
+                <th>Contato</th>
+                <th>Produto</th>
                 <th>Situação</th>
                 <th>Valores</th>
                 <th>Obs</th>
@@ -468,6 +481,33 @@
           </table>
         </div>
       </section>
+    </main>
+
+    <main id="view-arrecadacao-planos" class="page view hidden arrecadacao-planos-page">
+      <div class="report-head">
+        <div>
+          <h1>Planos e Produtos</h1>
+          <p class="subtitle">Configure cotas de patrocínio com benefícios de entrega e tipos de espaço permitidos.</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-arr-produto-new">Novo plano</button>
+      </div>
+      <p class="report-summary" id="arr-produtos-summary"></p>
+      <div class="table-wrap arr-produtos-table-wrap">
+        <table class="arr-produtos-table fin-catalog-table">
+          <thead>
+            <tr>
+              <th>Plano</th>
+              <th>Valor</th>
+              <th>Espaços</th>
+              <th>Benefícios</th>
+              <th>Leads</th>
+              <th>Status</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="arr-produtos-table"></tbody>
+        </table>
+      </div>
     </main>
 
     <main id="view-artistico" class="page view hidden">
@@ -548,12 +588,100 @@
       </div>
       <p class="report-summary" id="marketing-summary"></p>
       <div class="marketing-tabs" id="marketing-tabs" role="tablist" aria-label="Seções de marketing">
-        <button class="marketing-tab active" type="button" data-marketing-tab="canais" role="tab">Origens</button>
+        <button class="marketing-tab active" type="button" data-marketing-tab="inicio" role="tab">Início</button>
+        <button class="marketing-tab" type="button" data-marketing-tab="canais" role="tab">Origens</button>
         <button class="marketing-tab" type="button" data-marketing-tab="campanhas" role="tab">Campanhas</button>
         <button class="marketing-tab" type="button" data-marketing-tab="criativos" role="tab">Criativos</button>
       </div>
 
-      <section id="marketing-panel-canais" class="marketing-panel">
+      <section id="marketing-panel-inicio" class="marketing-panel">
+        <div class="marketing-panel-head">
+          <h2>Ferramentas rápidas</h2>
+        </div>
+        <div class="marketing-tools-grid">
+          <article class="marketing-tool-card" aria-labelledby="marketing-tool-ig-title">
+            <h3 class="marketing-tool-card-title" id="marketing-tool-ig-title">@ Instagram dos espaços</h3>
+            <p class="marketing-tool-card-sub">
+              Gera a lista de menções dos participantes vinculados aos espaços do evento, pronta para colar em postagens.
+            </p>
+            <button class="tbtn primary" type="button" id="btn-marketing-ig-generate">Gerar lista</button>
+            <div class="marketing-tool-output hidden" id="marketing-ig-output">
+              <textarea
+                id="marketing-ig-result"
+                class="marketing-tool-textarea"
+                rows="4"
+                readonly
+                aria-label="Lista de @ do Instagram"
+              ></textarea>
+              <div class="marketing-tool-actions">
+                <button class="tbtn" type="button" id="btn-marketing-ig-copy">Copiar</button>
+                <span class="marketing-tool-meta" id="marketing-ig-meta"></span>
+              </div>
+            </div>
+          </article>
+          <article class="marketing-tool-card marketing-tool-card--wide" aria-labelledby="marketing-tool-com-title">
+            <h3 class="marketing-tool-card-title" id="marketing-tool-com-title">Comunicação</h3>
+            <p class="marketing-tool-card-sub">
+              Disparo em massa de WhatsApp com template personalizado. Apenas contatos com telefone válido.
+            </p>
+            <div class="marketing-com-filters" id="marketing-com-filters" role="group" aria-label="Tipos de lead">
+              <label class="marketing-origem-check"><input type="checkbox" value="espaco" checked /> Espaço</label>
+              <label class="marketing-origem-check"><input type="checkbox" value="patrocinio" checked /> Patrocínio</label>
+              <label class="marketing-origem-check"><input type="checkbox" value="artistico" /> Artístico</label>
+              <label class="marketing-origem-check"><input type="checkbox" value="contato" /> Contato</label>
+            </div>
+            <div class="field marketing-com-field">
+              <label for="marketing-com-template">Template da mensagem</label>
+              <textarea
+                id="marketing-com-template"
+                class="marketing-tool-textarea"
+                rows="4"
+                placeholder="Olá {{nome}}, tudo bem? Seu espaço {{espaco}} está confirmado."
+              ></textarea>
+              <p class="field-hint" id="marketing-com-vars-hint">
+                Variáveis: {{nome}}, {{tipo}}, {{espaco}}, {{grupo}}, {{instagram}}, {{telefone}}, {{contato}}, {{descricao}}, {{status}}
+              </p>
+            </div>
+            <div class="marketing-com-interval">
+              <label class="marketing-com-interval-label">
+                Intervalo mín. (s)
+                <input type="number" id="marketing-com-interval-min" min="5" max="600" value="15" />
+              </label>
+              <label class="marketing-com-interval-label">
+                Intervalo máx. (s)
+                <input type="number" id="marketing-com-interval-max" min="5" max="600" value="45" />
+              </label>
+            </div>
+            <div class="marketing-tool-actions marketing-com-actions-top">
+              <button class="tbtn primary" type="button" id="btn-marketing-com-preview">Gerar lista</button>
+            </div>
+            <div class="marketing-com-preview hidden" id="marketing-com-preview">
+              <p class="marketing-com-meta" id="marketing-com-meta"></p>
+              <div class="table-wrap marketing-com-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Destinatário</th>
+                      <th>Telefone</th>
+                      <th>Tipo</th>
+                      <th>Mensagem</th>
+                    </tr>
+                  </thead>
+                  <tbody id="marketing-com-table"></tbody>
+                </table>
+              </div>
+              <div class="marketing-tool-actions">
+                <button class="tbtn primary" type="button" id="btn-marketing-com-start">Iniciar disparo</button>
+                <button class="tbtn hidden" type="button" id="btn-marketing-com-pause">Pausar</button>
+                <span class="marketing-tool-meta" id="marketing-com-progress"></span>
+              </div>
+              <ul class="marketing-com-errors hidden" id="marketing-com-errors" aria-live="polite"></ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="marketing-panel-canais" class="marketing-panel hidden">
         <div class="marketing-panel-head">
           <h2>Origens</h2>
           <button class="tbtn primary" type="button" id="btn-marketing-canal-new">Nova origem</button>
@@ -677,6 +805,45 @@
             </tr>
           </thead>
           <tbody id="premiacoes-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-entregas" class="page view hidden producao-entregas-page">
+      <div class="report-head">
+        <div>
+          <h1>Entrega</h1>
+          <p class="subtitle">Checklist de benefícios e envio de marca para leads fechados.</p>
+        </div>
+      </div>
+      <div class="report-filters entregas-filters">
+        <div class="field-inline">
+          <label for="entregas-sort">Ordenar</label>
+          <select id="entregas-sort">
+            <option value="nome">Alfabético</option>
+            <option value="plano">Plano</option>
+            <option value="espaco">Espaço</option>
+          </select>
+        </div>
+        <div class="field-inline">
+          <label for="entregas-filter-show">Mostrar</label>
+          <select id="entregas-filter-show">
+            <option value="todos">Todos</option>
+            <option value="pendencias">Só pendências</option>
+          </select>
+        </div>
+        <div class="field-inline">
+          <label for="entregas-filter-plano">Plano</label>
+          <select id="entregas-filter-plano">
+            <option value="">Todos os planos</option>
+          </select>
+        </div>
+      </div>
+      <p class="report-summary" id="entregas-summary"></p>
+      <div class="table-wrap entregas-table-wrap">
+        <table class="table-entregas table-entregas-matrix">
+          <thead id="entregas-thead"></thead>
+          <tbody id="entregas-table"></tbody>
         </table>
       </div>
     </main>
@@ -1033,6 +1200,13 @@
           <label for="a-descricao">Referência / descrição</label>
           <input id="a-descricao" type="text" placeholder="Ex.: Patrocínio master" />
         </div>
+        <div class="field hidden" id="a-produto-field">
+          <label for="a-produto">Plano / Cota</label>
+          <select id="a-produto">
+            <option value="">Sem plano definido</option>
+          </select>
+          <p class="field-hint">Cota Bronze, Prata ou Ouro — configure em Planos de patrocínio.</p>
+        </div>
         <div class="field-row" id="a-valores-row">
           <div class="field" id="a-valor-total-field">
             <label for="a-valor-total" id="a-valor-total-label">Valor total (R$)</label>
@@ -1323,6 +1497,52 @@
       </div>
     </div>
 
+    <div class="modal-bg" id="arr-produto-edit-modal-bg">
+      <div class="modal modal-wide modal--arr-produto-edit" role="dialog" aria-modal="true" aria-labelledby="arr-produto-edit-title">
+        <h2 id="arr-produto-edit-title">Plano de patrocínio</h2>
+        <p class="form-errors hidden" id="arr-produto-edit-errors" role="alert"></p>
+        <div class="field-row">
+          <div class="field">
+            <label for="arr-produto-edit-nome">Nome <span class="req">*</span></label>
+            <input id="arr-produto-edit-nome" type="text" required autocomplete="off" placeholder="Ex.: Bronze" />
+          </div>
+          <div class="field">
+            <label for="arr-produto-edit-ordem">Ordem</label>
+            <input id="arr-produto-edit-ordem" type="number" min="0" step="1" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="arr-produto-edit-descricao">Descrição</label>
+          <input id="arr-produto-edit-descricao" type="text" autocomplete="off" placeholder="Opcional" />
+        </div>
+        <div class="field">
+          <label for="arr-produto-edit-valor">Valor fixo (R$)</label>
+          <input id="arr-produto-edit-valor" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+          <p class="field-hint">Preço fixo da cota de patrocínio.</p>
+        </div>
+        <fieldset class="arr-produto-fieldset">
+          <legend>Tipos de espaço permitidos</legend>
+          <div class="arr-produto-checkgrid" id="arr-produto-edit-espacos"></div>
+        </fieldset>
+        <fieldset class="arr-produto-fieldset">
+          <legend>Benefícios de entrega</legend>
+          <p class="field-hint">Benefícios marcados como inclusos em todos os planos valem para todas as cotas.</p>
+          <div class="arr-produto-checkgrid" id="arr-produto-edit-beneficios"></div>
+        </fieldset>
+        <div class="field">
+          <label class="checkbox-label">
+            <input id="arr-produto-edit-ativo" type="checkbox" checked />
+            Plano ativo
+          </label>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="arr-produto-edit-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="arr-produto-edit-delete">Excluir</button>
+          <button class="btn primary" type="button" id="arr-produto-edit-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="funil-modal-bg">
       <div class="modal modal-funil" role="dialog" aria-modal="true" aria-labelledby="funil-modal-title">
         <h2 id="funil-modal-title">Configurar funil</h2>
@@ -1361,6 +1581,7 @@
             <option value="outro_evento">Escolheu outro evento</option>
             <option value="sem_retorno">Sem retorno / não respondeu</option>
             <option value="perfil">Fora do perfil</option>
+            <option value="duplicado">Duplicado</option>
             <option value="outro">Outro</option>
           </select>
         </div>

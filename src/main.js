@@ -8,12 +8,14 @@ import { initLoginScreen } from './modules/login.js';
 import { initNavigation } from './modules/navigation.js';
 import { initUsersModule } from './modules/users.js';
 import { initArrecadacaoModule } from './modules/arrecadacao.js';
+import { initArrecadacaoProdutosModule } from './modules/arrecadacao-produtos.js';
 import { initTarefasModule } from './modules/tarefas.js';
 import { initTarefaEditor } from './modules/tarefa-editor.js';
 import { initEventosModule, initEventoSelector } from './modules/eventos.js';
 import { initMarketingModule } from './modules/marketing.js';
 import { initProducaoCronologiaModule } from './modules/producao-cronologia.js';
 import { initProducaoPremiacoesModule } from './modules/producao-premiacoes.js';
+import { initProducaoEntregasModule } from './modules/producao-entregas.js';
 import { initFinanceiroGestaoModule } from './modules/financeiro-gestao.js';
 import { initContasPagarModule } from './modules/contas-pagar.js';
 import { initFinanceiroPlanoContasModule } from './modules/financeiro-plano-contas.js';
@@ -27,12 +29,14 @@ const appScreen = document.getElementById('app-screen');
 const userNameEl = document.getElementById('user-name');
 let spacesModule = null;
 let arrecadacaoModule = null;
+let arrecadacaoProdutosModule = null;
 let participantesModule = null;
 let whatsappInboxModule = null;
 let tarefasModule = null;
 let marketingModule = null;
 let cronologiaModule = null;
 let premiacoesModule = null;
+let entregasModule = null;
 let financeiroGestaoModule = null;
 let contasPagarModule = null;
 let financeiroPlanoContasModule = null;
@@ -73,6 +77,7 @@ function showLoginOnly() {
   marketingModule = null;
   cronologiaModule = null;
   premiacoesModule = null;
+  entregasModule = null;
   financeiroGestaoModule = null;
   contasPagarModule = null;
   financeiroPlanoContasModule = null;
@@ -138,6 +143,9 @@ async function reloadEventoData() {
   if (navigation?.getCurrentView() === 'premiacoes') {
     premiacoesModule?.loadPremiacoes();
   }
+  if (navigation?.getCurrentView() === 'entregas') {
+    entregasModule?.loadEntregas();
+  }
   if (navigation?.getCurrentView() === 'financeiro-gestao') {
     financeiroGestaoModule?.loadFinanceiroGestao();
   }
@@ -146,6 +154,9 @@ async function reloadEventoData() {
   }
   if (navigation?.getCurrentView() === 'financeiro-plano-contas') {
     financeiroPlanoContasModule?.loadFinanceiroPlanoContas();
+  }
+  if (navigation?.getCurrentView() === 'arrecadacao-planos') {
+    arrecadacaoProdutosModule?.loadProdutos();
   }
   if (navigation?.getCurrentView() === 'permissoes') {
     permissoesModule?.loadPermissoes();
@@ -207,6 +218,9 @@ async function initApp(user) {
     currentUser: user,
     onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
   });
+  arrecadacaoProdutosModule = initArrecadacaoProdutosModule({
+    onChanged: () => arrecadacaoModule?.reloadProdutos?.(),
+  });
   tarefasModule = initTarefasModule({
     openTarefaEditor: (tarefa, opts) => tarefaEditor.open(tarefa, opts),
     onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
@@ -221,6 +235,9 @@ async function initApp(user) {
   premiacoesModule = initProducaoPremiacoesModule({
     onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
     onSaved: () => syncParticipantesList(),
+  });
+  entregasModule = initProducaoEntregasModule({
+    onOpenLead: (arrecadacaoId, opts) => openLeadFromApp(arrecadacaoId, opts),
   });
   financeiroGestaoModule = initFinanceiroGestaoModule();
   contasPagarModule = initContasPagarModule();
@@ -253,9 +270,11 @@ async function initApp(user) {
       if (view === 'marketing') marketingModule.loadMarketing();
       if (view === 'cronologia') cronologiaModule.loadCronologia();
       if (view === 'premiacoes') premiacoesModule.loadPremiacoes();
+      if (view === 'entregas') entregasModule.loadEntregas();
       if (view === 'financeiro-gestao') financeiroGestaoModule.loadFinanceiroGestao();
       if (view === 'financeiro-contas-pagar') contasPagarModule.loadContasPagar();
       if (view === 'financeiro-plano-contas') financeiroPlanoContasModule.loadFinanceiroPlanoContas();
+      if (view === 'arrecadacao-planos') arrecadacaoProdutosModule.loadProdutos();
       if (view === 'permissoes') permissoesModule.loadPermissoes();
       if (view === 'usuarios') usersModule.loadUsers();
     },

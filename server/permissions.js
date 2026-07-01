@@ -7,6 +7,7 @@ export const PERMISSION_CATALOG = [
   { key: 'marketing', label: 'Marketing', area: 'Operacional' },
   { key: 'cronologia', label: 'Cronologia', area: 'Produção' },
   { key: 'premiacoes', label: 'Premiações', area: 'Produção' },
+  { key: 'entregas', label: 'Entrega', area: 'Produção' },
   { key: 'financeiro-gestao', label: 'Gestão financeira', area: 'Financeiro' },
   { key: 'financeiro-contas-pagar', label: 'Contas a pagar', area: 'Financeiro' },
   { key: 'financeiro-plano-contas', label: 'Plano de contas', area: 'Financeiro' },
@@ -326,6 +327,7 @@ function resolveApiPermission(path, method) {
   if (p.startsWith('/api/marketing')) return { type: 'view', view: 'marketing' };
   if (p.startsWith('/api/producao/cronologia')) return { type: 'view', view: 'cronologia' };
   if (p.startsWith('/api/producao/premiacoes')) return { type: 'view', view: 'premiacoes' };
+  if (p.startsWith('/api/producao/entregas')) return { type: 'view', view: 'entregas' };
   if (p === '/api/financeiro/painel') {
     return {
       type: 'anyOf',

@@ -1,5 +1,6 @@
 import { ensureParticipante } from './participantes.js';
 import { createTarefaContato } from './tarefas.js';
+import { resolveProdutoId } from './arrecadacao-produtos.js';
 import {
   etapaByStatus,
   isPerdaStatus,
@@ -8,7 +9,7 @@ import {
   perdaStatuses,
   funilEscopoForTipo,
 } from './funil.js';
-const MOTIVOS_PERDA = new Set(['preco', 'desistiu', 'outro_evento', 'sem_retorno', 'perfil', 'outro']);
+const MOTIVOS_PERDA = new Set(['preco', 'desistiu', 'outro_evento', 'sem_retorno', 'perfil', 'duplicado', 'outro']);
 
 function parseStatus(value, fallback = 'neg') {
   const status = String(value || fallback).trim();
@@ -31,6 +32,9 @@ function rowToArrecadacao(row) {
     espacoNumero: row.espaco_numero != null ? Number(row.espaco_numero) : null,
     espacoGrupoSlug: row.espaco_grupo_slug || '',
     espacoTipo: row.espaco_tipo || '',
+    produtoId: row.produto_id != null ? Number(row.produto_id) : null,
+    produtoNome: row.produto_nome || '',
+    produtoValor: row.produto_valor != null ? Number(row.produto_valor) : null,
     descricao: row.descricao || '',
     valorTotal,
     valorPago,
@@ -394,12 +398,13 @@ function scopeTipoClause(scope) {
 }
 
 const ARRECADACAO_SELECT = `
-  SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
+  SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.produto_id, a.descricao,
          a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
          a.marketing_canal_id, a.marketing_campanha_id, a.marketing_criativo_id,
          a.created_at, a.updated_at, p.nome AS participante_nome,
          e.tipo AS espaco_tipo, e.numero AS espaco_numero,
          ge.slug AS espaco_grupo_slug,
+         ap.nome AS produto_nome, ap.valor AS produto_valor,
          mc.nome AS marketing_canal_nome,
          mcp.nome AS marketing_campanha_nome,
          mcr.nome AS marketing_criativo_nome
@@ -407,6 +412,7 @@ const ARRECADACAO_SELECT = `
   JOIN participantes p ON p.id = a.participante_id
   LEFT JOIN espacos e ON e.id = a.espaco_id
   LEFT JOIN grupos_espacos ge ON ge.id = e.grupo_id
+  LEFT JOIN arrecadacao_produtos ap ON ap.id = a.produto_id
   LEFT JOIN marketing_canais mc ON mc.id = a.marketing_canal_id
   LEFT JOIN marketing_campanhas mcp ON mcp.id = a.marketing_campanha_id
   LEFT JOIN marketing_criativos mcr ON mcr.id = a.marketing_criativo_id`;
@@ -470,12 +476,34 @@ export async function createPatrocinio(pool, eventoId, raw) {
     const descricao = String(raw.descricao || descricaoPadrao).trim() || descricaoPadrao;
     const obs = String(raw.obs || '').trim();
     const status = parseStatus(raw.status, 'neg');
+    let produtoId = null;
+    if (tipo === 'patrocinio') {
+      produtoId = (await resolveProdutoId(conn, eventoId, raw)) ?? null;
+    } else if (raw.produtoId !== undefined || raw.produto_id !== undefined) {
+      const resolved = await resolveProdutoId(conn, eventoId, raw);
+      if (resolved != null) {
+        throw Object.assign(
+          new Error('Plano de participação só se aplica a espaço ou patrocínio'),
+          { status: 400 },
+        );
+      }
+    }
 
     const [result] = await conn.query(
       `INSERT INTO arrecadacao
-         (evento_id, participante_id, tipo, status, espaco_id, descricao, valor_total, valor_pago, obs, updated_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
-      [eventoId, participanteId, tipo, status, descricao, valorTotal, valorPago, obs || null],
+         (evento_id, participante_id, tipo, status, espaco_id, produto_id, descricao, valor_total, valor_pago, obs, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+      [
+        eventoId,
+        participanteId,
+        tipo,
+        status,
+        produtoId ?? null,
+        descricao,
+        valorTotal,
+        valorPago,
+        obs || null,
+      ],
     );
 
     if (valorPago > 0) {
@@ -620,10 +648,24 @@ export async function updateArrecadacao(pool, id, raw) {
     marketingCriativoId = v != null && v !== '' ? Number(v) : null;
   }
 
+  let produtoId = existing.produtoId ?? null;
+  if (raw.produtoId !== undefined || raw.produto_id !== undefined) {
+    if (existing.tipo !== 'espaco' && existing.tipo !== 'patrocinio') {
+      throw Object.assign(
+        new Error('Plano de participação só se aplica a espaço ou patrocínio'),
+        { status: 400 },
+      );
+    }
+    const [eventoRows] = await pool.query('SELECT evento_id FROM arrecadacao WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    produtoId = await resolveProdutoId(pool, eventoRows[0]?.evento_id, raw);
+  }
+
   await pool.query(
     `UPDATE arrecadacao SET
        participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, status = ?,
-       marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?,
+       marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?, produto_id = ?,
        updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
     [
@@ -637,9 +679,28 @@ export async function updateArrecadacao(pool, id, raw) {
       marketingCanalId,
       marketingCampanhaId,
       marketingCriativoId,
+      produtoId,
       id,
     ],
   );
+
+  if (
+    (raw.produtoId !== undefined || raw.produto_id !== undefined) &&
+    participanteId &&
+    (tipo === 'espaco' || tipo === 'patrocinio')
+  ) {
+    const [eventoRows] = await pool.query('SELECT evento_id FROM arrecadacao WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    const eventoId = eventoRows[0]?.evento_id;
+    if (eventoId) {
+      await pool.query(
+        `UPDATE arrecadacao SET produto_id = ?, updated_at = CURRENT_TIMESTAMP(3)
+         WHERE evento_id = ? AND participante_id = ? AND tipo IN ('espaco', 'patrocinio') AND id != ?`,
+        [produtoId, eventoId, participanteId, id],
+      );
+    }
+  }
 
   if (raw.status !== undefined && status !== existing.status && participanteId) {
     const [eventoRows] = await pool.query('SELECT evento_id FROM arrecadacao WHERE id = ? LIMIT 1', [

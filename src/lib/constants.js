@@ -26,5 +26,6 @@ export const MOTIVOS_PERDA_LEAD = [
   { value: 'outro_evento', label: 'Escolheu outro evento' },
   { value: 'sem_retorno', label: 'Sem retorno / não respondeu' },
   { value: 'perfil', label: 'Fora do perfil' },
+  { value: 'duplicado', label: 'Duplicado' },
   { value: 'outro', label: 'Outro' },
 ];

@@ -48,6 +48,14 @@ import {
   findArrecadacaoByEspacoId,
 } from './arrecadacao.js';
 import {
+  migrateArrecadacaoProdutos,
+  listArrecadacaoProdutos,
+  createArrecadacaoProduto,
+  updateArrecadacaoProduto,
+  duplicateArrecadacaoProduto,
+  deleteArrecadacaoProduto,
+} from './arrecadacao-produtos.js';
+import {
   migrateEventos,
   listEventos,
   findEventoById,
@@ -80,6 +88,7 @@ import {
   deleteMarketingCampanha,
   deleteMarketingCriativo,
 } from './marketing.js';
+import { previewComunicacao, enviarComunicacaoItem, COMUNICACAO_TEMPLATE_VARS } from './marketing-comunicacao.js';
 import {
   migrateProducaoCronologia,
   listProducaoCronologia,
@@ -94,6 +103,11 @@ import {
   updateProducaoPremiacao,
   deleteProducaoPremiacao,
 } from './producao-premiacoes.js';
+import {
+  migrateProducaoEntregas,
+  listProducaoEntregas,
+  patchProducaoEntrega,
+} from './producao-entregas.js';
 import {
   migrateFinanceiroResultado,
   listFinanceiroResultado,
@@ -574,6 +588,7 @@ app.get('/api/arrecadacao', requireEvento, async (req, res) => {
       req.eventoId,
     );
     const funilEtapas = await listFunilEtapas(pool, req.eventoId, { escopo: scope });
+    const { produtos, beneficiosDef, beneficiosUniversais, espacosTipos } = await listArrecadacaoProdutos(pool, req.eventoId);
     res.json({
       items,
       espacosDisponiveis,
@@ -581,10 +596,85 @@ app.get('/api/arrecadacao', requireEvento, async (req, res) => {
       participantes,
       funilEtapas,
       funilEscopo: scope,
+      produtos,
+      beneficiosDef,
+      beneficiosUniversais,
+      espacosTipos,
     });
   } catch (err) {
     console.error('GET /api/arrecadacao', err);
     res.status(500).json({ error: 'Falha ao carregar arrecadação' });
+  }
+});
+
+app.get('/api/arrecadacao/produtos', requireEvento, async (req, res) => {
+  try {
+    const gestao = req.query.gestao === '1' || req.query.gestao === 'true';
+    const data = await listArrecadacaoProdutos(pool, req.eventoId, { gestao });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('GET /api/arrecadacao/produtos', err);
+    res.status(500).json({ error: 'Falha ao carregar planos de patrocínio' });
+  }
+});
+
+app.post('/api/arrecadacao/produtos', requireEvento, async (req, res) => {
+  try {
+    const produto = await createArrecadacaoProduto(pool, req.eventoId, req.body);
+    res.status(201).json({ produto });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/produtos', err);
+    res.status(500).json({ error: 'Falha ao cadastrar plano' });
+  }
+});
+
+app.put('/api/arrecadacao/produtos/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const produto = await updateArrecadacaoProduto(pool, id, req.eventoId, req.body);
+    if (!produto) return res.status(404).json({ error: 'Plano não encontrado' });
+    res.json({ produto });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/arrecadacao/produtos/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar plano' });
+  }
+});
+
+app.post('/api/arrecadacao/produtos/:id/duplicar', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const produto = await duplicateArrecadacaoProduto(pool, id, req.eventoId);
+    if (!produto) return res.status(404).json({ error: 'Plano não encontrado' });
+    res.status(201).json({ produto });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/arrecadacao/produtos/:id/duplicar', err);
+    res.status(500).json({ error: 'Falha ao duplicar plano' });
+  }
+});
+
+app.delete('/api/arrecadacao/produtos/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+    const ok = await deleteArrecadacaoProduto(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Plano não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/arrecadacao/produtos/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir plano' });
   }
 });
 
@@ -1303,6 +1393,32 @@ app.delete('/api/marketing/criativos/:id', requireEvento, async (req, res) => {
   }
 });
 
+app.get('/api/marketing/comunicacao/variaveis', requireEvento, (_req, res) => {
+  res.json({ variaveis: COMUNICACAO_TEMPLATE_VARS });
+});
+
+app.post('/api/marketing/comunicacao/preview', requireEvento, async (req, res) => {
+  try {
+    const data = await previewComunicacao(pool, req.eventoId, req.body);
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacao/preview', err);
+    res.status(500).json({ error: 'Falha ao gerar preview' });
+  }
+});
+
+app.post('/api/marketing/comunicacao/enviar', requireEvento, async (req, res) => {
+  try {
+    const data = await enviarComunicacaoItem(pool, req.eventoId, req.body);
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacao/enviar', err);
+    res.status(500).json({ error: 'Falha ao enviar mensagem' });
+  }
+});
+
 app.get('/api/producao/cronologia', requireEvento, async (req, res) => {
   try {
     const data = await listProducaoCronologia(pool, req.eventoId);
@@ -1392,6 +1508,31 @@ app.delete('/api/producao/premiacoes/:id', requireEvento, async (req, res) => {
   } catch (err) {
     console.error('DELETE /api/producao/premiacoes/:id', err);
     res.status(500).json({ error: 'Falha ao excluir prêmio' });
+  }
+});
+
+app.get('/api/producao/entregas', requireEvento, async (req, res) => {
+  try {
+    const data = await listProducaoEntregas(pool, req.eventoId, {
+      produtoId: req.query.produtoId,
+    });
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/producao/entregas', err);
+    res.status(500).json({ error: 'Falha ao carregar entregas' });
+  }
+});
+
+app.patch('/api/producao/entregas/:arrecadacaoId', requireEvento, async (req, res) => {
+  try {
+    const arrecadacaoId = Number(req.params.arrecadacaoId);
+    const item = await patchProducaoEntrega(pool, arrecadacaoId, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Lead não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PATCH /api/producao/entregas/:arrecadacaoId', err);
+    res.status(500).json({ error: 'Falha ao salvar checklist' });
   }
 });
 
@@ -1989,12 +2130,14 @@ async function start() {
   await migrateEventos(pool);
   await migrateEspacos(pool);
   await migrateArrecadacao(pool);
+  await migrateArrecadacaoProdutos(pool);
   await migrateTarefas(pool);
   await migrateFunil(pool);
   await migrateInteracoes(pool);
   await migrateMarketing(pool);
   await migrateProducaoCronologia(pool);
   await migrateProducaoPremiacoes(pool);
+  await migrateProducaoEntregas(pool);
   await migrateFinanceiroResultado(pool);
   await migrateFinanceiroContasPagar(pool);
   await migrateWhatsapp(pool);

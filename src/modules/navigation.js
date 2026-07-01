@@ -3,12 +3,18 @@ import { canAccessView, getDefaultView, applyNavPermissions } from '../lib/permi
 const VIEWS = {
   eventos: { viewId: 'view-eventos', navId: 'nav-eventos' },
   espacos: { viewId: 'view-espacos', navId: 'nav-espacos' },
-  arrecadacao: { viewId: 'view-arrecadacao', navId: 'nav-arrecadacao' },
+  arrecadacao: { viewId: 'view-arrecadacao', navId: 'nav-arrecadacao-lista', parentId: 'nav-arrecadacao' },
+  'arrecadacao-planos': {
+    viewId: 'view-arrecadacao-planos',
+    navId: 'nav-arrecadacao-planos',
+    parentId: 'nav-arrecadacao',
+  },
   artistico: { viewId: 'view-artistico', navId: 'nav-artistico' },
   tarefas: { viewId: 'view-tarefas', navId: 'nav-tarefas' },
   marketing: { viewId: 'view-marketing', navId: 'nav-marketing' },
   cronologia: { viewId: 'view-cronologia', navId: 'nav-cronologia', parentId: 'nav-producao' },
   premiacoes: { viewId: 'view-premiacoes', navId: 'nav-premiacoes', parentId: 'nav-producao' },
+  entregas: { viewId: 'view-entregas', navId: 'nav-entregas', parentId: 'nav-producao' },
   'financeiro-gestao': {
     viewId: 'view-financeiro-gestao',
     navId: 'nav-financeiro-gestao',

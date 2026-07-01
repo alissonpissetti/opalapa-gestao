@@ -231,6 +231,33 @@ export function deleteArrecadacao(id) {
   return apiRequest(`/api/arrecadacao/${id}`, { method: 'DELETE' });
 }
 
+export function fetchArrecadacaoProdutos({ gestao = true } = {}) {
+  const q = gestao ? '?gestao=1' : '';
+  return apiRequest(`/api/arrecadacao/produtos${q}`);
+}
+
+export function createArrecadacaoProduto(data) {
+  return apiRequest('/api/arrecadacao/produtos', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateArrecadacaoProduto(id, data) {
+  return apiRequest(`/api/arrecadacao/produtos/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteArrecadacaoProduto(id) {
+  return apiRequest(`/api/arrecadacao/produtos/${id}`, { method: 'DELETE' });
+}
+
+export function duplicateArrecadacaoProduto(id) {
+  return apiRequest(`/api/arrecadacao/produtos/${id}/duplicar`, { method: 'POST' });
+}
+
 export function registerPerdaLead(id, data) {
   return apiRequest(`/api/arrecadacao/${id}/perda-lead`, {
     method: 'POST',
@@ -349,6 +376,24 @@ export function deleteMarketingCriativo(id) {
   return apiRequest(`/api/marketing/criativos/${id}`, { method: 'DELETE' });
 }
 
+export function fetchMarketingComunicacaoVariaveis() {
+  return apiRequest('/api/marketing/comunicacao/variaveis');
+}
+
+export function previewMarketingComunicacao(data) {
+  return apiRequest('/api/marketing/comunicacao/preview', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function enviarMarketingComunicacaoItem(data) {
+  return apiRequest('/api/marketing/comunicacao/enviar', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export function fetchProducaoCronologia() {
   return apiRequest('/api/producao/cronologia');
 }
@@ -385,6 +430,21 @@ export function updateProducaoPremiacao(id, data) {
 
 export function deleteProducaoPremiacao(id) {
   return apiRequest(`/api/producao/premiacoes/${id}`, { method: 'DELETE' });
+}
+
+export function fetchProducaoEntregas({ produtoId } = {}) {
+  const qs =
+    produtoId != null && produtoId !== ''
+      ? `?produtoId=${encodeURIComponent(produtoId)}`
+      : '';
+  return apiRequest(`/api/producao/entregas${qs}`);
+}
+
+export function patchProducaoEntrega(arrecadacaoId, data) {
+  return apiRequest(`/api/producao/entregas/${arrecadacaoId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
 }
 
 export function clearFinanceiroResultado() {
