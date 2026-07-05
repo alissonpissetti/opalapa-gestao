@@ -17,6 +17,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build da imagem
         uses: docker/build-push-action@v6
         with:
@@ -31,6 +34,7 @@ jobs:
 
   deploy:
     name: Disparar deploy no Coolify
+    needs: docker-build
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via webhook
@@ -38,17 +42,46 @@ jobs:
           COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
-          if [ -z "$COOLIFY_WEBHOOK" ]; then
-            echo "::warning::COOLIFY_WEBHOOK não configurado."
-            echo "O deploy depende do Auto Deploy do Coolify (GitHub App) ou do secret COOLIFY_WEBHOOK."
-            echo "Coolify → Application → General → Auto Deploy (ON) e Build Pack = Dockerfile."
-            exit 0
+          set -euo pipefail
+
+          if [ -z "${COOLIFY_WEBHOOK:-}" ]; then
+            echo "::error::Secret COOLIFY_WEBHOOK não configurado no GitHub."
+            echo "Coolify → Application → Webhooks → copie a Deploy Webhook URL"
+            echo "GitHub → Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
           fi
 
-          args=(-fsS --request GET "$COOLIFY_WEBHOOK")
-          if [ -n "$COOLIFY_TOKEN" ]; then
-            args+=(--header "Authorization: Bearer $COOLIFY_TOKEN")
+          echo "Disparando deploy no Coolify..."
+          curl_args=(
+            -sS
+            -o /tmp/coolify-deploy-response.txt
+            -w "%{http_code}"
+            --request GET
+            "$COOLIFY_WEBHOOK"
+          )
+
+          if [ -n "${COOLIFY_TOKEN:-}" ]; then
+            curl_args+=(--header "Authorization: Bearer $COOLIFY_TOKEN")
+          else
+            echo "::warning::COOLIFY_TOKEN não configurado. Se o Coolify exigir Bearer token, o deploy falhará."
+            echo "Coolify → Keys & Tokens → crie um API token com permissão Deploy"
           fi
 
-          curl "${args[@]}"
-          echo "Deploy disparado no Coolify."
+          http_code="$(curl "${curl_args[@]}")"
+          echo "Resposta do Coolify (HTTP ${http_code}):"
+          cat /tmp/coolify-deploy-response.txt || true
+          echo ""
+
+          case "$http_code" in
+            200|201|202|204)
+              echo "Deploy disparado com sucesso."
+              ;;
+            401|403)
+              echo "::error::Coolify recusou autenticação (HTTP ${http_code}). Configure COOLIFY_TOKEN."
+              exit 1
+              ;;
+            *)
+              echo "::error::Coolify retornou HTTP ${http_code}. Verifique a URL do webhook e o token."
+              exit 1
+              ;;
+          esac

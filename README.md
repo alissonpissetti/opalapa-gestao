@@ -119,7 +119,16 @@ Em [Settings → Secrets and variables → Actions](https://github.com/alissonpi
 | `COOLIFY_WEBHOOK`  | Coolify → Application → Webhooks → Deploy Webhook URL                      |
 | `COOLIFY_TOKEN`    | Coolify → Keys & Tokens → API token com permissão **deploy** (recomendado) |
 
-Sem o `COOLIFY_WEBHOOK`, o workflow falha e o deploy não é disparado.
+Sem o `COOLIFY_WEBHOOK`, o workflow **falha** e o deploy não é disparado. O `COOLIFY_TOKEN` é obrigatório se o Coolify usar o endpoint `/api/v1/deploy` (recomendado).
+
+**Configuração rápida:**
+
+1. Coolify → sua aplicação → **Webhooks** → copie a URL (formato `https://.../api/v1/deploy?uuid=...`)
+2. Coolify → **Keys & Tokens** → crie API token com permissão **Deploy**
+3. GitHub → [Secrets do repositório](https://github.com/alissonpissetti/opalapa-gestao/settings/secrets/actions) → crie `COOLIFY_WEBHOOK` e `COOLIFY_TOKEN`
+4. Faça um push em `main` ou rode o workflow manualmente em **Actions → Deploy → Run workflow**
+
+Alternativa: no Coolify, ative **Auto Deploy** com a integração GitHub (GitHub App) — aí cada push dispara o build direto no Coolify, sem depender do webhook do Actions.
 
 ### 3. Variáveis de ambiente no Coolify (obrigatórias)
 
