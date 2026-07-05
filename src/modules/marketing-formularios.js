@@ -7,6 +7,7 @@ import {
   updateFormularioResposta,
   fetchMarketingFormularioLogoBlob,
   generateMarketingFormularioIntro,
+  generateMarketingFormularioSecao,
 } from '../lib/api.js';
 import { escapeHtml, fmtMoney } from '../lib/format.js';
 import { getActiveEvento } from '../lib/evento.js';
@@ -47,6 +48,31 @@ function defaultCampo(index = 0) {
   };
 }
 
+function defaultSecao(index = 0) {
+  return {
+    id: `secao_${index + 1}`,
+    titulo: '',
+    texto: '',
+  };
+}
+
+function moveListItem(list, index, delta) {
+  const next = index + delta;
+  if (next < 0 || next >= list.length) return;
+  const [item] = list.splice(index, 1);
+  list.splice(next, 0, item);
+}
+
+function orderButtonsHtml(index, total, prefix) {
+  const upDisabled = index === 0 ? ' disabled' : '';
+  const downDisabled = index >= total - 1 ? ' disabled' : '';
+  return `
+    <div class="marketing-form-order-btns" aria-label="Ordenar">
+      <button class="tbtn marketing-form-order-btn" type="button" data-action="move-${prefix}-up" data-index="${index}" title="Mover para cima"${upDisabled}>↑</button>
+      <button class="tbtn marketing-form-order-btn" type="button" data-action="move-${prefix}-down" data-index="${index}" title="Mover para baixo"${downDisabled}>↓</button>
+    </div>`;
+}
+
 export function initMarketingFormularios({ getMarketingData, onSummaryChange }) {
   const els = {
     panel: document.getElementById('marketing-panel-formularios'),
@@ -79,6 +105,9 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     logoPickHint: document.getElementById('marketing-form-logo-pick-hint'),
     camposList: document.getElementById('marketing-form-campos'),
     btnAddCampo: document.getElementById('marketing-form-add-campo'),
+    secoesList: document.getElementById('marketing-form-secoes'),
+    btnAddSecao: document.getElementById('marketing-form-add-secao'),
+    btnAddSecaoAi: document.getElementById('marketing-form-add-secao-ai'),
     btnCancel: document.getElementById('marketing-form-cancel'),
     btnSave: document.getElementById('marketing-form-save'),
     btnDelete: document.getElementById('marketing-form-delete'),
@@ -99,6 +128,7 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
   let formularios = [];
   let editId = null;
   let campos = [];
+  let secoes = [];
   let respostasCtx = { formulario: null, respostas: [] };
   let respostaEditId = null;
   let pendingLogoDataUrl = null;
@@ -355,6 +385,82 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     }
   }
 
+  function setSecaoAiStatus(index, message = '', type = '') {
+    const el = els.secoesList?.querySelector(`[data-secao-ai-status="${index}"]`);
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('hidden', !message);
+    el.classList.toggle('is-error', type === 'error');
+    el.classList.toggle('is-loading', type === 'loading');
+  }
+
+  function setSecoesAiBusy(busy, activeIndex = -1) {
+    els.secoesList?.querySelectorAll('[data-action="generate-secao-ai"]').forEach((btn) => {
+      btn.disabled = busy;
+      btn.classList.toggle('is-loading', busy && Number(btn.dataset.index) === activeIndex);
+    });
+  }
+
+  async function generateSecaoWithAi(index) {
+    const nome = els.fieldNome?.value.trim() || '';
+    if (!nome) {
+      alert('Informe o nome do formulário antes de gerar o texto.');
+      els.fieldNome?.focus();
+      return;
+    }
+
+    syncSecoesFromDom();
+    syncCampoFromDom();
+    const secao = secoes[index];
+    if (!secao) return;
+
+    const evento = getActiveEvento();
+    setSecoesAiBusy(true, index);
+    setSecaoAiStatus(index, 'Gerando texto com IA…', 'loading');
+
+    try {
+      const res = await generateMarketingFormularioSecao({
+        nome,
+        descricaoLead: els.fieldDescricaoLead?.value.trim() || nome,
+        tipoLead: els.fieldTipoLead?.value || 'patrocinio',
+        brief: secao.brief || '',
+        tituloAtual: secao.titulo || '',
+        textoAtual: secao.texto || '',
+        introducao: els.fieldIntro?.value.trim() || '',
+        campos: readCamposFromDom().filter((c) => c.label),
+        secoes: secoes.map((s) => ({
+          titulo: String(s.titulo || '').trim(),
+          texto: String(s.texto || '').trim(),
+        })),
+        secaoIndex: index,
+        eventoNome: evento?.nome || '',
+      });
+
+      secao.titulo = res.titulo || '';
+      secao.texto = res.texto || '';
+
+      const block = els.secoesList?.querySelector(`.marketing-form-secao[data-index="${index}"]`);
+      const tituloEl = block?.querySelector('[data-secao="titulo"]');
+      const textoEl = block?.querySelector('[data-secao="texto"]');
+      if (tituloEl) tituloEl.value = secao.titulo;
+      if (textoEl) textoEl.value = secao.texto;
+
+      setSecaoAiStatus(index, 'Texto gerado. Revise antes de salvar.');
+    } catch (err) {
+      setSecaoAiStatus(index, err.message || 'Não foi possível gerar o texto.', 'error');
+    } finally {
+      setSecoesAiBusy(false);
+    }
+  }
+
+  function bindSecoesAi() {
+    els.secoesList?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action="generate-secao-ai"]');
+      if (!btn || btn.disabled) return;
+      void generateSecaoWithAi(Number(btn.dataset.index));
+    });
+  }
+
   function bindIntroAi() {
     els.btnIntroAi?.addEventListener('click', () => void generateIntroWithAi());
   }
@@ -397,6 +503,106 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     }
   }
 
+  function renderSecoesBuilder() {
+    if (!els.secoesList) return;
+    if (!secoes.length) {
+      els.secoesList.innerHTML =
+        '<p class="field-hint">Nenhum bloco adicional. O texto de introdução acima continua sendo exibido no topo.</p>';
+      return;
+    }
+
+    els.secoesList.innerHTML = secoes
+      .map((secao, index) => {
+        return `
+        <div class="marketing-form-secao" data-index="${index}">
+          <div class="marketing-form-campo-head">
+            <div class="marketing-form-campo-head-left">
+              ${orderButtonsHtml(index, secoes.length, 'secao')}
+              <strong>Texto ${index + 1}</strong>
+            </div>
+            <button class="tbtn danger-text" type="button" data-action="remove-secao" data-index="${index}">Remover</button>
+          </div>
+          <div class="marketing-form-secao-ai">
+            <input
+              type="text"
+              data-secao="brief"
+              data-index="${index}"
+              value="${escapeHtml(secao.brief || '')}"
+              placeholder="Opcional: o que este bloco deve explicar (ex.: critérios de seleção)"
+            />
+            <button class="tbtn marketing-form-intro-ai-btn" type="button" data-action="generate-secao-ai" data-index="${index}">
+              Gerar com IA
+            </button>
+          </div>
+          <p class="field-hint marketing-form-intro-ai-status hidden" data-secao-ai-status="${index}"></p>
+          <div class="field">
+            <label>Título</label>
+            <input type="text" data-secao="titulo" data-index="${index}" value="${escapeHtml(secao.titulo)}" placeholder="Ex.: Como funciona a seleção" />
+          </div>
+          <div class="field">
+            <label>Texto</label>
+            <textarea data-secao="texto" data-index="${index}" rows="4" placeholder="Conteúdo exibido ao candidato">${escapeHtml(secao.texto)}</textarea>
+          </div>
+        </div>`;
+      })
+      .join('');
+
+    bindSecoesBuilderEvents();
+  }
+
+  function bindSecoesBuilderEvents() {
+    if (!els.secoesList) return;
+
+    els.secoesList.querySelectorAll('[data-action="remove-secao"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        syncSecoesFromDom();
+        secoes.splice(Number(btn.dataset.index), 1);
+        renderSecoesBuilder();
+      });
+    });
+
+    els.secoesList.querySelectorAll('[data-action^="move-secao-"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        syncSecoesFromDom();
+        const index = Number(btn.dataset.index);
+        moveListItem(secoes, index, btn.dataset.action.endsWith('-up') ? -1 : 1);
+        renderSecoesBuilder();
+      });
+    });
+
+    els.secoesList.querySelectorAll('[data-secao]').forEach((el) => {
+      el.addEventListener('input', () => syncSecoesFromDom());
+      el.addEventListener('change', () => syncSecoesFromDom());
+    });
+  }
+
+  function syncSecoesFromDom() {
+    if (!els.secoesList) return;
+    els.secoesList.querySelectorAll('.marketing-form-secao').forEach((block) => {
+      const index = Number(block.dataset.index);
+      const secao = secoes[index];
+      if (!secao) return;
+      const titulo = block.querySelector('[data-secao="titulo"]');
+      const texto = block.querySelector('[data-secao="texto"]');
+      const brief = block.querySelector('[data-secao="brief"]');
+      if (titulo) secao.titulo = titulo.value;
+      if (texto) secao.texto = texto.value;
+      if (brief) secao.brief = brief.value;
+    });
+  }
+
+  function readSecoesFromDom() {
+    syncSecoesFromDom();
+    return secoes
+      .map((secao, index) => ({
+        ...secao,
+        id: secao.id || `secao_${index + 1}`,
+        titulo: String(secao.titulo || '').trim(),
+        texto: String(secao.texto || '').trim(),
+      }))
+      .filter((s) => s.titulo || s.texto);
+  }
+
   function renderCamposBuilder() {
     if (!els.camposList) return;
     if (!campos.length) {
@@ -415,7 +621,10 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
         return `
         <div class="marketing-form-campo" data-index="${index}">
           <div class="marketing-form-campo-head">
-            <strong>Pergunta ${index + 1}</strong>
+            <div class="marketing-form-campo-head-left">
+              ${orderButtonsHtml(index, campos.length, 'campo')}
+              <strong>Pergunta ${index + 1}</strong>
+            </div>
             <button class="tbtn danger-text" type="button" data-action="remove-campo" data-index="${index}">Remover</button>
           </div>
           <div class="field">
@@ -447,7 +656,17 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
 
     els.camposList.querySelectorAll('[data-action="remove-campo"]').forEach((btn) => {
       btn.addEventListener('click', () => {
+        syncCampoFromDom();
         campos.splice(Number(btn.dataset.index), 1);
+        renderCamposBuilder();
+      });
+    });
+
+    els.camposList.querySelectorAll('[data-action^="move-campo-"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        syncCampoFromDom();
+        const index = Number(btn.dataset.index);
+        moveListItem(campos, index, btn.dataset.action.endsWith('-up') ? -1 : 1);
         renderCamposBuilder();
       });
     });
@@ -503,6 +722,7 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
   function openFormModal(item = null) {
     editId = item?.id ?? null;
     campos = item?.campos?.length ? item.campos.map((c) => ({ ...c })) : [defaultCampo()];
+    secoes = item?.secoes?.length ? item.secoes.map((s) => ({ ...s })) : [];
 
     if (els.modalTitle) {
       els.modalTitle.textContent = editId ? 'Editar formulário' : 'Novo formulário';
@@ -519,6 +739,7 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     setCorFundoFields(item?.corFundo || DEFAULT_FORM_BG);
 
     renderMarketingSelects(item || {});
+    renderSecoesBuilder();
     renderCamposBuilder();
     resetLogoField(item);
 
@@ -542,6 +763,7 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     els.modalBg?.classList.remove('open');
     editId = null;
     campos = [];
+    secoes = [];
     setIntroAiStatus();
     revokeLogoPreviewUrl();
     resetLogoField();
@@ -572,6 +794,7 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
       nome,
       slug: els.fieldSlug?.value.trim() || undefined,
       introducao: els.fieldIntro?.value.trim() || '',
+      secoes: readSecoesFromDom(),
       descricaoLead: els.fieldDescricaoLead?.value.trim() || nome,
       tipoLead: els.fieldTipoLead?.value || 'patrocinio',
       statusInicial: els.fieldStatusInicial?.value || 'lead',
@@ -794,9 +1017,28 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
   bindLogoInput();
   bindCorFundoInputs();
   bindIntroAi();
+  bindSecoesAi();
   els.btnAddCampo?.addEventListener('click', () => {
+    syncCampoFromDom();
     campos.push(defaultCampo(campos.length));
     renderCamposBuilder();
+  });
+  els.btnAddSecao?.addEventListener('click', () => {
+    syncSecoesFromDom();
+    secoes.push(defaultSecao(secoes.length));
+    renderSecoesBuilder();
+  });
+  els.btnAddSecaoAi?.addEventListener('click', () => {
+    const nome = els.fieldNome?.value.trim() || '';
+    if (!nome) {
+      alert('Informe o nome do formulário antes de gerar o texto.');
+      els.fieldNome?.focus();
+      return;
+    }
+    syncSecoesFromDom();
+    secoes.push(defaultSecao(secoes.length));
+    renderSecoesBuilder();
+    void generateSecaoWithAi(secoes.length - 1);
   });
   els.btnCancel?.addEventListener('click', closeFormModal);
   els.btnSave?.addEventListener('click', () => void saveFormModal());

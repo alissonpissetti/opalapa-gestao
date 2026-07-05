@@ -106,12 +106,7 @@ export async function generateFormularioIntroText({
   const userBrief = String(brief || '').trim();
   const currentIntro = String(introducaoAtual || '').trim();
   const evento = String(eventoNome || 'Opalapa').trim();
-  const leadTipo =
-    tipoLead === 'artistico'
-      ? 'artístico'
-      : tipoLead === 'alimentacao'
-        ? 'alimentação'
-        : 'comercial / patrocínio';
+  const leadTipo = leadTipoLabel(tipoLead);
   const leadDesc = String(descricaoLead || formName).trim();
 
   const systemPrompt = `Você escreve textos de introdução para formulários públicos de candidatura do evento Opalapa.
@@ -144,4 +139,122 @@ Regras:
     ],
     { temperature: 0.65, maxTokens: 700 },
   );
+}
+
+function leadTipoLabel(tipoLead) {
+  if (tipoLead === 'artistico') return 'artístico';
+  if (tipoLead === 'alimentacao') return 'alimentação';
+  return 'comercial / patrocínio';
+}
+
+function formatSecoesResumo(secoes, ignoreIndex = -1) {
+  if (!Array.isArray(secoes) || !secoes.length) return 'Nenhum outro bloco informativo cadastrado.';
+  const lines = secoes
+    .map((secao, index) => {
+      if (index === ignoreIndex) return null;
+      const titulo = String(secao.titulo || '').trim();
+      const texto = String(secao.texto || '').trim();
+      if (!titulo && !texto) return null;
+      const preview = texto ? `${texto.slice(0, 140)}${texto.length > 140 ? '…' : ''}` : '';
+      return `- ${titulo || `Bloco ${index + 1}`}${preview ? `: ${preview}` : ''}`;
+    })
+    .filter(Boolean);
+  return lines.length ? lines.join('\n') : 'Nenhum outro bloco informativo cadastrado.';
+}
+
+function parseSecaoAiResponse(raw) {
+  const text = String(raw || '').trim();
+  if (!text) {
+    throw Object.assign(new Error('A IA não retornou texto'), { status: 502 });
+  }
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const titulo = String(parsed.titulo || parsed.title || '').trim();
+      const corpo = String(parsed.texto || parsed.text || parsed.conteudo || '').trim();
+      if (titulo || corpo) return { titulo, texto: corpo };
+    } catch {
+      /* fallback abaixo */
+    }
+  }
+
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length >= 2) {
+    return { titulo: lines[0].replace(/^#+\s*/, ''), texto: lines.slice(1).join('\n\n') };
+  }
+
+  return { titulo: '', texto: text };
+}
+
+export async function generateFormularioSecaoText({
+  eventoNome,
+  nome,
+  descricaoLead,
+  tipoLead,
+  brief,
+  tituloAtual,
+  textoAtual,
+  campos,
+  secoes,
+  secaoIndex,
+  introducao,
+}) {
+  const formName = String(nome || '').trim();
+  if (!formName) {
+    throw Object.assign(new Error('Informe o nome do formulário antes de gerar o texto'), { status: 400 });
+  }
+
+  const userBrief = String(brief || '').trim();
+  const titulo = String(tituloAtual || '').trim();
+  const corpo = String(textoAtual || '').trim();
+  const evento = String(eventoNome || 'Opalapa').trim();
+  const leadTipo = leadTipoLabel(tipoLead);
+  const leadDesc = String(descricaoLead || formName).trim();
+  const index = Number(secaoIndex) || 0;
+  const intro = String(introducao || '').trim();
+
+  const systemPrompt = `Você escreve blocos informativos para formulários públicos de candidatura do evento Opalapa.
+Cada bloco tem um título curto e um texto explicativo exibido antes das perguntas.
+Regras:
+- Escreva em português do Brasil, tom acolhedor e profissional.
+- O título deve ter no máximo 80 caracteres, sem markdown.
+- O texto deve ter 1 a 3 parágrafos curtos, prontos para publicar.
+- Não invente prazos, valores, benefícios ou regras que não foram informados.
+- Não repita conteúdo já presente na introdução ou em outros blocos.
+- Não use markdown, bullets, emojis nem formatação especial no texto.
+- Responda APENAS com JSON válido no formato: {"titulo":"...","texto":"..."}`;
+
+  const userPrompt = [
+    `Evento: ${evento}`,
+    `Formulário: ${formName}`,
+    `Tipo de lead: ${leadTipo}`,
+    `Descrição interna do lead: ${leadDesc}`,
+    `Posição do bloco: ${index + 1}`,
+    '',
+    intro ? `Introdução já publicada no topo:\n${intro}` : '',
+    '',
+    'Outros blocos informativos já cadastrados:',
+    formatSecoesResumo(secoes, index),
+    '',
+    'Perguntas do formulário:',
+    formatCamposResumo(campos),
+    userBrief ? `\nO que este bloco deve explicar: ${userBrief}` : '',
+    titulo || corpo
+      ? `\nConteúdo atual deste bloco (pode melhorar ou reescrever):\nTítulo: ${titulo || '(vazio)'}\nTexto: ${corpo || '(vazio)'}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const raw = await deepseekChat(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    { temperature: 0.68, maxTokens: 750 },
+  );
+
+  return parseSecaoAiResponse(raw);
 }

@@ -421,6 +421,14 @@ export function generateMarketingFormularioIntro(data) {
   });
 }
 
+export function generateMarketingFormularioSecao(data) {
+  return apiRequest('/api/marketing/formularios/gerar-intro', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, modo: 'secao' }),
+    timeoutMs: Number(import.meta.env.VITE_DEEPSEEK_CLIENT_TIMEOUT_MS) || 70000,
+  });
+}
+
 export function fetchFormularioRespostas(id) {
   return apiRequest(`/api/marketing/formularios/${id}/respostas`);
 }

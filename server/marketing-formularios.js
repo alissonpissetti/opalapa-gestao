@@ -86,6 +86,7 @@ function rowToFormulario(row) {
     slug: row.slug,
     ativo: Boolean(row.ativo),
     introducao: row.introducao || '',
+    secoes: parseJson(row.secoes, []),
     tipoLead: row.tipo_lead || 'patrocinio',
     descricaoLead: row.descricao_lead || '',
     statusInicial: row.status_inicial || 'lead',
@@ -278,6 +279,20 @@ function normalizeCampo(raw, index) {
   };
 }
 
+function normalizeSecao(raw, index) {
+  const id = String(raw?.id || `secao_${index + 1}`).trim() || `secao_${index + 1}`;
+  return {
+    id,
+    titulo: String(raw?.titulo || '').trim(),
+    texto: String(raw?.texto || '').trim(),
+  };
+}
+
+function normalizeSecoes(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((secao, index) => normalizeSecao(secao, index)).filter((s) => s.titulo || s.texto);
+}
+
 function normalizeCampos(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.map((campo, index) => normalizeCampo(campo, index));
@@ -426,6 +441,9 @@ export async function migrateMarketingFormularios(pool) {
   if (!colSet.has('cor_fundo')) {
     await pool.query('ALTER TABLE marketing_formularios ADD COLUMN cor_fundo VARCHAR(16) NULL AFTER logo_path');
   }
+  if (!colSet.has('secoes')) {
+    await pool.query('ALTER TABLE marketing_formularios ADD COLUMN secoes JSON NULL AFTER introducao');
+  }
 }
 
 function normalizeCorFundo(raw) {
@@ -478,6 +496,7 @@ export async function createMarketingFormulario(pool, eventoId, raw) {
   }
 
   const campos = normalizeCampos(raw.campos);
+  const secoes = normalizeSecoes(raw.secoes);
   const slug = await ensureUniqueSlug(pool, eventoId, raw.slug || nome);
   const tipoLead = normalizeTipoLead(raw.tipoLead);
 
@@ -485,15 +504,16 @@ export async function createMarketingFormulario(pool, eventoId, raw) {
 
   const [result] = await pool.query(
     `INSERT INTO marketing_formularios
-       (evento_id, nome, slug, ativo, introducao, tipo_lead, descricao_lead, status_inicial,
+       (evento_id, nome, slug, ativo, introducao, secoes, tipo_lead, descricao_lead, status_inicial,
         marketing_canal_id, marketing_campanha_id, marketing_criativo_id, campos, cor_fundo, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [
       eventoId,
       nome,
       slug,
       raw.ativo === false ? 0 : 1,
       String(raw.introducao || '').trim() || null,
+      JSON.stringify(secoes),
       tipoLead,
       String(raw.descricaoLead || raw.descricao_lead || nome).trim() || nome,
       String(raw.statusInicial || raw.status_inicial || 'lead').trim() || 'lead',
@@ -520,6 +540,7 @@ export async function updateMarketingFormulario(pool, id, eventoId, raw) {
   }
 
   const campos = raw.campos !== undefined ? normalizeCampos(raw.campos) : existing.campos;
+  const secoes = raw.secoes !== undefined ? normalizeSecoes(raw.secoes) : existing.secoes;
   const slug =
     raw.slug !== undefined || raw.nome !== undefined
       ? await ensureUniqueSlug(pool, eventoId, raw.slug || nome, id)
@@ -534,7 +555,7 @@ export async function updateMarketingFormulario(pool, id, eventoId, raw) {
 
   await pool.query(
     `UPDATE marketing_formularios SET
-       nome = ?, slug = ?, ativo = ?, introducao = ?, tipo_lead = ?, descricao_lead = ?,
+       nome = ?, slug = ?, ativo = ?, introducao = ?, secoes = ?, tipo_lead = ?, descricao_lead = ?,
        status_inicial = ?, marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?,
        campos = ?, cor_fundo = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ? AND evento_id = ?`,
@@ -543,6 +564,7 @@ export async function updateMarketingFormulario(pool, id, eventoId, raw) {
       slug,
       raw.ativo === undefined ? (existing.ativo ? 1 : 0) : raw.ativo ? 1 : 0,
       raw.introducao !== undefined ? String(raw.introducao).trim() || null : existing.introducao || null,
+      JSON.stringify(secoes),
       tipoLead,
       raw.descricaoLead !== undefined
         ? String(raw.descricaoLead).trim() || nome
@@ -688,6 +710,7 @@ export async function getPublicFormulario(pool, slug) {
     slug: form.slug,
     nome: form.nome,
     introducao: form.introducao,
+    secoes: form.secoes,
     campos: form.campos,
     eventoNome: evento?.nome || '',
     logoUrl: form.hasLogo ? `/api/public/formularios/${encodeURIComponent(form.slug)}/logo` : null,

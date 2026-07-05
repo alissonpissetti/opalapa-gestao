@@ -5371,6 +5371,72 @@ tbody tr:hover {
   border-top: 1px solid var(--content-border, #e2e8f0);
 }
 
+.marketing-form-secoes-wrap {
+  margin: 1rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--content-border, #e2e8f0);
+}
+
+.marketing-form-secoes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.marketing-form-secoes-head .tbtn {
+  flex-shrink: 0;
+}
+
+.marketing-form-secao-ai {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.65rem;
+}
+
+.marketing-form-secao-ai input[type='text'] {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.marketing-form-secao {
+  padding: 0.85rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--content-border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--content-surface-muted, #f8fafc);
+}
+
+.marketing-form-campo-head-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.marketing-form-order-btns {
+  display: inline-flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.marketing-form-order-btn {
+  min-width: 2rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.marketing-form-order-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .marketing-form-campos-head {
   display: flex;
   align-items: center;

@@ -101,7 +101,7 @@ import {
   submitPublicFormulario,
   readMarketingFormularioLogo,
 } from './marketing-formularios.js';
-import { generateFormularioIntroText } from './deepseek.js';
+import { generateFormularioIntroText, generateFormularioSecaoText } from './deepseek.js';
 import {
   migrateProducaoCronologia,
   listProducaoCronologia,
@@ -1432,8 +1432,25 @@ app.post('/api/marketing/comunicacao/enviar', requireEvento, async (req, res) =>
   }
 });
 
-app.post('/api/marketing/formularios/gerar-intro', requireEvento, async (req, res) => {
+async function handleGerarFormularioTextoIa(req, res, modo = 'intro') {
   try {
+    if (modo === 'secao') {
+      const result = await generateFormularioSecaoText({
+        eventoNome: req.evento?.nome,
+        nome: req.body?.nome,
+        descricaoLead: req.body?.descricaoLead ?? req.body?.descricao_lead,
+        tipoLead: req.body?.tipoLead ?? req.body?.tipo_lead,
+        brief: req.body?.brief ?? req.body?.instrucoes,
+        tituloAtual: req.body?.tituloAtual ?? req.body?.titulo_atual ?? req.body?.titulo,
+        textoAtual: req.body?.textoAtual ?? req.body?.texto_atual ?? req.body?.texto,
+        campos: req.body?.campos,
+        secoes: req.body?.secoes,
+        secaoIndex: req.body?.secaoIndex ?? req.body?.secao_index,
+        introducao: req.body?.introducao,
+      });
+      return res.json(result);
+    }
+
     const texto = await generateFormularioIntroText({
       eventoNome: req.evento?.nome,
       nome: req.body?.nome,
@@ -1446,9 +1463,18 @@ app.post('/api/marketing/formularios/gerar-intro', requireEvento, async (req, re
     res.json({ texto });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
-    console.error('POST /api/marketing/formularios/gerar-intro', err);
+    console.error(`POST /api/marketing/formularios/gerar-${modo === 'secao' ? 'secao' : 'intro'}`, err);
     res.status(500).json({ error: 'Falha ao gerar texto com IA' });
   }
+}
+
+app.post('/api/marketing/formularios/gerar-intro', requireEvento, async (req, res) => {
+  const modo = String(req.body?.modo || req.body?.tipoGeracao || 'intro').trim();
+  await handleGerarFormularioTextoIa(req, res, modo === 'secao' ? 'secao' : 'intro');
+});
+
+app.post('/api/marketing/formularios/gerar-secao', requireEvento, async (req, res) => {
+  await handleGerarFormularioTextoIa(req, res, 'secao');
 });
 
 app.get('/api/marketing/formularios', requireEvento, async (req, res) => {
