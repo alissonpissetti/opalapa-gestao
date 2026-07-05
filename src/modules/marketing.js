@@ -15,6 +15,7 @@ import {
   enviarMarketingComunicacaoItem,
 } from '../lib/api.js';
 import { escapeHtml } from '../lib/format.js';
+import { initMarketingFormularios } from './marketing-formularios.js';
 
 function normalizeInstagramHandle(value) {
   const handle = String(value || '')
@@ -109,6 +110,7 @@ export function initMarketingModule() {
     panelCanais: document.getElementById('marketing-panel-canais'),
     panelCampanhas: document.getElementById('marketing-panel-campanhas'),
     panelCriativos: document.getElementById('marketing-panel-criativos'),
+    panelFormularios: document.getElementById('marketing-panel-formularios'),
     btnIgGenerate: document.getElementById('btn-marketing-ig-generate'),
     igOutput: document.getElementById('marketing-ig-output'),
     igResult: document.getElementById('marketing-ig-result'),
@@ -158,6 +160,13 @@ export function initMarketingModule() {
   let comSent = 0;
   let comAbort = false;
 
+  const formulariosModule = initMarketingFormularios({
+    getMarketingData: () => data,
+    onSummaryChange: (text) => {
+      if (activeTab === 'formularios' && els.summary) els.summary.textContent = text;
+    },
+  });
+
   function setTab(tab) {
     activeTab = tab;
     els.tabs?.querySelectorAll('[data-marketing-tab]').forEach((btn) => {
@@ -167,6 +176,7 @@ export function initMarketingModule() {
     els.panelCanais?.classList.toggle('hidden', tab !== 'canais');
     els.panelCampanhas?.classList.toggle('hidden', tab !== 'campanhas');
     els.panelCriativos?.classList.toggle('hidden', tab !== 'criativos');
+    formulariosModule.showPanel(tab === 'formularios');
   }
 
   function getCampanhaById(id) {
@@ -345,6 +355,8 @@ export function initMarketingModule() {
     if (els.summary) {
       if (activeTab === 'inicio') {
         els.summary.textContent = 'Ferramentas para agilizar postagens e acompanhar origens de leads.';
+      } else if (activeTab === 'formularios') {
+        formulariosModule.renderTable();
       } else {
         els.summary.textContent = `${canais.length} origem(ns) · ${campanhas.length} campanha(s) · ${criativos.length} criativo(s)`;
       }

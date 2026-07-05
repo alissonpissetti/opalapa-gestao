@@ -87,6 +87,7 @@ const TIPO_LABELS = {
   espaco: 'Espaço',
   patrocinio: 'Patrocínio',
   artistico: 'Artístico',
+  alimentacao: 'Alimentação',
 };
 
 function tipoBadgeClass(tipo) {
@@ -97,7 +98,7 @@ function tipoBadgeClass(tipo) {
 
 function itemsForScope(list, scope) {
   if (scope === 'artistico') return list.filter((i) => i.tipo === 'artistico');
-  return list.filter((i) => i.tipo === 'espaco' || i.tipo === 'patrocinio');
+  return list.filter((i) => i.tipo === 'espaco' || i.tipo === 'patrocinio' || i.tipo === 'alimentacao');
 }
 
   async function notifyEspacosDataChanged(item) {

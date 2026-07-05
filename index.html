@@ -197,6 +197,7 @@
           <button type="button" class="nav-drawer-logout" id="btn-logout-drawer">Sair</button>
         </nav>
         </div>
+        <div class="evento-selector header-evento-selector"></div>
         <div class="user-menu">
           <button
             class="tbtn wa-header-btn"
@@ -592,6 +593,7 @@
         <button class="marketing-tab" type="button" data-marketing-tab="canais" role="tab">Origens</button>
         <button class="marketing-tab" type="button" data-marketing-tab="campanhas" role="tab">Campanhas</button>
         <button class="marketing-tab" type="button" data-marketing-tab="criativos" role="tab">Criativos</button>
+        <button class="marketing-tab" type="button" data-marketing-tab="formularios" role="tab">Formulários</button>
       </div>
 
       <section id="marketing-panel-inicio" class="marketing-panel">
@@ -737,6 +739,30 @@
               </tr>
             </thead>
             <tbody id="marketing-table-criativos"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="marketing-panel-formularios" class="marketing-panel hidden">
+        <div class="marketing-panel-head">
+          <h2>Formulários de candidatura</h2>
+          <button class="tbtn primary" type="button" id="btn-marketing-formulario-new">Novo formulário</button>
+        </div>
+        <p class="subtitle marketing-form-hint">
+          Crie formulários customizados para candidatos responderem (ex.: alimentação no evento).
+          Compartilhe o link público e classifique cada resposta para decidir quem participa.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Status</th>
+                <th>Respostas</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="marketing-table-formularios"></tbody>
           </table>
         </div>
       </section>
@@ -1625,6 +1651,167 @@
           <button class="btn" type="button" id="marketing-modal-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="marketing-modal-delete">Excluir</button>
           <button class="btn primary" type="button" id="marketing-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="marketing-form-modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="marketing-form-modal-title">
+        <h2 id="marketing-form-modal-title">Formulário</h2>
+        <p class="msub">Monte perguntas para candidatos e gere um link público para envio.</p>
+        <p class="field-hint hidden" id="marketing-form-link"></p>
+        <div class="field">
+          <label for="marketing-form-nome">Nome do formulário</label>
+          <input id="marketing-form-nome" type="text" placeholder="Ex.: Candidatura alimentação 2026" required />
+        </div>
+        <div class="field">
+          <label for="marketing-form-slug">Identificador do link <span class="field-optional">(opcional)</span></label>
+          <input id="marketing-form-slug" type="text" placeholder="Ex.: alimentacao-2026" />
+          <p class="field-hint">Usado na URL pública. Se vazio, é gerado automaticamente.</p>
+        </div>
+        <div class="field marketing-form-intro-field">
+          <div class="marketing-form-intro-head">
+            <label for="marketing-form-intro">Texto de introdução</label>
+            <button class="tbtn marketing-form-intro-ai-btn" type="button" id="marketing-form-intro-ai">
+              Gerar com IA
+            </button>
+          </div>
+          <input
+            id="marketing-form-intro-ai-brief"
+            type="text"
+            placeholder="Opcional: tom, público-alvo ou detalhes para a IA"
+          />
+          <textarea id="marketing-form-intro" rows="4" placeholder="Explique o que é a candidatura e o que acontece após o envio."></textarea>
+          <p class="field-hint marketing-form-intro-ai-status hidden" id="marketing-form-intro-ai-status"></p>
+        </div>
+        <div class="field marketing-form-logo-field">
+          <label for="marketing-form-logo">Logomarca do formulário</label>
+          <input id="marketing-form-logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+          <p class="field-hint">Exibida no topo do formulário público. PNG, JPG, WEBP ou GIF — máx. 2 MB.</p>
+          <div class="marketing-form-logo-preview hidden" id="marketing-form-logo-preview-wrap">
+            <div class="marketing-form-logo-pick-wrap" id="marketing-form-logo-pick-wrap">
+              <img id="marketing-form-logo-preview" alt="Prévia da logomarca" />
+              <p class="marketing-form-logo-pick-hint hidden" id="marketing-form-logo-pick-hint">
+                Clique na imagem para escolher a cor de fundo
+              </p>
+            </div>
+            <label class="marketing-origem-check">
+              <input type="checkbox" id="marketing-form-logo-remove" />
+              Remover logomarca ao salvar
+            </label>
+          </div>
+        </div>
+        <div class="field marketing-form-cor-field">
+          <label for="marketing-form-cor-fundo">Cor de fundo da página pública</label>
+          <div class="marketing-form-cor-row">
+            <input id="marketing-form-cor-fundo" type="color" value="#eef2f6" />
+            <input id="marketing-form-cor-fundo-hex" type="text" value="#eef2f6" maxlength="7" placeholder="#eef2f6" />
+            <button class="tbtn" type="button" id="marketing-form-cor-fundo-from-logo" disabled>
+              Pegar da logo
+            </button>
+            <button class="tbtn" type="button" id="marketing-form-cor-fundo-reset">Padrão</button>
+          </div>
+          <p class="field-hint">Use o conta-gotas na logo para copiar uma cor, ou escolha manualmente. Vale para o formulário público e a tela de confirmação.</p>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="marketing-form-descricao-lead">Descrição do lead criado</label>
+            <input id="marketing-form-descricao-lead" type="text" placeholder="Ex.: Candidato alimentação" />
+          </div>
+          <div class="field">
+            <label for="marketing-form-tipo-lead">Tipo de lead</label>
+            <select id="marketing-form-tipo-lead">
+              <option value="patrocinio">Patrocínio / comercial</option>
+              <option value="artistico">Artístico</option>
+              <option value="alimentacao">Alimentação</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="marketing-form-status-inicial">Etapa inicial no funil</label>
+            <input id="marketing-form-status-inicial" type="text" value="lead" />
+          </div>
+          <div class="field">
+            <label class="marketing-origem-check" style="margin-top: 1.6rem">
+              <input id="marketing-form-ativo" type="checkbox" checked />
+              Formulário ativo
+            </label>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="marketing-form-canal">Origem (marketing)</label>
+            <select id="marketing-form-canal"><option value="">Nenhuma</option></select>
+          </div>
+          <div class="field">
+            <label for="marketing-form-campanha">Campanha</label>
+            <select id="marketing-form-campanha"><option value="">Nenhuma</option></select>
+          </div>
+          <div class="field">
+            <label for="marketing-form-criativo">Criativo</label>
+            <select id="marketing-form-criativo"><option value="">Nenhum</option></select>
+          </div>
+        </div>
+        <div class="marketing-form-campos-wrap">
+          <div class="marketing-form-campos-head">
+            <strong>Perguntas do formulário</strong>
+            <button class="tbtn" type="button" id="marketing-form-add-campo">Adicionar pergunta</button>
+          </div>
+          <div id="marketing-form-campos"></div>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="marketing-form-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="marketing-form-delete">Excluir</button>
+          <button class="btn primary" type="button" id="marketing-form-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="marketing-respostas-modal-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="marketing-respostas-title">
+        <h2 id="marketing-respostas-title">Respostas</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Telefone</th>
+                <th colspan="2">Resumo</th>
+                <th>Classificação</th>
+                <th>Enviado em</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="marketing-respostas-table"></tbody>
+          </table>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="marketing-respostas-close">Fechar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="marketing-resposta-detail-bg">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="marketing-resposta-detail-title">
+        <h2 id="marketing-resposta-detail-title">Analisar resposta</h2>
+        <div id="marketing-resposta-detail-body"></div>
+        <div class="field">
+          <label for="marketing-resposta-classificacao">Classificação</label>
+          <select id="marketing-resposta-classificacao">
+            <option value="pendente">Pendente</option>
+            <option value="em_analise">Em análise</option>
+            <option value="aprovado">Aprovado — pode participar</option>
+            <option value="reprovado">Reprovado</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="marketing-resposta-nota">Nota interna</label>
+          <textarea id="marketing-resposta-nota" rows="3" placeholder="Observações da equipe sobre este candidato."></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="marketing-resposta-detail-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="marketing-resposta-detail-save">Salvar classificação</button>
         </div>
       </div>
     </div>

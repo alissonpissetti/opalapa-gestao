@@ -23,7 +23,21 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: './',
-    plugins: [apiHealthCheck(apiPort)],
+    plugins: [
+      apiHealthCheck(apiPort),
+      {
+        name: 'public-form-route',
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            const url = req.url?.split('?')[0] || '';
+            if (/^\/f\/[^/]+/.test(url)) {
+              req.url = '/formulario.html';
+            }
+            next();
+          });
+        },
+      },
+    ],
     server: {
       proxy: {
         '/api': {

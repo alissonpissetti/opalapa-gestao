@@ -32,6 +32,34 @@ function normalizePhone(value) {
   return digits.slice(0, 11);
 }
 
+/** Busca participante existente por WhatsApp ou Instagram. */
+export async function findParticipanteByContato(conn, { telefone, instagram } = {}) {
+  const phone = normalizePhone(telefone);
+  const ig = normalizeInstagram(instagram);
+
+  if (phone) {
+    const [rows] = await conn.query(
+      'SELECT id FROM participantes WHERE contato_telefone = ? LIMIT 1',
+      [phone],
+    );
+    if (rows[0]) return Number(rows[0].id);
+  }
+
+  if (ig) {
+    const igLower = ig.toLowerCase();
+    const igBare = igLower.replace(/^@+/, '');
+    const [rows] = await conn.query(
+      `SELECT id FROM participantes
+       WHERE LOWER(instagram) = ? OR LOWER(REPLACE(instagram, '@', '')) = ?
+       LIMIT 1`,
+      [igLower, igBare],
+    );
+    if (rows[0]) return Number(rows[0].id);
+  }
+
+  return null;
+}
+
 export function normalizeParticipanteInput(body, { requireNome = true } = {}) {
   const nome = String(body?.nome || '').trim();
   if (requireNome && !nome) {

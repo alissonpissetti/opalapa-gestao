@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1d9e75" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Formulário · Opalapa</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #eef2f6;
+        --card: #ffffff;
+        --text: #0f172a;
+        --muted: #64748b;
+        --border: #dbe3ee;
+        --accent: #1d9e75;
+        --accent-hover: #178564;
+        --accent-soft: rgba(29, 158, 117, 0.1);
+        --danger: #dc2626;
+        --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(29, 158, 117, 0.08), transparent 42%),
+          var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+        -webkit-text-size-adjust: 100%;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+        position: relative;
+      }
+
+      .page {
+        min-height: 100vh;
+        min-height: 100dvh;
+        width: 100%;
+        max-width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 1.5rem 1rem 2.5rem;
+        overflow-x: hidden;
+      }
+
+      .page-shell {
+        width: 100%;
+        max-width: 640px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        min-width: 0;
+        overflow-x: hidden;
+      }
+
+      .page-header {
+        width: 100%;
+        text-align: center;
+        margin-bottom: 1rem;
+        min-width: 0;
+      }
+
+      .brand {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 0.75rem;
+      }
+
+      .form-logo {
+        display: block;
+        margin: 0 auto;
+        width: auto;
+        max-width: 100%;
+        height: auto;
+        max-height: 110px;
+        object-fit: contain;
+      }
+
+      .card {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow: hidden;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 1.5rem;
+        box-shadow: var(--shadow);
+      }
+
+      @media (min-width: 640px) {
+        .card {
+          padding: 2rem;
+        }
+      }
+
+      h1 {
+        margin: 0 0 0.4rem;
+        font-size: clamp(1.35rem, 4vw, 1.75rem);
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .subtitle {
+        margin: 0 0 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .intro {
+        margin: 0 0 1.25rem;
+        padding: 0.9rem 1rem;
+        background: #f8fafc;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        color: #334155;
+        white-space: pre-wrap;
+        font-size: 0.95rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      #public-form,
+      #custom-fields {
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      .section-title {
+        margin: 1.35rem 0 0.85rem;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+
+      .section-title:first-child {
+        margin-top: 0;
+      }
+
+      .field {
+        margin-bottom: 1rem;
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      .field-control {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .field-control select {
+        width: 0;
+        min-width: 100%;
+      }
+
+      .field label {
+        display: block;
+        margin-bottom: 0.4rem;
+        font-size: 13px;
+        font-weight: 600;
+        color: #334155;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .field input,
+      .field textarea,
+      .field select {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        padding: 0.72rem 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font: inherit;
+        font-size: 16px;
+        color: var(--text);
+        background: #fff;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+
+      .field select {
+        padding-right: 2.5rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        background-color: #fff;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2364748b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.9rem center;
+        background-size: 12px 8px;
+      }
+
+      .field input:focus,
+      .field textarea:focus,
+      .field select:focus {
+        outline: none;
+        border-color: rgba(29, 158, 117, 0.55);
+        box-shadow: inset 0 0 0 1px rgba(29, 158, 117, 0.35);
+      }
+
+      .field textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      .check-field {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.65rem;
+        padding: 0.85rem 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fafbfd;
+      }
+
+      .check-field input {
+        width: 1.15rem;
+        height: 1.15rem;
+        min-width: 1.15rem;
+        margin-top: 0.1rem;
+        accent-color: var(--accent);
+        flex-shrink: 0;
+      }
+
+      .check-field label {
+        margin: 0;
+        font-weight: 500;
+      }
+
+      .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        max-width: 100%;
+        margin-top: 0.5rem;
+        min-height: 52px;
+        padding: 0.85rem 1rem;
+        border: none;
+        border-radius: 12px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.1s ease;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+
+      .btn:hover {
+        background: var(--accent-hover);
+      }
+
+      .btn:active {
+        transform: translateY(1px);
+      }
+
+      .btn:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
+
+      .error {
+        margin: 0 0 1rem;
+        padding: 0.8rem 0.95rem;
+        border-radius: 10px;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: var(--danger);
+        font-size: 14px;
+      }
+
+      .status-card {
+        text-align: center;
+        padding: 2.5rem 1.25rem;
+      }
+
+      .status-card h2 {
+        margin: 0 0 0.5rem;
+        font-size: 1.35rem;
+      }
+
+      .status-card p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .status-card--success h2 {
+        color: var(--accent);
+      }
+
+      .status-card--loading p,
+      .status-card--empty p {
+        color: var(--muted);
+      }
+
+      .page-footer {
+        width: 100%;
+        margin-top: 1rem;
+        text-align: center;
+        font-size: 12px;
+        color: #94a3b8;
+        min-width: 0;
+      }
+
+      .form-actions {
+        width: min(640px, calc(100% - 2rem));
+        margin: 0.75rem auto 0;
+        padding: 0 1rem;
+        min-width: 0;
+      }
+
+      body > .form-actions {
+        width: min(640px, calc(100% - 2rem));
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .form-actions-spacer {
+        display: none;
+      }
+
+      .field-other-wrap {
+        margin-top: 0.55rem;
+      }
+
+      .field-other-wrap input {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      @media (max-width: 639px) {
+        .page {
+          padding:
+            max(0.75rem, env(safe-area-inset-top))
+            0
+            calc(5.75rem + env(safe-area-inset-bottom));
+          overflow-x: hidden;
+        }
+
+        .page-shell {
+          width: 100%;
+          max-width: 100%;
+        }
+
+        .page-header {
+          padding: 0.25rem 1rem 0.5rem;
+          margin-bottom: 0.5rem;
+        }
+
+        .form-logo {
+          max-height: 88px;
+        }
+
+        .card {
+          width: 100%;
+          max-width: 100%;
+          border-left: none;
+          border-right: none;
+          border-radius: 20px 20px 0 0;
+          box-shadow: none;
+          padding:
+            1.15rem
+            max(1rem, env(safe-area-inset-left))
+            1.25rem
+            max(1rem, env(safe-area-inset-right));
+        }
+
+        h1 {
+          font-size: 1.3rem;
+        }
+
+        .subtitle,
+        .intro {
+          font-size: 0.92rem;
+        }
+
+        .field {
+          margin-bottom: 1.1rem;
+        }
+
+        .field label {
+          font-size: 14px;
+          margin-bottom: 0.45rem;
+        }
+
+        .field input,
+        .field textarea,
+        .field select {
+          min-height: 48px;
+          padding: 0.85rem 1rem;
+          border-radius: 12px;
+        }
+
+        .field textarea {
+          min-height: 120px;
+        }
+
+        .check-field {
+          min-height: 52px;
+          padding: 0.95rem 1rem;
+        }
+
+        .status-card {
+          padding: 2rem 1rem;
+        }
+
+        .page-footer {
+          padding: 0 1rem;
+          margin-top: 0.75rem;
+        }
+
+        .form-actions {
+          position: fixed;
+          inset: auto 0 0 0;
+          z-index: 20;
+          width: auto;
+          max-width: none;
+          margin: 0;
+          padding:
+            0.7rem
+            max(1rem, env(safe-area-inset-left))
+            calc(0.7rem + env(safe-area-inset-bottom))
+            max(1rem, env(safe-area-inset-right));
+          background: rgba(255, 255, 255, 0.96);
+          border-top: 1px solid var(--border);
+          box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.06);
+        }
+
+        body > .form-actions {
+          width: auto;
+          max-width: none;
+        }
+
+        .form-actions .btn {
+          margin-top: 0;
+        }
+
+        .form-actions-spacer {
+          display: block;
+          height: 0.25rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="page-shell">
+      <header class="page-header">
+        <div class="brand hidden" id="form-brand">Opalapa</div>
+        <img class="form-logo hidden" id="form-logo" alt="" />
+      </header>
+
+      <div class="card status-card status-card--loading" id="state-loading">
+        <p>Carregando formulário…</p>
+      </div>
+
+      <div class="card status-card status-card--empty hidden" id="state-empty">
+        <h2>Formulário não encontrado</h2>
+        <p>Verifique se o link está correto ou se o formulário ainda está ativo.</p>
+      </div>
+
+      <div class="card hidden" id="state-form">
+        <h1 id="form-title"></h1>
+        <p class="subtitle hidden" id="form-evento"></p>
+        <div class="intro hidden" id="form-intro"></div>
+        <div class="error hidden" id="form-error" role="alert"></div>
+        <form id="public-form" novalidate>
+          <p class="section-title">Seus dados</p>
+          <div class="field">
+            <label for="pf-nome">Nome *</label>
+            <input id="pf-nome" name="nome" type="text" required autocomplete="name" />
+          </div>
+          <div class="field">
+            <label for="pf-telefone">Telefone / WhatsApp *</label>
+            <input id="pf-telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="(00) 00000-0000" required data-phone="1" />
+          </div>
+          <div class="field">
+            <label for="pf-instagram">Instagram</label>
+            <input id="pf-instagram" name="instagram" type="text" placeholder="@perfil" autocomplete="off" />
+          </div>
+          <div id="custom-fields"></div>
+          <div class="form-actions-spacer" aria-hidden="true"></div>
+        </form>
+      </div>
+
+      <div class="card status-card status-card--success hidden" id="state-success">
+        <h2>Enviado!</h2>
+        <p id="success-message">Obrigado pelas informações.</p>
+      </div>
+
+      <footer class="page-footer" id="page-footer">Formulário seguro · Opalapa Gestão</footer>
+      </div>
+    </div>
+
+    <div class="form-actions hidden" id="form-actions-bar">
+      <button class="btn" type="submit" form="public-form" id="form-submit">Enviar respostas</button>
+    </div>
+
+    <script>
+      function getSlug() {
+        const path = window.location.pathname.replace(/\/+$/, '');
+        const fromPath = path.match(/\/f\/([^/]+)/);
+        if (fromPath) return decodeURIComponent(fromPath[1]);
+        return new URLSearchParams(window.location.search).get('slug') || '';
+      }
+
+      function escapeHtml(text) {
+        return String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function show(id) {
+        ['state-loading', 'state-empty', 'state-form', 'state-success'].forEach((elId) => {
+          document.getElementById(elId)?.classList.toggle('hidden', elId !== id);
+        });
+        document.getElementById('form-actions-bar')?.classList.toggle('hidden', id !== 'state-form');
+        document.getElementById('page-footer')?.classList.toggle('hidden', id === 'state-form');
+      }
+
+      function applyPageBackground(corFundo) {
+        const color = /^#[0-9a-fA-F]{6}$/.test(String(corFundo || ''))
+          ? String(corFundo).toLowerCase()
+          : '#eef2f6';
+        document.body.style.background = `radial-gradient(circle at top, rgba(29, 158, 117, 0.08), transparent 42%), ${color}`;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+      }
+
+      function sortOptions(options) {
+        return [...(options || [])].sort((a, b) =>
+          String(a).localeCompare(String(b), 'pt-BR', { sensitivity: 'base' }),
+        );
+      }
+
+      const SELECT_OTHER_VALUE = '__outro__';
+
+      function bindSelectOtherFields() {
+        document.querySelectorAll('[data-select-other="1"]').forEach((select) => {
+          const campoId = select.getAttribute('name');
+          const otherInput = document.getElementById(`pf-${campoId}-outro`);
+          const otherWrap = document.getElementById(`pf-${campoId}-outro-wrap`);
+          const sync = () => {
+            const isOther = select.value === SELECT_OTHER_VALUE;
+            otherWrap?.classList.toggle('hidden', !isOther);
+            if (otherInput) {
+              otherInput.required = isOther && select.required;
+              if (!isOther) otherInput.value = '';
+            }
+          };
+          select.addEventListener('change', sync);
+          sync();
+        });
+      }
+
+      function maskPhoneInput(el) {
+        el.addEventListener('input', () => {
+          const digits = el.value.replace(/\D/g, '').slice(0, 11);
+          if (!digits) {
+            el.value = '';
+            return;
+          }
+          if (digits.length <= 2) {
+            el.value = `(${digits}`;
+            return;
+          }
+          if (digits.length <= 6) {
+            el.value = `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+            return;
+          }
+          if (digits.length <= 10) {
+            el.value = `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+            return;
+          }
+          el.value = `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+        });
+      }
+
+      function maskMoneyInput(el) {
+        el.addEventListener('input', () => {
+          const digits = el.value.replace(/\D/g, '');
+          if (!digits) {
+            el.value = '';
+            return;
+          }
+          const val = parseInt(digits, 10) / 100;
+          el.value = val.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
+        });
+      }
+
+      function renderField(campo) {
+        const id = escapeHtml(campo.id);
+        const label = escapeHtml(campo.label);
+        const required = campo.required ? ' required' : '';
+        const reqMark = campo.required ? ' *' : '';
+
+        if (campo.type === 'textarea') {
+          return `<div class="field"><label for="pf-${id}">${label}${reqMark}</label><textarea id="pf-${id}" name="${id}"${required}></textarea></div>`;
+        }
+        if (campo.type === 'select') {
+          const opts = sortOptions(campo.options || [])
+            .map((o) => {
+              const value = escapeHtml(o);
+              return `<option value="${value}">${value}</option>`;
+            })
+            .join('');
+          const otherOption = campo.allowOther
+            ? `<option value="${SELECT_OTHER_VALUE}">Outro</option>`
+            : '';
+          const otherField = campo.allowOther
+            ? `<div class="field-other-wrap hidden" id="pf-${id}-outro-wrap"><input type="text" id="pf-${id}-outro" name="${id}_outro" placeholder="Descreva sua resposta" autocomplete="off" /></div>`
+            : '';
+          return `<div class="field"><label for="pf-${id}">${label}${reqMark}</label><div class="field-control"><select id="pf-${id}" name="${id}" data-select-other="${campo.allowOther ? '1' : '0'}"${required}><option value="">Selecione uma opção</option>${opts}${otherOption}</select></div>${otherField}</div>`;
+        }
+        if (campo.type === 'checkbox') {
+          return `<div class="field check-field"><input id="pf-${id}" name="${id}" type="checkbox"${required} /><label for="pf-${id}">${label}${reqMark}</label></div>`;
+        }
+        if (campo.type === 'money') {
+          return `<div class="field"><label for="pf-${id}">${label}${reqMark}</label><input id="pf-${id}" name="${id}" type="text" inputmode="decimal" placeholder="0,00"${required} data-money="1" /></div>`;
+        }
+        const inputType =
+          campo.type === 'email' ? 'email' : campo.type === 'number' ? 'number' : campo.type === 'phone' ? 'tel' : 'text';
+        return `<div class="field"><label for="pf-${id}">${label}${reqMark}</label><input id="pf-${id}" name="${id}" type="${inputType}"${required}${inputType === 'tel' ? ' inputmode="numeric" placeholder="(00) 00000-0000" data-phone="1"' : ''} /></div>`;
+      }
+
+      function lockHorizontalScroll() {
+        document.documentElement.style.overflowX = 'hidden';
+        document.body.style.overflowX = 'hidden';
+      }
+
+      function initSelectOverflowFix() {
+        document.querySelectorAll('.field select').forEach((select) => {
+          const wrap = select.closest('.field-control') || select.parentElement;
+          if (!wrap) return;
+          const syncWidth = () => {
+            wrap.style.maxWidth = '100%';
+            select.style.maxWidth = '100%';
+          };
+          syncWidth();
+          select.addEventListener('change', syncWidth);
+        });
+      }
+
+      async function init() {
+        lockHorizontalScroll();
+        window.addEventListener('resize', lockHorizontalScroll, { passive: true });
+        const slug = getSlug();
+        if (!slug) {
+          show('state-empty');
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/public/formularios/${encodeURIComponent(slug)}`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Formulário não encontrado');
+
+          const form = data.formulario;
+          document.title = `${form.nome} · Opalapa`;
+          applyPageBackground(form.corFundo);
+
+          const brand = document.getElementById('form-brand');
+          const logoImg = document.getElementById('form-logo');
+          if (form.logoUrl && logoImg) {
+            logoImg.src = form.logoUrl;
+            logoImg.alt = form.nome || 'Logomarca';
+            logoImg.classList.remove('hidden');
+            brand?.classList.add('hidden');
+          } else {
+            logoImg?.classList.add('hidden');
+            brand?.classList.remove('hidden');
+          }
+
+          document.getElementById('form-title').textContent = form.nome;
+
+          const eventoEl = document.getElementById('form-evento');
+          if (eventoEl) {
+            const eventoNome = String(form.eventoNome || '').trim();
+            if (eventoNome) {
+              eventoEl.textContent = eventoNome;
+              eventoEl.classList.remove('hidden');
+            } else {
+              eventoEl.classList.add('hidden');
+            }
+          }
+
+          const intro = document.getElementById('form-intro');
+          if (form.introducao) {
+            intro.textContent = form.introducao;
+            intro.classList.remove('hidden');
+          } else {
+            intro.classList.add('hidden');
+          }
+
+          const custom = document.getElementById('custom-fields');
+          if (form.campos?.length) {
+            custom.innerHTML =
+              '<p class="section-title">Perguntas</p>' + form.campos.map(renderField).join('');
+            custom.querySelectorAll('[data-money="1"]').forEach(maskMoneyInput);
+            custom.querySelectorAll('[data-phone="1"]').forEach(maskPhoneInput);
+            const telefoneEl = document.getElementById('pf-telefone');
+            if (telefoneEl) maskPhoneInput(telefoneEl);
+            initSelectOverflowFix();
+            bindSelectOtherFields();
+          } else {
+            custom.innerHTML = '';
+          }
+
+          document.getElementById('public-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formEl = e.target;
+            if (!formEl.reportValidity()) {
+              const invalid = formEl.querySelector(':invalid');
+              invalid?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              return;
+            }
+            const errEl = document.getElementById('form-error');
+            const btn = document.getElementById('form-submit');
+            errEl.classList.add('hidden');
+            btn.disabled = true;
+            const prev = btn.textContent;
+            btn.textContent = 'Enviando…';
+
+            const fd = new FormData(e.target);
+            const respostas = {};
+            for (const campo of form.campos || []) {
+              if (campo.type === 'checkbox') {
+                respostas[campo.id] = fd.get(campo.id) === 'on';
+              } else if (campo.type === 'select') {
+                const selected = fd.get(campo.id) || '';
+                if (selected === SELECT_OTHER_VALUE) {
+                  respostas[campo.id] = String(fd.get(`${campo.id}_outro`) || '').trim();
+                } else {
+                  respostas[campo.id] = selected;
+                }
+              } else {
+                respostas[campo.id] = fd.get(campo.id) || '';
+              }
+            }
+
+            try {
+              const submitRes = await fetch(`/api/public/formularios/${encodeURIComponent(slug)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  nome: fd.get('nome'),
+                  telefone: fd.get('telefone'),
+                  instagram: fd.get('instagram'),
+                  respostas,
+                }),
+              });
+              const submitData = await submitRes.json().catch(() => ({}));
+              if (!submitRes.ok) throw new Error(submitData.error || 'Não foi possível enviar');
+
+              document.getElementById('success-message').textContent =
+                submitData.mensagem || 'Obrigado pelas informações.';
+              show('state-success');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (err) {
+              errEl.textContent = err.message || 'Erro ao enviar.';
+              errEl.classList.remove('hidden');
+              errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              btn.disabled = false;
+              btn.textContent = prev;
+            }
+          });
+
+          show('state-form');
+        } catch (err) {
+          show('state-empty');
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>

@@ -296,6 +296,7 @@ function resolveApiPermission(path, method) {
   if (p === '/api/auth/password/reset' && m === 'POST') return { type: 'open' };
   if (p.startsWith('/api/auth/')) return { type: 'shared' };
   if (p === '/api/health') return { type: 'open' };
+  if (p.startsWith('/api/public/formularios')) return { type: 'open' };
   if (p.startsWith('/api/webhooks/')) return { type: 'open' };
   if (/^\/api\/whatsapp\/media\/\d+/.test(p)) return { type: 'open' };
   if (/^\/api\/whatsapp\/avatar\/\d+/.test(p)) return { type: 'open' };
@@ -376,6 +377,7 @@ export function isPublicApiRoute(req) {
   if (req.path === '/api/auth/logout') return true;
   if (req.path.startsWith('/api/auth/otp/')) return true;
   if (req.path === '/api/auth/password/reset' && req.method === 'POST') return true;
+  if (req.path.startsWith('/api/public/formularios')) return true;
   if (req.path.startsWith('/api/webhooks/')) return true;
   if (/^\/api\/whatsapp\/media\/\d+/.test(req.path)) return true;
   if (/^\/api\/whatsapp\/avatar\/\d+/.test(req.path)) return true;

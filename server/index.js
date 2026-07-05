@@ -90,6 +90,19 @@ import {
 } from './marketing.js';
 import { previewComunicacao, enviarComunicacaoItem, COMUNICACAO_TEMPLATE_VARS } from './marketing-comunicacao.js';
 import {
+  migrateMarketingFormularios,
+  listMarketingFormularios,
+  createMarketingFormulario,
+  updateMarketingFormulario,
+  deleteMarketingFormulario,
+  listFormularioRespostas,
+  updateFormularioResposta,
+  getPublicFormulario,
+  submitPublicFormulario,
+  readMarketingFormularioLogo,
+} from './marketing-formularios.js';
+import { generateFormularioIntroText } from './deepseek.js';
+import {
   migrateProducaoCronologia,
   listProducaoCronologia,
   createProducaoCronologia,
@@ -1419,6 +1432,146 @@ app.post('/api/marketing/comunicacao/enviar', requireEvento, async (req, res) =>
   }
 });
 
+app.post('/api/marketing/formularios/gerar-intro', requireEvento, async (req, res) => {
+  try {
+    const texto = await generateFormularioIntroText({
+      eventoNome: req.evento?.nome,
+      nome: req.body?.nome,
+      descricaoLead: req.body?.descricaoLead ?? req.body?.descricao_lead,
+      tipoLead: req.body?.tipoLead ?? req.body?.tipo_lead,
+      brief: req.body?.brief ?? req.body?.instrucoes,
+      introducaoAtual: req.body?.introducaoAtual ?? req.body?.introducao_atual ?? req.body?.introducao,
+      campos: req.body?.campos,
+    });
+    res.json({ texto });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/formularios/gerar-intro', err);
+    res.status(500).json({ error: 'Falha ao gerar texto com IA' });
+  }
+});
+
+app.get('/api/marketing/formularios', requireEvento, async (req, res) => {
+  try {
+    const formularios = await listMarketingFormularios(pool, req.eventoId);
+    res.json({ formularios });
+  } catch (err) {
+    console.error('GET /api/marketing/formularios', err);
+    res.status(500).json({ error: 'Falha ao carregar formulários' });
+  }
+});
+
+app.post('/api/marketing/formularios', requireEvento, async (req, res) => {
+  try {
+    const formulario = await createMarketingFormulario(pool, req.eventoId, req.body);
+    res.status(201).json({ formulario });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/formularios', err);
+    res.status(500).json({ error: 'Falha ao criar formulário' });
+  }
+});
+
+app.put('/api/marketing/formularios/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const formulario = await updateMarketingFormulario(pool, id, req.eventoId, req.body);
+    if (!formulario) return res.status(404).json({ error: 'Formulário não encontrado' });
+    res.json({ formulario });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/formularios/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar formulário' });
+  }
+});
+
+app.delete('/api/marketing/formularios/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteMarketingFormulario(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Formulário não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/marketing/formularios/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir formulário' });
+  }
+});
+
+app.get('/api/marketing/formularios/:id/respostas', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await listFormularioRespostas(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Formulário não encontrado' });
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/marketing/formularios/:id/respostas', err);
+    res.status(500).json({ error: 'Falha ao carregar respostas' });
+  }
+});
+
+app.put('/api/marketing/formulario-respostas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const resposta = await updateFormularioResposta(pool, id, req.eventoId, req.body);
+    if (!resposta) return res.status(404).json({ error: 'Resposta não encontrada' });
+    res.json({ resposta });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/formulario-respostas/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar resposta' });
+  }
+});
+
+app.get('/api/marketing/formularios/:id/logo', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const logo = await readMarketingFormularioLogo(pool, { id });
+    if (!logo) return res.status(404).json({ error: 'Logomarca não encontrada' });
+    res.setHeader('Content-Type', logo.mimetype);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(logo.buffer);
+  } catch (err) {
+    console.error('GET /api/marketing/formularios/:id/logo', err);
+    res.status(500).json({ error: 'Falha ao carregar logomarca' });
+  }
+});
+
+app.get('/api/public/formularios/:slug/logo', async (req, res) => {
+  try {
+    const logo = await readMarketingFormularioLogo(pool, { slug: req.params.slug });
+    if (!logo) return res.status(404).json({ error: 'Logomarca não encontrada' });
+    res.setHeader('Content-Type', logo.mimetype);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(logo.buffer);
+  } catch (err) {
+    console.error('GET /api/public/formularios/:slug/logo', err);
+    res.status(500).json({ error: 'Falha ao carregar logomarca' });
+  }
+});
+
+app.get('/api/public/formularios/:slug', async (req, res) => {
+  try {
+    const formulario = await getPublicFormulario(pool, req.params.slug);
+    if (!formulario) return res.status(404).json({ error: 'Formulário não encontrado' });
+    res.json({ formulario });
+  } catch (err) {
+    console.error('GET /api/public/formularios/:slug', err);
+    res.status(500).json({ error: 'Falha ao carregar formulário' });
+  }
+});
+
+app.post('/api/public/formularios/:slug', async (req, res) => {
+  try {
+    const result = await submitPublicFormulario(pool, req.params.slug, req.body);
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/public/formularios/:slug', err);
+    res.status(500).json({ error: 'Falha ao enviar formulário' });
+  }
+});
+
 app.get('/api/producao/cronologia', requireEvento, async (req, res) => {
   try {
     const data = await listProducaoCronologia(pool, req.eventoId);
@@ -2117,6 +2270,11 @@ app.use('/api', (req, res) => {
 });
 
 const distPath = path.join(__dirname, '..', 'dist');
+app.get('/f/:slug', (req, res, next) => {
+  res.sendFile(path.join(distPath, 'formulario.html'), (err) => {
+    if (err) next();
+  });
+});
 app.use(express.static(distPath));
 app.use((req, res, next) => {
   if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
@@ -2135,6 +2293,7 @@ async function start() {
   await migrateFunil(pool);
   await migrateInteracoes(pool);
   await migrateMarketing(pool);
+  await migrateMarketingFormularios(pool);
   await migrateProducaoCronologia(pool);
   await migrateProducaoPremiacoes(pool);
   await migrateProducaoEntregas(pool);

@@ -149,6 +149,16 @@ export async function migrateArrecadacao(pool) {
       `ALTER TABLE arrecadacao MODIFY tipo ENUM('espaco', 'patrocinio', 'artistico', 'contato') NOT NULL DEFAULT 'patrocinio'`,
     );
   }
+  const [tipoCol3] = await pool.query(
+    `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'tipo'`,
+  );
+  const tipoEnum3 = tipoCol3[0]?.COLUMN_TYPE || '';
+  if (tipoEnum3 && !tipoEnum3.includes('alimentacao')) {
+    await pool.query(
+      `ALTER TABLE arrecadacao MODIFY tipo ENUM('espaco', 'patrocinio', 'artistico', 'contato', 'alimentacao') NOT NULL DEFAULT 'patrocinio'`,
+    );
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS arrecadacao_pagamentos (
@@ -394,7 +404,23 @@ export async function syncAllArrecadacaoFromEspacos(pool) {
 
 function scopeTipoClause(scope) {
   if (scope === 'artistico') return " AND a.tipo = 'artistico'";
-  return " AND a.tipo IN ('espaco', 'patrocinio')";
+  return " AND a.tipo IN ('espaco', 'patrocinio', 'alimentacao')";
+}
+
+function parseLeadTipo(raw) {
+  const tipo = String(raw || 'patrocinio');
+  if (tipo === 'artistico' || tipo === 'alimentacao') return tipo;
+  return 'patrocinio';
+}
+
+function descricaoPadraoForTipo(tipo) {
+  if (tipo === 'artistico') return 'Artístico';
+  if (tipo === 'alimentacao') return 'Alimentação';
+  return 'Patrocínio';
+}
+
+function isLeadTipoManual(tipo) {
+  return tipo === 'patrocinio' || tipo === 'artistico' || tipo === 'alimentacao';
 }
 
 const ARRECADACAO_SELECT = `
@@ -471,8 +497,8 @@ export async function createPatrocinio(pool, eventoId, raw) {
     const participanteId = await resolveParticipanteFromBody(conn, raw);
     const valorTotal = parseMoney(raw.valorTotal ?? raw.valor_total, 'Valor total');
     const valorPago = parseMoney(raw.valorPago ?? raw.valor_pago ?? 0, 'Valor pago');
-    const tipo = raw.tipo === 'artistico' ? 'artistico' : 'patrocinio';
-    const descricaoPadrao = tipo === 'artistico' ? 'Artístico' : 'Patrocínio';
+    const tipo = parseLeadTipo(raw.tipo);
+    const descricaoPadrao = descricaoPadraoForTipo(tipo);
     const descricao = String(raw.descricao || descricaoPadrao).trim() || descricaoPadrao;
     const obs = String(raw.obs || '').trim();
     const status = parseStatus(raw.status, 'neg');
@@ -553,8 +579,8 @@ export async function updateArrecadacao(pool, id, raw) {
 
   const obs = raw.obs !== undefined ? String(raw.obs || '').trim() : existing.obs;
   let descricao = existing.descricao;
-  if ((existing.tipo === 'patrocinio' || existing.tipo === 'artistico') && raw.descricao !== undefined) {
-    const padrao = existing.tipo === 'artistico' ? 'Artístico' : 'Patrocínio';
+  if (isLeadTipoManual(existing.tipo) && raw.descricao !== undefined) {
+    const padrao = descricaoPadraoForTipo(existing.tipo);
     descricao = String(raw.descricao || padrao).trim() || padrao;
   }
 
@@ -569,7 +595,7 @@ export async function updateArrecadacao(pool, id, raw) {
     raw.participanteSeguidores !== undefined ||
     raw.participante_seguidores !== undefined;
 
-  if ((existing.tipo === 'patrocinio' || existing.tipo === 'artistico') && shouldUpdateParticipante) {
+  if (isLeadTipoManual(existing.tipo) && shouldUpdateParticipante) {
     const conn = await pool.getConnection();
     try {
       participanteId = await resolveParticipanteFromBody(conn, raw);
@@ -586,7 +612,7 @@ export async function updateArrecadacao(pool, id, raw) {
   let tipo = existing.tipo;
   if (raw.tipo !== undefined) {
     const next = String(raw.tipo || '').trim();
-    if (next !== 'patrocinio' && next !== 'artistico') {
+    if (!isLeadTipoManual(next)) {
       throw Object.assign(new Error('Tipo de lead inválido'), { status: 400 });
     }
     if (existing.tipo === 'espaco') {
@@ -595,13 +621,10 @@ export async function updateArrecadacao(pool, id, raw) {
         { status: 400 },
       );
     }
-    if (existing.tipo === 'patrocinio' || existing.tipo === 'artistico') {
+    if (isLeadTipoManual(existing.tipo)) {
       tipo = next;
-      if (tipo === 'artistico' && existing.tipo === 'patrocinio' && descricao === 'Patrocínio') {
-        descricao = 'Artístico';
-      }
-      if (tipo === 'patrocinio' && existing.tipo === 'artistico' && descricao === 'Artístico') {
-        descricao = 'Patrocínio';
+      if (next !== existing.tipo && descricao === descricaoPadraoForTipo(existing.tipo)) {
+        descricao = descricaoPadraoForTipo(next);
       }
     }
   }

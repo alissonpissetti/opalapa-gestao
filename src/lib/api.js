@@ -394,6 +394,67 @@ export function enviarMarketingComunicacaoItem(data) {
   });
 }
 
+export function fetchMarketingFormularios() {
+  return apiRequest('/api/marketing/formularios');
+}
+
+export function createMarketingFormulario(data) {
+  return apiRequest('/api/marketing/formularios', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateMarketingFormulario(id, data) {
+  return apiRequest(`/api/marketing/formularios/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteMarketingFormulario(id) {
+  return apiRequest(`/api/marketing/formularios/${id}`, { method: 'DELETE' });
+}
+
+export function generateMarketingFormularioIntro(data) {
+  return apiRequest('/api/marketing/formularios/gerar-intro', {
+    method: 'POST',
+    body: JSON.stringify(data),
+    timeoutMs: Number(import.meta.env.VITE_DEEPSEEK_CLIENT_TIMEOUT_MS) || 70000,
+  });
+}
+
+export function fetchFormularioRespostas(id) {
+  return apiRequest(`/api/marketing/formularios/${id}/respostas`);
+}
+
+export async function fetchMarketingFormularioLogoBlob(id) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(`${API_BASE}/api/marketing/formularios/${id}/logo`, {
+      credentials: 'include',
+      headers: eventoHeaders(),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let message = `Erro ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body.error) message = body.error;
+      } catch (_) {}
+      throw new ApiError(message, res.status);
+    }
+    return res.blob();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function updateFormularioResposta(id, data) {
+  return apiRequest(`/api/marketing/formulario-respostas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
 export function fetchProducaoCronologia() {
   return apiRequest('/api/producao/cronologia');
 }
