@@ -220,7 +220,7 @@
         word-break: break-word;
       }
 
-      .field input,
+      .field input:not([type='radio']):not([type='checkbox']),
       .field textarea,
       .field select {
         display: block;
@@ -271,6 +271,60 @@
         border: 1px solid var(--border);
         border-radius: 10px;
         background: #fafbfd;
+      }
+
+      .yesno-field .yesno-label {
+        display: block;
+        margin-bottom: 0.55rem;
+        font-size: 13px;
+        font-weight: 600;
+        color: #334155;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .yesno-options {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.65rem;
+      }
+
+      .yesno-option {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 48px;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+        color: #334155;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+        transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+      }
+
+      .yesno-option input {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+        height: 1px;
+        margin: 0;
+        pointer-events: none;
+      }
+
+      .yesno-option:has(input:checked) {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: #0f513f;
+      }
+
+      .yesno-option:has(input:focus-visible) {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
 
       .check-field input {
@@ -447,7 +501,7 @@
           margin-bottom: 0.45rem;
         }
 
-        .field input,
+        .field input:not([type='radio']):not([type='checkbox']),
         .field textarea,
         .field select {
           min-height: 48px;
@@ -682,7 +736,20 @@
           return `<div class="field"><label for="pf-${id}">${label}${reqMark}</label><div class="field-control"><select id="pf-${id}" name="${id}" data-select-other="${campo.allowOther ? '1' : '0'}"${required}><option value="">Selecione uma opção</option>${opts}${otherOption}</select></div>${otherField}</div>`;
         }
         if (campo.type === 'checkbox') {
-          return `<div class="field check-field"><input id="pf-${id}" name="${id}" type="checkbox"${required} /><label for="pf-${id}">${label}${reqMark}</label></div>`;
+          const reqAttr = campo.required ? ' required' : '';
+          return `<div class="field yesno-field">
+            <div class="yesno-label" id="pf-${id}-label">${label}${reqMark}</div>
+            <div class="yesno-options" role="radiogroup" aria-labelledby="pf-${id}-label">
+              <label class="yesno-option">
+                <input id="pf-${id}-sim" name="${id}" type="radio" value="sim"${reqAttr} />
+                <span>Sim</span>
+              </label>
+              <label class="yesno-option">
+                <input id="pf-${id}-nao" name="${id}" type="radio" value="nao" />
+                <span>Não</span>
+              </label>
+            </div>
+          </div>`;
         }
         if (campo.type === 'money') {
           return `<div class="field"><label for="pf-${id}">${label}${reqMark}</label><input id="pf-${id}" name="${id}" type="text" inputmode="decimal" placeholder="0,00"${required} data-money="1" /></div>`;
@@ -819,7 +886,8 @@
             const respostas = {};
             for (const campo of form.campos || []) {
               if (campo.type === 'checkbox') {
-                respostas[campo.id] = fd.get(campo.id) === 'on';
+                const selected = fd.get(campo.id);
+                respostas[campo.id] = selected === 'sim';
               } else if (campo.type === 'select') {
                 const selected = fd.get(campo.id) || '';
                 if (selected === SELECT_OTHER_VALUE) {

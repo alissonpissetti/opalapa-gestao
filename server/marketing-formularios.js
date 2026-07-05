@@ -353,7 +353,13 @@ function validateRespostas(campos, respostas, participante) {
     }
 
     if (campo.type === 'checkbox') {
-      normalized[campo.id] = raw === true || raw === 'true' || raw === 1 || raw === '1';
+      if (raw === 'sim' || raw === true || raw === 'true' || raw === 1 || raw === '1') {
+        normalized[campo.id] = true;
+      } else if (raw === 'nao' || raw === false || raw === 'false' || raw === 0 || raw === '0') {
+        normalized[campo.id] = false;
+      } else if (!empty) {
+        throw Object.assign(new Error(`Resposta inválida em "${campo.label}"`), { status: 400 });
+      }
     } else if (campo.type === 'money') {
       if (empty) continue;
       const parsed = parseMoneyValue(raw);
