@@ -1494,16 +1494,25 @@ export function initArrecadacaoModule(
           .join('')}</div>`
       : `<div class="arr-kanban-card-actions row-actions-icons">${renderItemActions(primary)}</div>`;
 
+    const planoHtml = planoBadgesHtml(group.items, produtoNomeById);
+    const planoRow = planoHtml
+      ? `<div class="arr-kanban-card-plano">${planoHtml}</div>`
+      : '';
+
     const groupIds = group.items.map((item) => item.id).join(',');
 
     return `
       <article class="arr-kanban-card${group.merged ? ' arr-kanban-card--grouped' : ''}" draggable="true" data-id="${primary.id}" data-group-ids="${groupIds}">
         <div class="arr-kanban-card-head">
-          <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
-          ${renderTipoBadges(group.tipos || [group.tipo])}
-          ${planoBadgesHtml(group.items, produtoNomeById)}
+          <div class="arr-kanban-card-title">
+            <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
+          </div>
+          <div class="arr-kanban-card-badges">
+            ${renderTipoBadges(group.tipos || [group.tipo])}
+          </div>
         </div>
         ${refsHtml}
+        ${planoRow}
         <div class="arr-kanban-card-valores">
           <span>${fmtMoney(group.valorTotal)}</span>
           ${faltaHtml}

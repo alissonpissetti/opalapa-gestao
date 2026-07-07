@@ -34,7 +34,7 @@ const VIEWS = {
   permissoes: { viewId: 'view-permissoes', navId: 'nav-permissoes', parentId: 'nav-acessos' },
 };
 
-const MOBILE_NAV_MQ = window.matchMedia('(max-width: 768px)');
+const MOBILE_NAV_MQ = window.matchMedia('(max-width: 900px)');
 
 function syncHeaderHeight() {
   const header = document.querySelector('.app-header');

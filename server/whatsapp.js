@@ -15,6 +15,10 @@ import {
   sendWhatsAppAudioMessage,
   ensureInstance,
   connectInstance,
+  restartInstance,
+  probeInstanceConnection,
+  inspectInstanceConnection,
+  isConnectionClosedError,
   logoutInstance,
   extractQrPayload,
   parseConnectionState,
@@ -1520,18 +1524,25 @@ export async function getWhatsappStatus() {
   }
 
   try {
-    const state = await getConnectionState();
-    const connection = parseConnectionState(state);
+    const health = await inspectInstanceConnection();
+    const connected = Boolean(health.ok);
+    const staleConnection = Boolean(health.stale);
+    const connection = connected ? health.reportedState || health.state || 'open' : health.state || 'close';
+
     return {
       configured: true,
-      connected: isConnectedState(connection),
+      connected,
+      staleConnection,
+      needsServerRestart: Boolean(health.needsServerRestart),
       instance: config.instance,
-      state: connection || 'unknown',
+      state: connection,
+      ...(staleConnection ? { error: 'Sessão WhatsApp expirada na Evolution API' } : {}),
     };
   } catch (err) {
     return {
       configured: true,
       connected: false,
+      staleConnection: isConnectionClosedError(err),
       instance: config.instance,
       state: 'error',
       error: err.message,
@@ -1582,33 +1593,68 @@ export async function connectWhatsapp({ phone } = {}) {
   }
 
   await ensureInstance();
-  let stateRes = await getConnectionState();
-  let connection = parseConnectionState(stateRes);
+  const initialHealth = await inspectInstanceConnection();
 
-  if (isConnectedState(connection)) {
+  if (initialHealth.ok) {
     await maybeConfigureWebhook();
     return {
       configured: true,
       connected: true,
       instance: config.instance,
-      state: connection,
+      state: initialHealth.state || 'open',
       qrcode: null,
     };
   }
 
+  if (initialHealth.stale) {
+    console.warn('WhatsApp: sessão obsoleta na Evolution.');
+    try {
+      await restartInstance();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const retryHealth = await inspectInstanceConnection();
+      if (retryHealth.ok) {
+        await maybeConfigureWebhook();
+        return {
+          configured: true,
+          connected: true,
+          instance: config.instance,
+          state: retryHealth.state || 'open',
+          qrcode: null,
+        };
+      }
+    } catch (err) {
+      console.warn('restartInstance:', err.message);
+    }
+  }
+
   const connectRes = await connectInstance(phone);
   const qrcode = extractQrPayload(connectRes);
-  stateRes = await getConnectionState();
-  connection = parseConnectionState(stateRes);
+  const finalHealth = await inspectInstanceConnection();
+  const connected = Boolean(finalHealth.ok);
+  const connection = connected ? finalHealth.state || 'open' : finalHealth.state || 'stale';
+  const needsServerRestart = Boolean(finalHealth.needsServerRestart) && !qrcode;
 
   await maybeConfigureWebhook();
 
   return {
     configured: true,
-    connected: isConnectedState(connection),
+    connected,
+    staleConnection: !connected && (finalHealth.stale || connection === 'stale'),
+    needsServerRestart,
     instance: config.instance,
     state: connection || 'connecting',
     qrcode,
+    ...(needsServerRestart
+      ? {
+          error:
+            'A instância da Evolution está travada. Reinicie o container da Evolution no servidor (Coolify) e tente novamente.',
+        }
+      : !connected && finalHealth.stale
+        ? {
+            error:
+              'Sessão WhatsApp expirada. Se o QR Code não aparecer, reinicie o container da Evolution no servidor.',
+          }
+        : {}),
   };
 }
 
@@ -1618,7 +1664,13 @@ export async function disconnectWhatsapp() {
     throw Object.assign(new Error('Evolution API não configurada no servidor'), { status: 503 });
   }
 
-  await logoutInstance();
+  try {
+    await logoutInstance();
+  } catch (err) {
+    if (!isConnectionClosedError(err)) throw err;
+    console.warn('logoutInstance com sessão fechada; tentando restart:', err.message);
+    await restartInstance();
+  }
   return getWhatsappStatus();
 }
 

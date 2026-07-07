@@ -5,6 +5,7 @@ const STATE_LABELS = {
   connected: 'Conectado',
   connecting: 'Aguardando leitura do QR',
   close: 'Desconectado',
+  stale: 'Sessão expirada',
   not_found: 'Não configurado',
   not_configured: 'API não configurada',
   error: 'Erro na conexão',
@@ -51,6 +52,7 @@ export function initWhatsappConnect() {
     if (label) {
       if (!status?.configured) label.textContent = 'WhatsApp';
       else if (status.connected) label.textContent = 'WhatsApp conectado';
+      else if (key === 'stale' || status.staleConnection) label.textContent = 'WhatsApp desconectado';
       else if (key === 'connecting') label.textContent = 'Conectando…';
       else label.textContent = 'Conectar WhatsApp';
     }
@@ -78,6 +80,18 @@ export function initWhatsappConnect() {
       btnRefresh.classList.add('hidden');
       btnDisconnect.classList.remove('hidden');
       stopPolling();
+      return;
+    }
+
+    if (key === 'stale' || status.staleConnection) {
+      modalSub.textContent = `${instance} A Evolution indica conexão, mas a sessão WhatsApp expirou.`;
+      const serverHint = status.needsServerRestart
+        ? '<p class="wa-modal-message">A instância está <strong>travada</strong> no servidor — o botão abaixo não vai gerar QR Code. Peça ao administrador para <strong>reiniciar o container da Evolution</strong> no Coolify e depois abra este modal novamente.</p>'
+        : '<p class="wa-modal-message wa-modal-message--err">Sessão expirada. Clique em <strong>Atualizar QR</strong> para reconectar. Se o QR não aparecer, peça ao administrador para reiniciar o container da Evolution no servidor.</p>';
+      modalStatus.innerHTML = serverHint;
+      btnDisconnect.classList.add('hidden');
+      btnRefresh.classList.remove('hidden');
+      btnRefresh.textContent = status.needsServerRestart ? 'Tentar novamente' : 'Atualizar QR';
       return;
     }
 
