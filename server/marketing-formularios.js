@@ -11,6 +11,14 @@ const LOGO_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'
 const CLASSIFICACOES = new Set(['pendente', 'em_analise', 'aprovado', 'reprovado']);
 const LEAD_TIPOS_FORM = ['patrocinio', 'artistico', 'alimentacao'];
 
+function normalizePhone(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length > 11) {
+    digits = digits.slice(2);
+  }
+  return digits.slice(0, 11);
+}
+
 function normalizeTipoLead(raw) {
   const tipo = String(raw || 'patrocinio');
   if (tipo === 'artistico' || tipo === 'alimentacao') return tipo;
@@ -104,9 +112,10 @@ function rowToFormulario(row) {
 
 function rowToResposta(row) {
   return {
-    id: row.id,
+    id: Number(row.id),
     formularioId: Number(row.formulario_id),
     arrecadacaoId: row.arrecadacao_id ? Number(row.arrecadacao_id) : null,
+    participanteId: row.participante_id ? Number(row.participante_id) : null,
     participanteNome: row.participante_nome || '',
     participanteTelefone: row.participante_telefone || '',
     participanteInstagram: row.participante_instagram || '',
@@ -642,9 +651,10 @@ export async function listFormularioRespostas(pool, formularioId, eventoId) {
   if (!form) return null;
 
   const [rows] = await pool.query(
-    `SELECT r.*
+    `SELECT r.*, a.participante_id
      FROM marketing_formulario_respostas r
      JOIN marketing_formularios f ON f.id = r.formulario_id
+     LEFT JOIN arrecadacao a ON a.id = r.arrecadacao_id
      WHERE r.formulario_id = ? AND f.evento_id = ?
      ORDER BY r.created_at DESC, r.id DESC`,
     [formularioId, eventoId],
@@ -657,6 +667,9 @@ export async function listFormularioRespostas(pool, formularioId, eventoId) {
 }
 
 export async function updateFormularioResposta(pool, id, eventoId, raw) {
+  if (raw?.action === 'delete') {
+    throw Object.assign(new Error('Pedido de exclusão inválido nesta rota'), { status: 400 });
+  }
   const [rows] = await pool.query(
     `SELECT r.*, f.evento_id
      FROM marketing_formulario_respostas r
@@ -676,15 +689,26 @@ export async function updateFormularioResposta(pool, id, eventoId, raw) {
   const notaInterna =
     raw.notaInterna !== undefined ? String(raw.notaInterna).trim() : row.nota_interna || '';
 
+  let participanteTelefone = row.participante_telefone || '';
+  if (raw.participanteTelefone !== undefined) {
+    participanteTelefone = normalizePhone(raw.participanteTelefone);
+    if (!participanteTelefone) {
+      throw Object.assign(new Error('Informe um telefone ou WhatsApp válido'), { status: 400 });
+    }
+  }
+
   await pool.query(
     `UPDATE marketing_formulario_respostas
-     SET classificacao = ?, nota_interna = ?, updated_at = CURRENT_TIMESTAMP(3)
+     SET classificacao = ?, nota_interna = ?, participante_telefone = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
-    [classificacao, notaInterna || null, id],
+    [classificacao, notaInterna || null, participanteTelefone, id],
   );
 
   if (row.arrecadacao_id && raw.atualizarLead !== false) {
     const leadPatch = {};
+    if (raw.participanteTelefone !== undefined) {
+      leadPatch.participanteWhatsapp = participanteTelefone;
+    }
     if (classificacao === 'aprovado' && raw.statusLead) {
       leadPatch.status = raw.statusLead;
     } else if (classificacao === 'reprovado') {
@@ -694,13 +718,35 @@ export async function updateFormularioResposta(pool, id, eventoId, raw) {
     if (Object.keys(leadPatch).length) {
       await updateArrecadacao(pool, row.arrecadacao_id, leadPatch);
     }
+  } else if (row.arrecadacao_id && raw.participanteTelefone !== undefined) {
+    await updateArrecadacao(pool, row.arrecadacao_id, {
+      participanteWhatsapp: participanteTelefone,
+    });
   }
 
   const [updated] = await pool.query(
-    'SELECT * FROM marketing_formulario_respostas WHERE id = ? LIMIT 1',
+    `SELECT r.*, a.participante_id
+     FROM marketing_formulario_respostas r
+     LEFT JOIN arrecadacao a ON a.id = r.arrecadacao_id
+     WHERE r.id = ? LIMIT 1`,
     [id],
   );
   return updated[0] ? rowToResposta(updated[0]) : null;
+}
+
+export async function deleteFormularioResposta(pool, id, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT r.id
+     FROM marketing_formulario_respostas r
+     JOIN marketing_formularios f ON f.id = r.formulario_id
+     WHERE r.id = ? AND f.evento_id = ?
+     LIMIT 1`,
+    [id, eventoId],
+  );
+  if (!rows[0]) return false;
+
+  await pool.query('DELETE FROM marketing_formulario_respostas WHERE id = ?', [id]);
+  return true;
 }
 
 export async function getPublicFormulario(pool, slug) {

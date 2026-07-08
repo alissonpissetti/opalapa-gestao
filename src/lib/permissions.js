@@ -78,6 +78,12 @@ export function applyNavPermissions() {
     dropdown.classList.toggle('nav-hidden', visibleLinks.length === 0);
   });
 
+  document.querySelectorAll('.nav-section').forEach((section) => {
+    const links = section.querySelectorAll('[data-view]');
+    const visibleLinks = [...links].filter((link) => !link.classList.contains('nav-hidden'));
+    section.classList.toggle('nav-hidden', visibleLinks.length === 0);
+  });
+
   applyWhatsappHeaderPermissions();
 }
 

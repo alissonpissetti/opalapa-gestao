@@ -463,6 +463,22 @@ export function updateFormularioResposta(id, data) {
   });
 }
 
+export async function deleteFormularioResposta(id) {
+  const res = await apiRequest(`/api/marketing/formulario-respostas/${id}`, { method: 'DELETE' });
+  if (res?.ok === true) return res;
+
+  const fallback = await apiRequest(`/api/marketing/formulario-respostas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ action: 'delete' }),
+  });
+  if (fallback?.ok === true) return fallback;
+
+  throw new ApiError(
+    'Não foi possível excluir a resposta. Reinicie a API (npm run dev) e tente novamente.',
+    500,
+  );
+}
+
 export function fetchProducaoCronologia() {
   return apiRequest('/api/producao/cronologia');
 }

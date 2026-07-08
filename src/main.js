@@ -227,7 +227,9 @@ async function initApp(user) {
     onOpenLead: (arrecadacaoId, opts) => openLeadFromApp(arrecadacaoId, opts),
   });
   await syncParticipantesList();
-  marketingModule = initMarketingModule();
+  marketingModule = initMarketingModule({
+    onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
+  });
   cronologiaModule = initProducaoCronologiaModule({
     onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
     onSaved: () => syncParticipantesList(),

@@ -142,51 +142,72 @@
           <div class="nav-drawer-backdrop" id="nav-drawer-backdrop" hidden></div>
         <nav class="nav nav-drawer" id="nav-drawer" aria-label="Módulos">
           <div class="nav-drawer-links">
-          <a href="#eventos" class="nav-link" data-view="eventos" id="nav-eventos">Eventos</a>
-          <a href="#espacos" class="nav-link active" data-view="espacos" id="nav-espacos" aria-current="page">Espaços</a>
-          <div class="nav-dropdown" id="nav-arrecadacao">
-            <button type="button" class="nav-dropdown-toggle" id="nav-arrecadacao-toggle" aria-expanded="false" aria-haspopup="true">
-              Arrecadação
-              <span class="nav-chevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="nav-dropdown-menu" role="menu">
-              <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao-lista" role="menuitem">Leads</a>
-              <a href="#arrecadacao-planos" class="nav-link" data-view="arrecadacao-planos" id="nav-arrecadacao-planos" role="menuitem">Planos e Produtos</a>
+          <div class="nav-section" id="nav-section-principal">
+            <p class="nav-section-label">Principal</p>
+            <div class="nav-section-links">
+              <a href="#espacos" class="nav-link active" data-view="espacos" id="nav-espacos" aria-current="page">Espaços</a>
+              <a href="#eventos" class="nav-link" data-view="eventos" id="nav-eventos">Eventos</a>
             </div>
           </div>
-          <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico">Artístico</a>
-          <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas">Tarefas</a>
-          <a href="#marketing" class="nav-link" data-view="marketing" id="nav-marketing">Marketing</a>
-          <div class="nav-dropdown" id="nav-producao">
-            <button type="button" class="nav-dropdown-toggle" id="nav-producao-toggle" aria-expanded="false" aria-haspopup="true">
-              Produção
-              <span class="nav-chevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="nav-dropdown-menu" role="menu">
-              <a href="#cronologia" class="nav-link" data-view="cronologia" id="nav-cronologia" role="menuitem">Cronologia</a>
-              <a href="#premiacoes" class="nav-link" data-view="premiacoes" id="nav-premiacoes" role="menuitem">Premiações</a>
-              <a href="#entregas" class="nav-link" data-view="entregas" id="nav-entregas" role="menuitem">Entrega</a>
+
+          <div class="nav-section" id="nav-section-comercial">
+            <p class="nav-section-label">Comercial</p>
+            <div class="nav-section-links nav-dropdown" id="nav-comercial">
+              <button type="button" class="nav-dropdown-toggle" id="nav-comercial-toggle" aria-expanded="false" aria-haspopup="true">
+                Comercial
+                <span class="nav-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="nav-dropdown-menu" role="menu">
+                <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao-lista" role="menuitem">Leads comerciais</a>
+                <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico" role="menuitem">Leads artísticos</a>
+                <a href="#marketing" class="nav-link" data-view="marketing" id="nav-marketing" role="menuitem">Marketing</a>
+                <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas" role="menuitem">Tarefas</a>
+                <a href="#arrecadacao-planos" class="nav-link" data-view="arrecadacao-planos" id="nav-arrecadacao-planos" role="menuitem">Planos e produtos</a>
+              </div>
             </div>
           </div>
-          <div class="nav-dropdown" id="nav-financeiro">
-            <button type="button" class="nav-dropdown-toggle" id="nav-financeiro-toggle" aria-expanded="false" aria-haspopup="true">
-              Financeiro
-              <span class="nav-chevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="nav-dropdown-menu" role="menu">
-              <a href="#financeiro-gestao" class="nav-link" data-view="financeiro-gestao" id="nav-financeiro-gestao" role="menuitem">Gestão</a>
-              <a href="#financeiro-contas-pagar" class="nav-link" data-view="financeiro-contas-pagar" id="nav-financeiro-contas-pagar" role="menuitem">Contas a pagar</a>
-              <a href="#financeiro-plano-contas" class="nav-link" data-view="financeiro-plano-contas" id="nav-financeiro-plano-contas" role="menuitem">Plano de contas</a>
+
+          <div class="nav-section" id="nav-section-producao">
+            <p class="nav-section-label">Produção do evento</p>
+            <div class="nav-section-links nav-dropdown" id="nav-producao">
+              <button type="button" class="nav-dropdown-toggle" id="nav-producao-toggle" aria-expanded="false" aria-haspopup="true">
+                Produção
+                <span class="nav-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="nav-dropdown-menu" role="menu">
+                <a href="#cronologia" class="nav-link" data-view="cronologia" id="nav-cronologia" role="menuitem">Cronologia</a>
+                <a href="#premiacoes" class="nav-link" data-view="premiacoes" id="nav-premiacoes" role="menuitem">Premiações</a>
+                <a href="#entregas" class="nav-link" data-view="entregas" id="nav-entregas" role="menuitem">Entregas</a>
+              </div>
             </div>
           </div>
-          <div class="nav-dropdown" id="nav-acessos">
-            <button type="button" class="nav-dropdown-toggle" id="nav-acessos-toggle" aria-expanded="false" aria-haspopup="true">
-              Acessos
-              <span class="nav-chevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="nav-dropdown-menu" role="menu">
-              <a href="#usuarios" class="nav-link" data-view="usuarios" id="nav-usuarios" role="menuitem">Usuários</a>
-              <a href="#permissoes" class="nav-link" data-view="permissoes" id="nav-permissoes" role="menuitem">Grupos</a>
+
+          <div class="nav-section" id="nav-section-financeiro">
+            <p class="nav-section-label">Financeiro</p>
+            <div class="nav-section-links nav-dropdown" id="nav-financeiro">
+              <button type="button" class="nav-dropdown-toggle" id="nav-financeiro-toggle" aria-expanded="false" aria-haspopup="true">
+                Financeiro
+                <span class="nav-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="nav-dropdown-menu" role="menu">
+                <a href="#financeiro-gestao" class="nav-link" data-view="financeiro-gestao" id="nav-financeiro-gestao" role="menuitem">Painel financeiro</a>
+                <a href="#financeiro-contas-pagar" class="nav-link" data-view="financeiro-contas-pagar" id="nav-financeiro-contas-pagar" role="menuitem">Contas a pagar</a>
+                <a href="#financeiro-plano-contas" class="nav-link" data-view="financeiro-plano-contas" id="nav-financeiro-plano-contas" role="menuitem">Plano de contas</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="nav-section" id="nav-section-admin">
+            <p class="nav-section-label">Administração</p>
+            <div class="nav-section-links nav-dropdown" id="nav-acessos">
+              <button type="button" class="nav-dropdown-toggle" id="nav-acessos-toggle" aria-expanded="false" aria-haspopup="true">
+                Administração
+                <span class="nav-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="nav-dropdown-menu" role="menu">
+                <a href="#usuarios" class="nav-link" data-view="usuarios" id="nav-usuarios" role="menuitem">Usuários</a>
+                <a href="#permissoes" class="nav-link" data-view="permissoes" id="nav-permissoes" role="menuitem">Permissões</a>
+              </div>
             </div>
           </div>
           </div>
@@ -764,6 +785,113 @@
             </thead>
             <tbody id="marketing-table-formularios"></tbody>
           </table>
+        </div>
+      </section>
+
+      <section id="marketing-panel-respostas" class="marketing-panel marketing-respostas-page hidden">
+        <div class="marketing-respostas-page-head">
+          <button class="tbtn marketing-respostas-back" type="button" id="marketing-respostas-back">← Voltar aos formulários</button>
+          <div class="marketing-respostas-page-intro">
+            <h2 id="marketing-respostas-title">Respostas</h2>
+            <p class="marketing-respostas-sub" id="marketing-respostas-sub"></p>
+          </div>
+        </div>
+        <div class="table-wrap marketing-respostas-table-wrap">
+          <table class="marketing-respostas-table">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Telefone</th>
+                <th>Resumo</th>
+                <th>Classificação</th>
+                <th>Enviado em</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="marketing-respostas-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="marketing-panel-resposta-detail" class="marketing-panel marketing-resposta-detail-page hidden">
+        <header class="marketing-resposta-detail-hero">
+          <button class="tbtn marketing-respostas-back" type="button" id="marketing-resposta-detail-back">← Voltar às respostas</button>
+          <div class="marketing-resposta-detail-hero-body">
+            <div class="marketing-resposta-detail-hero-main">
+              <p class="marketing-resposta-detail-kicker">Análise de candidatura</p>
+              <h2 id="marketing-resposta-detail-title">Candidato</h2>
+              <p class="marketing-resposta-detail-meta" id="marketing-resposta-detail-meta"></p>
+            </div>
+            <span class="marketing-resposta-head-badge marketing-classif" id="marketing-resposta-detail-badge" hidden></span>
+          </div>
+          <div class="marketing-resposta-detail-contacts" id="marketing-resposta-detail-contacts">
+            <div class="marketing-resposta-contact-phone">
+              <div class="marketing-resposta-contact-phone-view" id="marketing-resposta-telefone-view">
+                <button
+                  type="button"
+                  class="marketing-resposta-contact-chip marketing-resposta-contact-chip--wa wa-phone-btn"
+                  data-action="open-marketing-whatsapp"
+                >
+                  <span class="marketing-resposta-contact-chip-label">WhatsApp</span>
+                  <span class="marketing-resposta-contact-chip-value" id="marketing-resposta-telefone-display">—</span>
+                </button>
+                <button
+                  type="button"
+                  class="icon-btn marketing-resposta-contact-edit"
+                  data-action="edit-marketing-telefone"
+                  title="Editar telefone"
+                  aria-label="Editar telefone"
+                >
+                  ✎
+                </button>
+              </div>
+              <div class="marketing-resposta-contact-phone-edit hidden" id="marketing-resposta-telefone-edit">
+                <input
+                  id="marketing-resposta-telefone"
+                  type="tel"
+                  inputmode="tel"
+                  autocomplete="off"
+                  placeholder="(11) 99999-9999"
+                  aria-label="Telefone WhatsApp"
+                />
+                <button type="button" class="tbtn primary" data-action="save-marketing-telefone">Salvar</button>
+                <button type="button" class="tbtn" data-action="cancel-marketing-telefone">Cancelar</button>
+              </div>
+            </div>
+            <div id="marketing-resposta-contact-instagram"></div>
+          </div>
+        </header>
+
+        <div class="marketing-resposta-detail-layout">
+          <div class="marketing-resposta-detail-fields-wrap">
+            <h3 class="marketing-resposta-detail-section-title">Respostas do formulário</h3>
+            <dl class="marketing-resposta-answers" id="marketing-resposta-detail-body"></dl>
+          </div>
+
+          <aside class="marketing-resposta-detail-sidebar">
+            <h3 class="marketing-resposta-detail-section-title">Classificação da equipe</h3>
+            <div class="field">
+              <label for="marketing-resposta-classificacao">Classificação</label>
+              <select id="marketing-resposta-classificacao">
+                <option value="pendente">Pendente</option>
+                <option value="em_analise">Em análise</option>
+                <option value="aprovado">Aprovado — pode participar</option>
+                <option value="reprovado">Reprovado</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="marketing-resposta-nota">Nota interna</label>
+              <textarea id="marketing-resposta-nota" rows="6" placeholder="Observações da equipe sobre este candidato."></textarea>
+            </div>
+          </aside>
+        </div>
+
+        <div class="btns marketing-resposta-detail-foot">
+          <button class="btn marketing-resposta-detail-delete" type="button" id="marketing-resposta-detail-delete">Excluir resposta</button>
+          <div class="marketing-resposta-detail-foot-right">
+            <button class="btn" type="button" id="marketing-resposta-detail-cancel">Cancelar</button>
+            <button class="btn primary" type="button" id="marketing-resposta-detail-save">Salvar classificação</button>
+          </div>
         </div>
       </section>
     </main>
@@ -1773,54 +1901,6 @@
           <button class="btn" type="button" id="marketing-form-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="marketing-form-delete">Excluir</button>
           <button class="btn primary" type="button" id="marketing-form-save">Salvar</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-bg" id="marketing-respostas-modal-bg">
-      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="marketing-respostas-title">
-        <h2 id="marketing-respostas-title">Respostas</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>Telefone</th>
-                <th colspan="2">Resumo</th>
-                <th>Classificação</th>
-                <th>Enviado em</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="marketing-respostas-table"></tbody>
-          </table>
-        </div>
-        <div class="btns">
-          <button class="btn" type="button" id="marketing-respostas-close">Fechar</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-bg" id="marketing-resposta-detail-bg">
-      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="marketing-resposta-detail-title">
-        <h2 id="marketing-resposta-detail-title">Analisar resposta</h2>
-        <div id="marketing-resposta-detail-body"></div>
-        <div class="field">
-          <label for="marketing-resposta-classificacao">Classificação</label>
-          <select id="marketing-resposta-classificacao">
-            <option value="pendente">Pendente</option>
-            <option value="em_analise">Em análise</option>
-            <option value="aprovado">Aprovado — pode participar</option>
-            <option value="reprovado">Reprovado</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="marketing-resposta-nota">Nota interna</label>
-          <textarea id="marketing-resposta-nota" rows="3" placeholder="Observações da equipe sobre este candidato."></textarea>
-        </div>
-        <div class="btns">
-          <button class="btn" type="button" id="marketing-resposta-detail-cancel">Cancelar</button>
-          <button class="btn primary" type="button" id="marketing-resposta-detail-save">Salvar classificação</button>
         </div>
       </div>
     </div>

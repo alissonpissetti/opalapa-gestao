@@ -102,7 +102,7 @@ function formatCriativoOrigensLabel(criativo) {
   return label;
 }
 
-export function initMarketingModule() {
+export function initMarketingModule({ onOpenWhatsappChat } = {}) {
   const els = {
     summary: document.getElementById('marketing-summary'),
     tabs: document.getElementById('marketing-tabs'),
@@ -111,6 +111,7 @@ export function initMarketingModule() {
     panelCampanhas: document.getElementById('marketing-panel-campanhas'),
     panelCriativos: document.getElementById('marketing-panel-criativos'),
     panelFormularios: document.getElementById('marketing-panel-formularios'),
+    reportHead: document.querySelector('#view-marketing .report-head'),
     btnIgGenerate: document.getElementById('btn-marketing-ig-generate'),
     igOutput: document.getElementById('marketing-ig-output'),
     igResult: document.getElementById('marketing-ig-result'),
@@ -165,9 +166,16 @@ export function initMarketingModule() {
     onSummaryChange: (text) => {
       if (activeTab === 'formularios' && els.summary) els.summary.textContent = text;
     },
+    onRespostasPageChange: (open) => {
+      els.tabs?.classList.toggle('hidden', open);
+      els.summary?.classList.toggle('hidden', open);
+      els.reportHead?.classList.toggle('hidden', open);
+    },
+    onOpenWhatsappChat,
   });
 
   function setTab(tab) {
+    if (tab !== 'formularios') formulariosModule.closeRespostasPage();
     activeTab = tab;
     els.tabs?.querySelectorAll('[data-marketing-tab]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.marketingTab === tab);
