@@ -463,6 +463,32 @@ export function updateFormularioResposta(id, data) {
   });
 }
 
+export function fetchFormularioRespostaInteracoes(respostaId) {
+  return apiRequest(`/api/marketing/formulario-respostas/${respostaId}/interacoes`);
+}
+
+export function createFormularioRespostaInteracao(respostaId, data) {
+  return apiRequest(`/api/marketing/formulario-respostas/${respostaId}/interacoes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteFormularioRespostaInteracao(respostaId, interacaoId) {
+  try {
+    return await apiRequest(
+      `/api/marketing/formulario-respostas/${respostaId}/interacoes/${interacaoId}`,
+      { method: 'DELETE' },
+    );
+  } catch (err) {
+    if (err.status !== 404) throw err;
+    return apiRequest(`/api/marketing/formulario-respostas/${respostaId}/interacoes`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'delete', interacaoId }),
+    });
+  }
+}
+
 export async function deleteFormularioResposta(id) {
   const res = await apiRequest(`/api/marketing/formulario-respostas/${id}`, { method: 'DELETE' });
   if (res?.ok === true) return res;

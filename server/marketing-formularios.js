@@ -86,7 +86,37 @@ function parseJson(value, fallback) {
   }
 }
 
+const LISTA_COLUNA_FIXAS = new Set(['nome', 'telefone', 'classificacao', 'dataAtivacao', 'createdAt']);
+const DEFAULT_LISTA_COLUNAS_FIXAS = [
+  'nome',
+  'telefone',
+  'classificacao',
+  'dataAtivacao',
+  'createdAt',
+];
+
+function normalizeColunasLista(raw, campos = []) {
+  const validCampoIds = new Set(campos.map((c) => c.id));
+  const data = raw && typeof raw === 'object' ? raw : {};
+
+  let fixas = Array.isArray(data.fixas)
+    ? data.fixas.filter((key) => LISTA_COLUNA_FIXAS.has(key))
+    : [...DEFAULT_LISTA_COLUNAS_FIXAS];
+  if (!fixas.length) fixas = [...DEFAULT_LISTA_COLUNAS_FIXAS];
+
+  let campoIds = Array.isArray(data.campos)
+    ? data.campos.filter((id) => validCampoIds.has(id))
+    : [];
+
+  if (!campoIds.length && !data.campos && campos.some((c) => c.showInList)) {
+    campoIds = campos.filter((c) => c.showInList).map((c) => c.id);
+  }
+
+  return { fixas, campos: campoIds };
+}
+
 function rowToFormulario(row) {
+  const campos = parseJson(row.campos, []);
   return {
     id: row.id,
     eventoId: Number(row.evento_id),
@@ -101,7 +131,8 @@ function rowToFormulario(row) {
     marketingCanalId: row.marketing_canal_id ? Number(row.marketing_canal_id) : null,
     marketingCampanhaId: row.marketing_campanha_id ? Number(row.marketing_campanha_id) : null,
     marketingCriativoId: row.marketing_criativo_id ? Number(row.marketing_criativo_id) : null,
-    campos: parseJson(row.campos, []),
+    campos,
+    colunasLista: normalizeColunasLista(parseJson(row.colunas_lista, null), campos),
     logoPath: row.logo_path || null,
     hasLogo: Boolean(row.logo_path),
     corFundo: row.cor_fundo || '',
@@ -122,9 +153,43 @@ function rowToResposta(row) {
     respostas: parseJson(row.respostas, {}),
     classificacao: row.classificacao || 'pendente',
     notaInterna: row.nota_interna || '',
+    dataAtivacao: row.data_ativacao ? new Date(row.data_ativacao).toISOString() : null,
+    leadCreatedAt: row.lead_created_at ? new Date(row.lead_created_at).toISOString() : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
+}
+
+function parseDataAtivacao(raw) {
+  if (raw == null || raw === '') return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    throw Object.assign(new Error('Data de ativação inválida'), { status: 400 });
+  }
+  return d;
+}
+
+function rowToRespostaInteracao(row) {
+  return {
+    id: Number(row.id),
+    respostaId: Number(row.resposta_id),
+    userId: row.user_id ? Number(row.user_id) : null,
+    userName: row.user_name || '',
+    texto: row.texto || '',
+    criadoEm: row.criado_em ? new Date(row.criado_em).toISOString() : null,
+  };
+}
+
+async function findRespostaForEvento(pool, respostaId, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT r.id
+     FROM marketing_formulario_respostas r
+     JOIN marketing_formularios f ON f.id = r.formulario_id
+     WHERE r.id = ? AND f.evento_id = ?
+     LIMIT 1`,
+    [respostaId, eventoId],
+  );
+  return rows[0] || null;
 }
 
 function sortOptionsAlphabetically(options) {
@@ -284,6 +349,7 @@ function normalizeCampo(raw, index) {
     type,
     required,
     allowOther,
+    showInList: Boolean(raw.showInList ?? raw.show_in_list),
     options: type === 'select' ? selectOptions : [],
   };
 }
@@ -459,6 +525,60 @@ export async function migrateMarketingFormularios(pool) {
   if (!colSet.has('secoes')) {
     await pool.query('ALTER TABLE marketing_formularios ADD COLUMN secoes JSON NULL AFTER introducao');
   }
+  if (!colSet.has('colunas_lista')) {
+    await pool.query('ALTER TABLE marketing_formularios ADD COLUMN colunas_lista JSON NULL AFTER campos');
+  }
+
+  const [formsSemColunas] = await pool.query(
+    'SELECT id, campos FROM marketing_formularios WHERE colunas_lista IS NULL',
+  );
+  for (const row of formsSemColunas) {
+    const campos = parseJson(row.campos, []);
+    const colunasLista = normalizeColunasLista(null, campos);
+    await pool.query('UPDATE marketing_formularios SET colunas_lista = ? WHERE id = ?', [
+      JSON.stringify(colunasLista),
+      row.id,
+    ]);
+  }
+
+  const [respostaCols] = await pool.query(
+    `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'marketing_formulario_respostas'`,
+  );
+  const respostaColSet = new Set(respostaCols.map((c) => c.name));
+  if (!respostaColSet.has('data_ativacao')) {
+    await pool.query(
+      'ALTER TABLE marketing_formulario_respostas ADD COLUMN data_ativacao DATETIME(3) NULL AFTER nota_interna',
+    );
+    await pool.query(
+      'UPDATE marketing_formulario_respostas SET data_ativacao = created_at WHERE data_ativacao IS NULL',
+    );
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketing_formulario_resposta_interacoes (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      resposta_id INT UNSIGNED NOT NULL,
+      user_id INT UNSIGNED NULL,
+      texto TEXT NOT NULL,
+      criado_em DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      INDEX idx_mfri_resposta (resposta_id, criado_em),
+      CONSTRAINT fk_mfri_resposta
+        FOREIGN KEY (resposta_id) REFERENCES marketing_formulario_respostas(id) ON DELETE CASCADE,
+      CONSTRAINT fk_mfri_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await pool.query(`
+    INSERT INTO marketing_formulario_resposta_interacoes (resposta_id, user_id, texto, criado_em)
+    SELECT r.id, NULL, r.nota_interna, COALESCE(r.updated_at, r.created_at)
+    FROM marketing_formulario_respostas r
+    WHERE r.nota_interna IS NOT NULL AND TRIM(r.nota_interna) <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM marketing_formulario_resposta_interacoes i WHERE i.resposta_id = r.id
+      )
+  `);
 }
 
 function normalizeCorFundo(raw) {
@@ -512,6 +632,7 @@ export async function createMarketingFormulario(pool, eventoId, raw) {
 
   const campos = normalizeCampos(raw.campos);
   const secoes = normalizeSecoes(raw.secoes);
+  const colunasLista = normalizeColunasLista(raw.colunasLista ?? raw.colunas_lista, campos);
   const slug = await ensureUniqueSlug(pool, eventoId, raw.slug || nome);
   const tipoLead = normalizeTipoLead(raw.tipoLead);
 
@@ -520,8 +641,8 @@ export async function createMarketingFormulario(pool, eventoId, raw) {
   const [result] = await pool.query(
     `INSERT INTO marketing_formularios
        (evento_id, nome, slug, ativo, introducao, secoes, tipo_lead, descricao_lead, status_inicial,
-        marketing_canal_id, marketing_campanha_id, marketing_criativo_id, campos, cor_fundo, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+        marketing_canal_id, marketing_campanha_id, marketing_criativo_id, campos, colunas_lista, cor_fundo, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [
       eventoId,
       nome,
@@ -536,6 +657,7 @@ export async function createMarketingFormulario(pool, eventoId, raw) {
       raw.marketingCampanhaId ?? raw.marketing_campanha_id ?? null,
       raw.marketingCriativoId ?? raw.marketing_criativo_id ?? null,
       JSON.stringify(campos),
+      JSON.stringify(colunasLista),
       corFundo,
     ],
   );
@@ -556,6 +678,10 @@ export async function updateMarketingFormulario(pool, id, eventoId, raw) {
 
   const campos = raw.campos !== undefined ? normalizeCampos(raw.campos) : existing.campos;
   const secoes = raw.secoes !== undefined ? normalizeSecoes(raw.secoes) : existing.secoes;
+  const colunasLista =
+    raw.colunasLista !== undefined || raw.colunas_lista !== undefined
+      ? normalizeColunasLista(raw.colunasLista ?? raw.colunas_lista, campos)
+      : normalizeColunasLista(existing.colunasLista, campos);
   const slug =
     raw.slug !== undefined || raw.nome !== undefined
       ? await ensureUniqueSlug(pool, eventoId, raw.slug || nome, id)
@@ -572,7 +698,7 @@ export async function updateMarketingFormulario(pool, id, eventoId, raw) {
     `UPDATE marketing_formularios SET
        nome = ?, slug = ?, ativo = ?, introducao = ?, secoes = ?, tipo_lead = ?, descricao_lead = ?,
        status_inicial = ?, marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?,
-       campos = ?, cor_fundo = ?, updated_at = CURRENT_TIMESTAMP(3)
+       campos = ?, colunas_lista = ?, cor_fundo = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ? AND evento_id = ?`,
     [
       nome,
@@ -603,6 +729,7 @@ export async function updateMarketingFormulario(pool, id, eventoId, raw) {
           ? raw.marketing_criativo_id
           : existing.marketingCriativoId,
       JSON.stringify(campos),
+      JSON.stringify(colunasLista),
       corFundo,
       id,
       eventoId,
@@ -651,7 +778,7 @@ export async function listFormularioRespostas(pool, formularioId, eventoId) {
   if (!form) return null;
 
   const [rows] = await pool.query(
-    `SELECT r.*, a.participante_id
+    `SELECT r.*, a.participante_id, a.created_at AS lead_created_at
      FROM marketing_formulario_respostas r
      JOIN marketing_formularios f ON f.id = r.formulario_id
      LEFT JOIN arrecadacao a ON a.id = r.arrecadacao_id
@@ -671,9 +798,10 @@ export async function updateFormularioResposta(pool, id, eventoId, raw) {
     throw Object.assign(new Error('Pedido de exclusão inválido nesta rota'), { status: 400 });
   }
   const [rows] = await pool.query(
-    `SELECT r.*, f.evento_id
+    `SELECT r.*, f.evento_id, f.campos, a.participante_id
      FROM marketing_formulario_respostas r
      JOIN marketing_formularios f ON f.id = r.formulario_id
+     LEFT JOIN arrecadacao a ON a.id = r.arrecadacao_id
      WHERE r.id = ? AND f.evento_id = ?
      LIMIT 1`,
     [id, eventoId],
@@ -686,8 +814,18 @@ export async function updateFormularioResposta(pool, id, eventoId, raw) {
     throw Object.assign(new Error('Classificação inválida'), { status: 400 });
   }
 
-  const notaInterna =
-    raw.notaInterna !== undefined ? String(raw.notaInterna).trim() : row.nota_interna || '';
+  let participanteNome = row.participante_nome || '';
+  if (raw.participanteNome !== undefined || raw.participante_nome !== undefined) {
+    participanteNome = String(raw.participanteNome ?? raw.participante_nome ?? '').trim();
+    if (!participanteNome) {
+      throw Object.assign(new Error('Informe o nome do candidato'), { status: 400 });
+    }
+  }
+
+  let participanteInstagram = row.participante_instagram || '';
+  if (raw.participanteInstagram !== undefined || raw.participante_instagram !== undefined) {
+    participanteInstagram = String(raw.participanteInstagram ?? raw.participante_instagram ?? '').trim();
+  }
 
   let participanteTelefone = row.participante_telefone || '';
   if (raw.participanteTelefone !== undefined) {
@@ -697,17 +835,57 @@ export async function updateFormularioResposta(pool, id, eventoId, raw) {
     }
   }
 
+  let respostasJson = parseJson(row.respostas, {});
+  if (raw.respostas !== undefined) {
+    const campos = parseJson(row.campos, []);
+    const validated = validateRespostas(campos, raw.respostas, {
+      nome: participanteNome,
+      telefone: participanteTelefone,
+      instagram: participanteInstagram,
+    });
+    participanteNome = validated.nome;
+    participanteTelefone = normalizePhone(validated.telefone) || participanteTelefone;
+    participanteInstagram = validated.instagram;
+    respostasJson = validated.respostas;
+  }
+
+  let dataAtivacao = row.data_ativacao ? new Date(row.data_ativacao) : null;
+  if (raw.dataAtivacao !== undefined || raw.data_ativacao !== undefined) {
+    dataAtivacao = parseDataAtivacao(raw.dataAtivacao ?? raw.data_ativacao);
+    if (!dataAtivacao) {
+      throw Object.assign(new Error('Informe a data de ativação do lead'), { status: 400 });
+    }
+  }
+
   await pool.query(
     `UPDATE marketing_formulario_respostas
-     SET classificacao = ?, nota_interna = ?, participante_telefone = ?, updated_at = CURRENT_TIMESTAMP(3)
+     SET classificacao = ?, participante_nome = ?, participante_telefone = ?, participante_instagram = ?,
+         respostas = ?, data_ativacao = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
-    [classificacao, notaInterna || null, participanteTelefone, id],
+    [
+      classificacao,
+      participanteNome,
+      participanteTelefone,
+      participanteInstagram || null,
+      JSON.stringify(respostasJson),
+      dataAtivacao,
+      id,
+    ],
   );
 
   if (row.arrecadacao_id && raw.atualizarLead !== false) {
     const leadPatch = {};
     if (raw.participanteTelefone !== undefined) {
       leadPatch.participanteWhatsapp = participanteTelefone;
+    }
+    if (raw.participanteNome !== undefined || raw.participante_nome !== undefined) {
+      leadPatch.participanteNome = participanteNome;
+    }
+    if (raw.participanteInstagram !== undefined || raw.participante_instagram !== undefined) {
+      leadPatch.participanteInstagram = participanteInstagram || undefined;
+    }
+    if (raw.dataAtivacao !== undefined || raw.data_ativacao !== undefined) {
+      leadPatch.createdAt = dataAtivacao.toISOString();
     }
     if (classificacao === 'aprovado' && raw.statusLead) {
       leadPatch.status = raw.statusLead;
@@ -716,22 +894,96 @@ export async function updateFormularioResposta(pool, id, eventoId, raw) {
       if (raw.motivoPerda) leadPatch.motivoPerda = raw.motivoPerda;
     }
     if (Object.keys(leadPatch).length) {
-      await updateArrecadacao(pool, row.arrecadacao_id, leadPatch);
+      await updateArrecadacao(pool, row.arrecadacao_id, {
+        ...leadPatch,
+        participanteId: row.participante_id ? Number(row.participante_id) : undefined,
+      });
     }
   } else if (row.arrecadacao_id && raw.participanteTelefone !== undefined) {
     await updateArrecadacao(pool, row.arrecadacao_id, {
       participanteWhatsapp: participanteTelefone,
+      participanteId: row.participante_id ? Number(row.participante_id) : undefined,
     });
   }
 
   const [updated] = await pool.query(
-    `SELECT r.*, a.participante_id
+    `SELECT r.*, a.participante_id, a.created_at AS lead_created_at
      FROM marketing_formulario_respostas r
      LEFT JOIN arrecadacao a ON a.id = r.arrecadacao_id
      WHERE r.id = ? LIMIT 1`,
     [id],
   );
   return updated[0] ? rowToResposta(updated[0]) : null;
+}
+
+export async function listFormularioRespostaInteracoes(pool, respostaId, eventoId) {
+  const resposta = await findRespostaForEvento(pool, respostaId, eventoId);
+  if (!resposta) return null;
+
+  const [rows] = await pool.query(
+    `SELECT i.id, i.resposta_id, i.user_id, i.texto, i.criado_em, u.name AS user_name
+     FROM marketing_formulario_resposta_interacoes i
+     LEFT JOIN users u ON u.id = i.user_id
+     WHERE i.resposta_id = ?
+     ORDER BY i.criado_em ASC, i.id ASC`,
+    [respostaId],
+  );
+  return rows.map(rowToRespostaInteracao);
+}
+
+export async function createFormularioRespostaInteracao(pool, respostaId, eventoId, userId, raw) {
+  const resposta = await findRespostaForEvento(pool, respostaId, eventoId);
+  if (!resposta) return null;
+
+  const texto = String(raw.texto || '').trim();
+  if (!texto) {
+    throw Object.assign(new Error('Informe o texto da mensagem'), { status: 400 });
+  }
+
+  const [result] = await pool.query(
+    `INSERT INTO marketing_formulario_resposta_interacoes (resposta_id, user_id, texto)
+     VALUES (?, ?, ?)`,
+    [respostaId, userId || null, texto],
+  );
+
+  const [rows] = await pool.query(
+    `SELECT i.id, i.resposta_id, i.user_id, i.texto, i.criado_em, u.name AS user_name
+     FROM marketing_formulario_resposta_interacoes i
+     LEFT JOIN users u ON u.id = i.user_id
+     WHERE i.id = ? LIMIT 1`,
+    [result.insertId],
+  );
+  return rows[0] ? rowToRespostaInteracao(rows[0]) : null;
+}
+
+export async function deleteFormularioRespostaInteracao(
+  pool,
+  respostaId,
+  interacaoId,
+  eventoId,
+  userId,
+) {
+  const resposta = await findRespostaForEvento(pool, respostaId, eventoId);
+  if (!resposta) return null;
+
+  const [rows] = await pool.query(
+    `SELECT i.id, i.user_id
+     FROM marketing_formulario_resposta_interacoes i
+     WHERE i.id = ? AND i.resposta_id = ?
+     LIMIT 1`,
+    [interacaoId, respostaId],
+  );
+  const row = rows[0];
+  if (!row) return false;
+
+  const isOwn = userId && row.user_id && Number(row.user_id) === Number(userId);
+  const isLegacy = !row.user_id;
+  if (!isOwn && !isLegacy) {
+    throw Object.assign(new Error('Você só pode excluir suas próprias mensagens'), { status: 403 });
+  }
+
+  await pool.query('DELETE FROM marketing_formulario_resposta_interacoes WHERE id = ?', [interacaoId]);
+  return true;
 }
 
 export async function deleteFormularioResposta(pool, id, eventoId) {
@@ -833,8 +1085,8 @@ export async function submitPublicFormulario(pool, slug, raw) {
   const [result] = await pool.query(
     `INSERT INTO marketing_formulario_respostas
        (formulario_id, arrecadacao_id, participante_nome, participante_telefone, participante_instagram,
-        respostas, classificacao, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pendente', CURRENT_TIMESTAMP(3))`,
+        respostas, classificacao, data_ativacao, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'pendente', CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))`,
     [
       form.id,
       lead.id,

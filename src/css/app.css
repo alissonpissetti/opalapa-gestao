@@ -3716,6 +3716,19 @@ body.lead-workspace-open .lead-workspace {
   color: var(--content-text-muted, #64748b);
 }
 
+.marketing-respostas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.marketing-respostas-filters {
+  flex-wrap: wrap;
+}
+
 .marketing-respostas-table-wrap {
   overflow: auto;
   border: 1px solid var(--content-border, #e2e8f0);
@@ -3753,6 +3766,28 @@ body.lead-workspace-open .lead-workspace {
   background: var(--content-surface-muted, #f8fafc);
 }
 
+.marketing-respostas-table tbody tr.marketing-resposta-row--aprovado {
+  background: #ecfdf3;
+}
+
+.marketing-respostas-table tbody tr.marketing-resposta-row--aprovado:hover {
+  background: #dcfce7;
+}
+
+.marketing-respostas-table tbody tr.marketing-resposta-row--reprovado {
+  background: var(--content-surface-muted, #f8fafc);
+  opacity: 0.62;
+}
+
+.marketing-respostas-table tbody tr.marketing-resposta-row--reprovado td {
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-respostas-table tbody tr.marketing-resposta-row--reprovado:hover {
+  background: #f1f5f9;
+  opacity: 0.72;
+}
+
 .marketing-respostas-table tbody td {
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--content-border, #e2e8f0);
@@ -3777,11 +3812,26 @@ body.lead-workspace-open .lead-workspace {
   color: var(--content-text-muted, #64748b);
 }
 
+.marketing-respostas-table .marketing-resposta-col-campo {
+  min-width: 8rem;
+  max-width: 16rem;
+  line-height: 1.45;
+  color: var(--content-text-muted, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .marketing-respostas-table .marketing-resposta-data {
   min-width: 9.5rem;
   white-space: nowrap;
   font-size: 0.88rem;
   color: var(--content-text-muted, #64748b);
+}
+
+.marketing-respostas-table .marketing-resposta-ativacao {
+  color: var(--content-text, #0f172a);
+  font-weight: 500;
 }
 
 .marketing-respostas-table .marketing-resposta-actions {
@@ -4016,6 +4066,98 @@ body.lead-workspace-open .lead-workspace {
   color: var(--content-text, #0f172a);
 }
 
+.marketing-resposta-answers-hint {
+  margin: -0.35rem 0 0.85rem;
+}
+
+.marketing-resposta-contact-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--content-border, #e2e8f0);
+}
+
+.marketing-resposta-contact-fields input {
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.marketing-resposta-instagram-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.marketing-resposta-instagram-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.marketing-resposta-instagram-open {
+  flex-shrink: 0;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.marketing-resposta-answers-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.marketing-resposta-answer-field label,
+.marketing-resposta-answer-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-answer-field input,
+.marketing-resposta-answer-field textarea,
+.marketing-resposta-answer-field select {
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.marketing-resposta-select-other {
+  margin-top: 0.5rem;
+}
+
+.marketing-resposta-select-other.hidden {
+  display: none;
+}
+
+.marketing-resposta-yesno {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.marketing-resposta-yesno-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--content-border, #e2e8f0);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.marketing-resposta-yesno-option:has(input:checked) {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.08);
+}
+
 .marketing-resposta-answers {
   display: flex;
   flex-direction: column;
@@ -4080,6 +4222,100 @@ body.lead-workspace-open .lead-workspace {
   font-size: 0.95rem;
 }
 
+.marketing-resposta-interacoes-field {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.marketing-resposta-interacoes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 0.75rem;
+  margin-bottom: 0.65rem;
+  border: 1px solid var(--content-border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.marketing-resposta-interacoes-empty {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.marketing-resposta-interacao-item {
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.marketing-resposta-interacao-item--own {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.marketing-resposta-interacao-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.marketing-resposta-interacao-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.marketing-resposta-interacao-delete {
+  padding: 0.1rem 0.35rem;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.marketing-resposta-interacao-autor {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--content-text, #0f172a);
+}
+
+.marketing-resposta-interacao-head time {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.marketing-resposta-interacao-texto {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.marketing-resposta-interacao-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.marketing-resposta-interacao-form textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  font-size: 0.92rem;
+}
+
+.marketing-resposta-interacao-form .tbtn {
+  align-self: flex-end;
+}
+
 .marketing-resposta-detail-foot {
   display: flex;
   flex-wrap: wrap;
@@ -4112,6 +4348,10 @@ body.lead-workspace-open .lead-workspace {
     grid-template-columns: 1fr;
     padding-left: 1rem;
     padding-right: 1rem;
+  }
+
+  .marketing-resposta-contact-fields {
+    grid-template-columns: 1fr;
   }
 
   .marketing-resposta-answer {
@@ -5978,6 +6218,68 @@ tbody tr:hover {
 
 .marketing-form-required-check {
   margin-bottom: 0.65rem;
+}
+
+.marketing-form-list-col-check {
+  margin-bottom: 0.65rem;
+  white-space: nowrap;
+}
+
+.marketing-respostas-colunas-modal .marketing-form-colunas-group:first-child {
+  margin-top: 0;
+}
+
+.marketing-respostas-colunas-modal .btns {
+  margin-top: 1.25rem;
+}
+
+.marketing-form-colunas-wrap {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.marketing-form-colunas-head {
+  margin-bottom: 0.75rem;
+}
+
+.marketing-form-colunas-head .field-hint {
+  margin: 0.25rem 0 0;
+  max-width: 36rem;
+}
+
+.marketing-form-colunas-group + .marketing-form-colunas-group {
+  margin-top: 1rem;
+}
+
+.marketing-form-colunas-group-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #64748b);
+  margin-bottom: 0.5rem;
+}
+
+.marketing-form-colunas-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.marketing-form-coluna-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.marketing-form-campos-head .field-hint {
+  margin: 0.25rem 0 0;
+  max-width: 28rem;
 }
 
 .marketing-form-logo-field input[type='file'] {

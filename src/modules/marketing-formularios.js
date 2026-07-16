@@ -7,11 +7,15 @@ import {
   fetchArrecadacaoById,
   updateFormularioResposta,
   deleteFormularioResposta,
+  fetchFormularioRespostaInteracoes,
+  createFormularioRespostaInteracao,
+  deleteFormularioRespostaInteracao,
   fetchMarketingFormularioLogoBlob,
   generateMarketingFormularioIntro,
   generateMarketingFormularioSecao,
 } from '../lib/api.js';
-import { escapeHtml, fmtMoney, formatPhoneDisplay } from '../lib/format.js';
+import { escapeHtml, fmtMoney, formatPhoneDisplay, isoToDatetimeLocalValue, datetimeLocalToIso, fmtDate } from '../lib/format.js';
+import { getCurrentUser } from '../lib/auth.js';
 import { getActiveEvento } from '../lib/evento.js';
 
 const FIELD_TYPES = [
@@ -32,6 +36,55 @@ const CLASSIFICACAO_LABELS = {
   reprovado: 'Reprovado',
 };
 
+const SELECT_OTHER_VALUE = '__outro__';
+
+const RESPOSTAS_SORT_KEYS = new Set(['dataAtivacao', 'createdAt']);
+const DEFAULT_RESPOSTAS_SORT = { key: 'dataAtivacao', dir: 'desc' };
+
+const LISTA_COLUNA_FIXAS = [
+  { key: 'nome', label: 'Nome' },
+  { key: 'telefone', label: 'Telefone' },
+  { key: 'classificacao', label: 'Classificação' },
+  { key: 'dataAtivacao', label: 'Ativação' },
+  { key: 'createdAt', label: 'Enviado em' },
+];
+
+const DEFAULT_COLUNAS_LISTA = {
+  fixas: LISTA_COLUNA_FIXAS.map((c) => c.key),
+  campos: [],
+};
+
+function respostasSortStorageKey(formularioId) {
+  return `marketing-form-respostas-sort:${formularioId}`;
+}
+
+function readRespostasSort(formularioId) {
+  if (!formularioId) return { ...DEFAULT_RESPOSTAS_SORT };
+  try {
+    const raw = localStorage.getItem(respostasSortStorageKey(formularioId));
+    if (!raw) return { ...DEFAULT_RESPOSTAS_SORT };
+    const parsed = JSON.parse(raw);
+    if (!parsed?.key || !RESPOSTAS_SORT_KEYS.has(parsed.key)) {
+      return { ...DEFAULT_RESPOSTAS_SORT };
+    }
+    return { key: parsed.key, dir: parsed.dir === 'asc' ? 'asc' : 'desc' };
+  } catch {
+    return { ...DEFAULT_RESPOSTAS_SORT };
+  }
+}
+
+function writeRespostasSort(formularioId, state) {
+  if (!formularioId || !state?.key || !RESPOSTAS_SORT_KEYS.has(state.key)) return;
+  try {
+    localStorage.setItem(
+      respostasSortStorageKey(formularioId),
+      JSON.stringify({ key: state.key, dir: state.dir === 'asc' ? 'asc' : 'desc' }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 const DEFAULT_FORM_BG = '#eef2f6';
 
 function formPublicUrl(slug) {
@@ -48,6 +101,94 @@ function defaultCampo(index = 0) {
     required: true,
     options: [],
   };
+}
+
+function cloneColunasLista(source) {
+  const base = source && typeof source === 'object' ? source : DEFAULT_COLUNAS_LISTA;
+  return {
+    fixas: Array.isArray(base.fixas) ? [...base.fixas] : [...DEFAULT_COLUNAS_LISTA.fixas],
+    campos: Array.isArray(base.campos) ? [...base.campos] : [],
+  };
+}
+
+function normalizeColunasListaForCampos(colunasLista, campos) {
+  const next = cloneColunasLista(colunasLista);
+  const validIds = new Set(campos.map((c) => c.id));
+  next.fixas = next.fixas.filter((key) => LISTA_COLUNA_FIXAS.some((c) => c.key === key));
+  if (!next.fixas.length) next.fixas = [...DEFAULT_COLUNAS_LISTA.fixas];
+  next.campos = next.campos.filter((id) => validIds.has(id));
+  return next;
+}
+
+function colunasListaFromFormulario(item, campos) {
+  if (item?.colunasLista) return normalizeColunasListaForCampos(item.colunasLista, campos);
+  const legacyCampoIds = campos.filter((c) => c.showInList).map((c) => c.id);
+  return normalizeColunasListaForCampos(
+    { fixas: [...DEFAULT_COLUNAS_LISTA.fixas], campos: legacyCampoIds },
+    campos,
+  );
+}
+
+function readColunasListaFromContainer(container, campos) {
+  if (!container) return cloneColunasLista();
+  const fixas = [];
+  container.querySelectorAll('[data-coluna-fixa]:checked').forEach((input) => {
+    fixas.push(input.dataset.colunaFixa);
+  });
+  const campoIds = [];
+  container.querySelectorAll('[data-coluna-campo]:checked').forEach((input) => {
+    campoIds.push(input.dataset.colunaCampo);
+  });
+  return normalizeColunasListaForCampos({ fixas, campos: campoIds }, campos);
+}
+
+function renderColunasListaEditor(container, listaState, campos) {
+  if (!container) return;
+
+  const camposComLabel = campos.filter((campo) => String(campo.label || '').trim());
+
+  const fixasHtml = LISTA_COLUNA_FIXAS.map((coluna) => {
+    const checked = listaState.fixas.includes(coluna.key) ? ' checked' : '';
+    return `
+      <label class="marketing-form-coluna-check">
+        <input type="checkbox" data-coluna-fixa="${coluna.key}"${checked} />
+        ${escapeHtml(coluna.label)}
+      </label>`;
+  }).join('');
+
+  const camposHtml = camposComLabel.length
+    ? camposComLabel
+        .map((campo) => {
+          const checked = listaState.campos.includes(campo.id) ? ' checked' : '';
+          return `
+      <label class="marketing-form-coluna-check">
+        <input type="checkbox" data-coluna-campo="${escapeHtml(campo.id)}"${checked} />
+        ${escapeHtml(campo.label)}
+      </label>`;
+        })
+        .join('')
+    : '<p class="field-hint">Este formulário não tem perguntas configuradas.</p>';
+
+  container.innerHTML = `
+    <div class="marketing-form-colunas-group">
+      <span class="marketing-form-colunas-group-label">Colunas padrão</span>
+      <div class="marketing-form-colunas-checks">${fixasHtml}</div>
+    </div>
+    <div class="marketing-form-colunas-group">
+      <span class="marketing-form-colunas-group-label">Perguntas do formulário</span>
+      <p class="field-hint">Se nenhuma pergunta estiver marcada, a lista mostra a coluna <strong>Resumo</strong>.</p>
+      <div class="marketing-form-colunas-checks">${camposHtml}</div>
+    </div>`;
+
+  const sync = () => {
+    const next = readColunasListaFromContainer(container, campos);
+    listaState.fixas = next.fixas;
+    listaState.campos = next.campos;
+  };
+
+  container.querySelectorAll('[data-coluna-fixa], [data-coluna-campo]').forEach((input) => {
+    input.addEventListener('change', sync);
+  });
 }
 
 function defaultSecao(index = 0) {
@@ -112,6 +253,7 @@ export function initMarketingFormularios({
     logoPickWrap: document.getElementById('marketing-form-logo-pick-wrap'),
     logoPickHint: document.getElementById('marketing-form-logo-pick-hint'),
     camposList: document.getElementById('marketing-form-campos'),
+    colunasListaWrap: document.getElementById('marketing-form-colunas-lista'),
     btnAddCampo: document.getElementById('marketing-form-add-campo'),
     secoesList: document.getElementById('marketing-form-secoes'),
     btnAddSecao: document.getElementById('marketing-form-add-secao'),
@@ -122,8 +264,16 @@ export function initMarketingFormularios({
     linkPreview: document.getElementById('marketing-form-link'),
     respostasTitle: document.getElementById('marketing-respostas-title'),
     respostasSub: document.getElementById('marketing-respostas-sub'),
+    respostasFilters: document.getElementById('marketing-respostas-filters'),
+    respostasTableWrap: document.querySelector('.marketing-respostas-table-wrap'),
+    respostasTableHead: document.getElementById('marketing-respostas-table-head'),
     respostasTable: document.getElementById('marketing-respostas-table'),
     respostasBack: document.getElementById('marketing-respostas-back'),
+    respostasColunasBtn: document.getElementById('marketing-respostas-colunas-btn'),
+    respostasColunasModalBg: document.getElementById('marketing-respostas-colunas-modal-bg'),
+    respostasColunasListaWrap: document.getElementById('marketing-respostas-colunas-lista'),
+    respostasColunasCancel: document.getElementById('marketing-respostas-colunas-cancel'),
+    respostasColunasSave: document.getElementById('marketing-respostas-colunas-save'),
     respostaDetailPage: document.getElementById('marketing-panel-resposta-detail'),
     respostaDetailBack: document.getElementById('marketing-resposta-detail-back'),
     respostaDetailTitle: document.getElementById('marketing-resposta-detail-title'),
@@ -136,8 +286,14 @@ export function initMarketingFormularios({
     respostaContactInstagram: document.getElementById('marketing-resposta-contact-instagram'),
     respostaDetailBadge: document.getElementById('marketing-resposta-detail-badge'),
     respostaDetailBody: document.getElementById('marketing-resposta-detail-body'),
+    respostaParticipanteNome: document.getElementById('marketing-resposta-participante-nome'),
+    respostaParticipanteInstagram: document.getElementById('marketing-resposta-participante-instagram'),
+    respostaParticipanteInstagramOpen: document.getElementById('marketing-resposta-participante-instagram-open'),
     respostaClassificacao: document.getElementById('marketing-resposta-classificacao'),
-    respostaNota: document.getElementById('marketing-resposta-nota'),
+    respostaDataAtivacao: document.getElementById('marketing-resposta-data-ativacao'),
+    respostaInteracoesList: document.getElementById('marketing-resposta-interacoes-list'),
+    respostaInteracaoForm: document.getElementById('marketing-resposta-interacao-form'),
+    respostaInteracaoTexto: document.getElementById('marketing-resposta-interacao-texto'),
     respostaDetailDelete: document.getElementById('marketing-resposta-detail-delete'),
     respostaDetailCancel: document.getElementById('marketing-resposta-detail-cancel'),
     respostaDetailSave: document.getElementById('marketing-resposta-detail-save'),
@@ -147,9 +303,14 @@ export function initMarketingFormularios({
   let editId = null;
   let campos = [];
   let secoes = [];
+  let colunasLista = cloneColunasLista();
+  let respostasColunasDraft = cloneColunasLista();
   let respostasCtx = { formulario: null, respostas: [] };
   let respostaEditId = null;
+  let respostaInteracoes = [];
   let respostasPageOpen = false;
+  let respostasFilterClassificacao = '';
+  let respostasSort = { key: 'dataAtivacao', dir: 'desc' };
   let respostaDetailOpen = false;
   let respostaTelefoneOriginal = '';
   let telefoneEditOpen = false;
@@ -680,6 +841,7 @@ export function initMarketingFormularios({
       btn.addEventListener('click', () => {
         syncCampoFromDom();
         campos.splice(Number(btn.dataset.index), 1);
+        colunasLista = normalizeColunasListaForCampos(colunasLista, campos);
         renderCamposBuilder();
       });
     });
@@ -694,9 +856,33 @@ export function initMarketingFormularios({
     });
 
     els.camposList.querySelectorAll('[data-campo]').forEach((el) => {
-      el.addEventListener('input', () => syncCampoFromDom());
-      el.addEventListener('change', () => syncCampoFromDom());
+      el.addEventListener('input', () => {
+        syncCampoFromDom();
+        renderColunasListaBuilder();
+      });
+      el.addEventListener('change', () => {
+        syncCampoFromDom();
+        renderColunasListaBuilder();
+      });
     });
+
+    renderColunasListaBuilder();
+  }
+
+  function renderColunasListaBuilder() {
+    renderColunasListaEditor(els.colunasListaWrap, colunasLista, campos);
+  }
+
+  function syncColunasListaFromDom() {
+    if (!els.colunasListaWrap) return;
+    const next = readColunasListaFromContainer(els.colunasListaWrap, campos);
+    colunasLista.fixas = next.fixas;
+    colunasLista.campos = next.campos;
+  }
+
+  function readColunasListaFromDom() {
+    syncColunasListaFromDom();
+    return normalizeColunasListaForCampos(colunasLista, readCamposFromDom().filter((c) => c.label));
   }
 
   function syncCampoFromDom() {
@@ -745,6 +931,7 @@ export function initMarketingFormularios({
     editId = item?.id ?? null;
     campos = item?.campos?.length ? item.campos.map((c) => ({ ...c })) : [defaultCampo()];
     secoes = item?.secoes?.length ? item.secoes.map((s) => ({ ...s })) : [];
+    colunasLista = colunasListaFromFormulario(item, campos);
 
     if (els.modalTitle) {
       els.modalTitle.textContent = editId ? 'Editar formulário' : 'Novo formulário';
@@ -786,6 +973,7 @@ export function initMarketingFormularios({
     editId = null;
     campos = [];
     secoes = [];
+    colunasLista = cloneColunasLista();
     setIntroAiStatus();
     revokeLogoPreviewUrl();
     resetLogoField();
@@ -825,6 +1013,7 @@ export function initMarketingFormularios({
       marketingCampanhaId: els.fieldCampanha?.value || null,
       marketingCriativoId: els.fieldCriativo?.value || null,
       campos: readCamposFromDom().filter((c) => c.label),
+      colunasLista: readColunasListaFromDom(),
       corFundo: corFundo === DEFAULT_FORM_BG ? '' : corFundo,
       ...(logoPayload || {}),
     };
@@ -907,8 +1096,213 @@ export function initMarketingFormularios({
     setRespostasPageVisible(false);
   }
 
-  function renderAnswerRow(label, valueHtml) {
-    return `<div class="marketing-resposta-answer"><dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
+  function moneyInputValue(value) {
+    if (value == null || value === '') return '';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return String(value);
+    return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function maskMoneyInput(el) {
+    if (!el) return;
+    const digits = el.value.replace(/\D/g, '');
+    if (!digits) {
+      el.value = '';
+      return;
+    }
+    const val = parseInt(digits, 10) / 100;
+    el.value = val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function sortSelectOptions(options = []) {
+    return [...options].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { sensitivity: 'base' }));
+  }
+
+  function renderRespostaAnswerField(campo, value) {
+    const id = escapeHtml(campo.id);
+    const label = escapeHtml(campo.label);
+    const required = campo.required ? ' required' : '';
+    const reqMark = campo.required ? ' *' : '';
+
+    if (campo.type === 'textarea') {
+      return `<div class="field marketing-resposta-answer-field">
+        <label for="resposta-campo-${id}">${label}${reqMark}</label>
+        <textarea id="resposta-campo-${id}" data-campo-id="${id}" rows="4"${required}>${escapeHtml(value ?? '')}</textarea>
+      </div>`;
+    }
+
+    if (campo.type === 'select') {
+      const options = sortSelectOptions(campo.options || []);
+      const stringValue = value == null ? '' : String(value).trim();
+      const inOptions = options.includes(stringValue);
+      const selectedValue = inOptions ? stringValue : campo.allowOther && stringValue ? SELECT_OTHER_VALUE : '';
+      const otherValue = !inOptions && stringValue ? stringValue : '';
+      const opts = options
+        .map((option) => {
+          const opt = escapeHtml(option);
+          return `<option value="${opt}"${selectedValue === option ? ' selected' : ''}>${opt}</option>`;
+        })
+        .join('');
+      const otherOption = campo.allowOther
+        ? `<option value="${SELECT_OTHER_VALUE}"${selectedValue === SELECT_OTHER_VALUE ? ' selected' : ''}>Outro</option>`
+        : '';
+      const otherField = campo.allowOther
+        ? `<input
+            type="text"
+            class="marketing-resposta-select-other${selectedValue === SELECT_OTHER_VALUE ? '' : ' hidden'}"
+            data-outro-input="${id}"
+            value="${escapeHtml(otherValue)}"
+            placeholder="Descreva a resposta"
+          />`
+        : '';
+      return `<div class="field marketing-resposta-answer-field">
+        <label for="resposta-campo-${id}">${label}${reqMark}</label>
+        <select id="resposta-campo-${id}" data-campo-id="${id}" data-select-other="${campo.allowOther ? '1' : '0'}"${required}>
+          <option value="">Selecione uma opção</option>
+          ${opts}
+          ${otherOption}
+        </select>
+        ${otherField}
+      </div>`;
+    }
+
+    if (campo.type === 'checkbox') {
+      const isYes = value === true || value === 'true' || value === 1 || value === '1' || value === 'sim';
+      const isNo = value === false || value === 'false' || value === 0 || value === '0' || value === 'nao';
+      return `<div class="field marketing-resposta-answer-field marketing-resposta-answer-field--yesno">
+        <span class="marketing-resposta-answer-label">${label}${reqMark}</span>
+        <div class="marketing-resposta-yesno" role="radiogroup" aria-label="${label}">
+          <label class="marketing-resposta-yesno-option">
+            <input type="radio" name="resposta-${id}" value="sim"${isYes ? ' checked' : ''}${required && !isYes && !isNo ? ' required' : ''} />
+            <span>Sim</span>
+          </label>
+          <label class="marketing-resposta-yesno-option">
+            <input type="radio" name="resposta-${id}" value="nao"${isNo ? ' checked' : ''} />
+            <span>Não</span>
+          </label>
+        </div>
+      </div>`;
+    }
+
+    if (campo.type === 'money') {
+      return `<div class="field marketing-resposta-answer-field">
+        <label for="resposta-campo-${id}">${label}${reqMark}</label>
+        <input id="resposta-campo-${id}" data-campo-id="${id}" data-money="1" type="text" inputmode="decimal" placeholder="0,00" value="${escapeHtml(moneyInputValue(value))}"${required} />
+      </div>`;
+    }
+
+    const inputType =
+      campo.type === 'email' ? 'email' : campo.type === 'number' ? 'number' : campo.type === 'phone' ? 'tel' : 'text';
+    const phoneAttrs =
+      inputType === 'tel' ? ' inputmode="tel" data-phone="1" placeholder="(00) 00000-0000"' : '';
+    return `<div class="field marketing-resposta-answer-field">
+      <label for="resposta-campo-${id}">${label}${reqMark}</label>
+      <input id="resposta-campo-${id}" data-campo-id="${id}" type="${inputType}" value="${escapeHtml(value ?? '')}"${required}${phoneAttrs} />
+    </div>`;
+  }
+
+  function bindRespostaAnswerFields() {
+    els.respostaDetailBody?.querySelectorAll('[data-select-other="1"]').forEach((select) => {
+      const campoId = select.dataset.campoId;
+      const otherInput = els.respostaDetailBody?.querySelector(`[data-outro-input="${campoId}"]`);
+      const sync = () => {
+        const showOther = select.value === SELECT_OTHER_VALUE;
+        otherInput?.classList.toggle('hidden', !showOther);
+        if (showOther) otherInput?.focus();
+      };
+      select.addEventListener('change', sync);
+      sync();
+    });
+
+    els.respostaDetailBody?.querySelectorAll('[data-money="1"]').forEach((input) => {
+      input.addEventListener('input', () => maskMoneyInput(input));
+    });
+
+    els.respostaDetailBody?.querySelectorAll('[data-phone="1"]').forEach((input) => {
+      input.addEventListener('input', () => maskPhoneInput(input));
+    });
+  }
+
+  function readRespostasFromDom(campos) {
+    const respostas = {};
+    for (const campo of campos) {
+      if (campo.type === 'checkbox') {
+        const checked = els.respostaDetailBody?.querySelector(`input[name="resposta-${campo.id}"]:checked`);
+        if (checked) respostas[campo.id] = checked.value === 'sim';
+        continue;
+      }
+
+      const el = els.respostaDetailBody?.querySelector(`[data-campo-id="${campo.id}"]`);
+      if (!el) continue;
+
+      if (campo.type === 'select') {
+        if (el.value === SELECT_OTHER_VALUE) {
+          const other = els.respostaDetailBody?.querySelector(`[data-outro-input="${campo.id}"]`);
+          respostas[campo.id] = String(other?.value || '').trim();
+        } else {
+          respostas[campo.id] = el.value;
+        }
+        continue;
+      }
+
+      if (campo.type === 'money') {
+        const raw = String(el.value || '').trim();
+        if (!raw) {
+          respostas[campo.id] = '';
+          continue;
+        }
+        const digits = raw.replace(/\D/g, '');
+        respostas[campo.id] = digits ? parseInt(digits, 10) / 100 : '';
+        continue;
+      }
+
+      respostas[campo.id] = el.value;
+    }
+    return respostas;
+  }
+
+  function syncRespostaInstagramOpenBtn() {
+    const btn = els.respostaParticipanteInstagramOpen;
+    if (!btn) return;
+    const url = instagramProfileUrl(els.respostaParticipanteInstagram?.value || '');
+    if (!url) {
+      btn.hidden = true;
+      btn.setAttribute('href', '#');
+      btn.setAttribute('aria-disabled', 'true');
+      return;
+    }
+    btn.hidden = false;
+    btn.href = url;
+    btn.removeAttribute('aria-disabled');
+  }
+
+  function renderRespostaAnswersEditor(form, resposta) {
+    if (!els.respostaDetailBody) return;
+
+    if (els.respostaParticipanteNome) {
+      els.respostaParticipanteNome.value = resposta.participanteNome || '';
+    }
+    if (els.respostaParticipanteInstagram) {
+      els.respostaParticipanteInstagram.value = resposta.participanteInstagram || '';
+    }
+    syncRespostaInstagramOpenBtn();
+
+    const campos = form?.campos || [];
+    const fieldsHtml = campos.map((campo) =>
+      renderRespostaAnswerField(campo, resposta.respostas?.[campo.id]),
+    );
+
+    els.respostaDetailBody.innerHTML = fieldsHtml.length
+      ? fieldsHtml.join('')
+      : '<p class="marketing-resposta-answers-empty">Este formulário não possui perguntas adicionais além dos dados de contato.</p>';
+
+    bindRespostaAnswerFields();
+  }
+
+  function syncRespostaDetailTitle() {
+    if (!els.respostaDetailTitle) return;
+    const nome = els.respostaParticipanteNome?.value.trim();
+    els.respostaDetailTitle.textContent = nome || 'Candidato';
   }
 
   function maskPhoneInput(el) {
@@ -931,6 +1325,160 @@ export function initMarketingFormularios({
       return;
     }
     el.value = `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+
+  function readDataAtivacaoIso() {
+    const iso = datetimeLocalToIso(els.respostaDataAtivacao?.value);
+    if (!iso) {
+      throw new Error('Informe a data de ativação do lead.');
+    }
+    return iso;
+  }
+
+  function setDataAtivacaoInput(resposta) {
+    if (!els.respostaDataAtivacao) return;
+    const source = resposta?.dataAtivacao || resposta?.createdAt || resposta?.leadCreatedAt || '';
+    els.respostaDataAtivacao.value = isoToDatetimeLocalValue(source);
+  }
+
+  function buildRespostaUpdatePayload(extra = {}) {
+    const campos = respostasCtx.formulario?.campos || [];
+    const nome = els.respostaParticipanteNome?.value.trim() || '';
+    if (!nome) {
+      throw new Error('Informe o nome do candidato.');
+    }
+    const resposta = getRespostaAtual();
+    return {
+      classificacao: els.respostaClassificacao?.value || 'pendente',
+      participanteId: resposta?.participanteId || undefined,
+      participanteNome: nome,
+      participanteInstagram: els.respostaParticipanteInstagram?.value.trim() || '',
+      participanteTelefone: readTelefoneDigits(),
+      respostas: readRespostasFromDom(campos),
+      dataAtivacao: readDataAtivacaoIso(),
+      atualizarLead: true,
+      ...extra,
+    };
+  }
+
+  function renderRespostaInteracoesLoading(message = 'Carregando discussão…') {
+    if (!els.respostaInteracoesList) return;
+    els.respostaInteracoesList.innerHTML = `<p class="cell-muted marketing-resposta-interacoes-empty">${escapeHtml(message)}</p>`;
+  }
+
+  function renderRespostaInteracaoAuthor(interacao) {
+    if (interacao.userName) return interacao.userName;
+    if (interacao.userId) return 'Usuário';
+    return 'Nota anterior';
+  }
+
+  function canDeleteRespostaInteracao(interacao, currentUserId) {
+    if (!currentUserId) return false;
+    if (!interacao.userId) return true;
+    return Number(interacao.userId) === Number(currentUserId);
+  }
+
+  function renderRespostaInteracoesList() {
+    if (!els.respostaInteracoesList) return;
+
+    if (!respostaInteracoes.length) {
+      els.respostaInteracoesList.innerHTML =
+        '<p class="cell-muted marketing-resposta-interacoes-empty">Nenhuma mensagem ainda. Inicie a discussão sobre esta candidatura.</p>';
+      return;
+    }
+
+    const currentUserId = getCurrentUser()?.id;
+    els.respostaInteracoesList.innerHTML = respostaInteracoes
+      .map((interacao) => {
+        const isOwn = currentUserId && Number(interacao.userId) === Number(currentUserId);
+        const canDelete = canDeleteRespostaInteracao(interacao, currentUserId);
+        const deleteBtn = canDelete
+          ? `<button
+              class="tbtn danger-text marketing-resposta-interacao-delete"
+              type="button"
+              data-action="delete-interacao"
+              data-id="${interacao.id}"
+              title="Excluir mensagem"
+              aria-label="Excluir mensagem"
+            >Excluir</button>`
+          : '';
+        return `
+          <article class="marketing-resposta-interacao-item${isOwn ? ' marketing-resposta-interacao-item--own' : ''}" data-interacao-id="${interacao.id}">
+            <header class="marketing-resposta-interacao-head">
+              <span class="marketing-resposta-interacao-autor">${escapeHtml(renderRespostaInteracaoAuthor(interacao))}</span>
+              <div class="marketing-resposta-interacao-head-right">
+                <time class="cell-muted" datetime="${escapeHtml(interacao.criadoEm || '')}">${escapeHtml(fmtDate(interacao.criadoEm))}</time>
+                ${deleteBtn}
+              </div>
+            </header>
+            <p class="marketing-resposta-interacao-texto">${escapeHtml(interacao.texto)}</p>
+          </article>`;
+      })
+      .join('');
+
+    els.respostaInteracoesList.scrollTop = els.respostaInteracoesList.scrollHeight;
+  }
+
+  async function loadRespostaInteracoes(respostaId) {
+    if (!respostaId) {
+      respostaInteracoes = [];
+      renderRespostaInteracoesList();
+      return;
+    }
+    renderRespostaInteracoesLoading();
+    try {
+      const data = await fetchFormularioRespostaInteracoes(respostaId);
+      respostaInteracoes = data.interacoes || [];
+      renderRespostaInteracoesList();
+    } catch (err) {
+      renderRespostaInteracoesLoading(err.message || 'Não foi possível carregar a discussão.');
+    }
+  }
+
+  async function deleteRespostaInteracao(interacaoId) {
+    if (!respostaEditId || !interacaoId) return;
+    if (!confirm('Excluir esta mensagem da discussão?')) return;
+
+    try {
+      await deleteFormularioRespostaInteracao(respostaEditId, interacaoId);
+      respostaInteracoes = respostaInteracoes.filter((item) => Number(item.id) !== Number(interacaoId));
+      renderRespostaInteracoesList();
+    } catch (err) {
+      alert(err.message || 'Não foi possível excluir a mensagem.');
+    }
+  }
+
+  async function submitRespostaInteracao(event) {
+    event.preventDefault();
+    if (!respostaEditId) return;
+
+    const texto = els.respostaInteracaoTexto?.value.trim();
+    if (!texto) {
+      alert('Informe a mensagem.');
+      return;
+    }
+
+    const btn = els.respostaInteracaoForm?.querySelector('button[type="submit"]');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Enviando…';
+    }
+
+    try {
+      const { interacao } = await createFormularioRespostaInteracao(respostaEditId, { texto });
+      if (interacao) {
+        respostaInteracoes = [...respostaInteracoes, interacao];
+        renderRespostaInteracoesList();
+      }
+      if (els.respostaInteracaoTexto) els.respostaInteracaoTexto.value = '';
+    } catch (err) {
+      alert(err.message || 'Não foi possível enviar a mensagem.');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Enviar';
+      }
+    }
   }
 
   function readTelefoneDigits() {
@@ -989,8 +1537,18 @@ export function initMarketingFormularios({
     if (!updated) return;
     const idx = respostasCtx.respostas.findIndex((r) => Number(r.id) === Number(updated.id));
     if (idx >= 0) respostasCtx.respostas[idx] = { ...respostasCtx.respostas[idx], ...updated };
+    if (els.respostaDetailTitle) {
+      els.respostaDetailTitle.textContent = updated.participanteNome || 'Candidato';
+    }
+    if (els.respostaParticipanteNome) els.respostaParticipanteNome.value = updated.participanteNome || '';
+    if (els.respostaParticipanteInstagram) {
+      els.respostaParticipanteInstagram.value = updated.participanteInstagram || '';
+    }
+    syncRespostaInstagramOpenBtn();
     setTelefoneInputValue(updated.participanteTelefone || '');
     if (!telefoneEditOpen) updateTelefoneDisplay(updated.participanteTelefone || '');
+    setDataAtivacaoInput(updated);
+    renderRespostasSub();
     renderRespostasTableBody();
   }
 
@@ -1004,12 +1562,14 @@ export function initMarketingFormularios({
     if (!telefoneFoiAlterado()) return true;
 
     try {
-      const { resposta: updated } = await updateFormularioResposta(respostaEditId, {
-        classificacao: els.respostaClassificacao?.value || 'pendente',
-        notaInterna: els.respostaNota?.value.trim(),
-        participanteTelefone: digits,
-        atualizarLead: true,
-      });
+      let payload;
+      try {
+        payload = buildRespostaUpdatePayload();
+      } catch (err) {
+        if (!silent) alert(err.message);
+        return false;
+      }
+      const { resposta: updated } = await updateFormularioResposta(respostaEditId, payload);
       applyRespostaAtualizada(updated);
       return true;
     } catch (err) {
@@ -1125,13 +1685,6 @@ export function initMarketingFormularios({
     bindTableActions();
   }
 
-  function renderRespostaValue(campo, value) {
-    if (value == null || value === '') return '—';
-    if (campo?.type === 'checkbox') return value ? 'Sim' : 'Não';
-    if (campo?.type === 'money') return escapeHtml(fmtMoney(value));
-    return escapeHtml(String(value));
-  }
-
   function formatRespostaPlain(campo, value) {
     if (value == null || value === '') return '';
     if (campo?.type === 'checkbox') return value ? 'Sim' : 'Não';
@@ -1169,7 +1722,7 @@ export function initMarketingFormularios({
     }
     setTelefoneInputValue(resposta.participanteTelefone || '');
     setTelefoneViewMode(false);
-    renderInstagramContact(resposta.participanteInstagram);
+    if (els.respostaContactInstagram) els.respostaContactInstagram.innerHTML = '';
     if (els.respostaDetailBadge) {
       const classif = resposta.classificacao || 'pendente';
       els.respostaDetailBadge.hidden = false;
@@ -1179,20 +1732,10 @@ export function initMarketingFormularios({
     if (els.respostaClassificacao) {
       els.respostaClassificacao.value = resposta.classificacao || 'pendente';
     }
-    if (els.respostaNota) {
-      els.respostaNota.value = resposta.notaInterna || '';
-    }
-
-    const answerRows = (form.campos || []).map((campo) => {
-      const value = resposta.respostas?.[campo.id];
-      return renderAnswerRow(campo.label, renderRespostaValue(campo, value));
-    });
-
-    if (els.respostaDetailBody) {
-      els.respostaDetailBody.innerHTML = answerRows.length
-        ? answerRows.join('')
-        : '<p class="marketing-resposta-answers-empty">Este formulário não possui perguntas adicionais além dos dados de contato.</p>';
-    }
+    setDataAtivacaoInput(resposta);
+    if (els.respostaInteracaoTexto) els.respostaInteracaoTexto.value = '';
+    void loadRespostaInteracoes(resposta.id);
+    renderRespostaAnswersEditor(form, resposta);
 
     setRespostasFlowVisibility();
   }
@@ -1200,7 +1743,10 @@ export function initMarketingFormularios({
   function closeRespostaDetail() {
     respostaDetailOpen = false;
     respostaEditId = null;
+    respostaInteracoes = [];
     telefoneEditOpen = false;
+    if (els.respostaInteracaoTexto) els.respostaInteracaoTexto.value = '';
+    renderRespostaInteracoesList();
     setRespostasFlowVisibility();
   }
 
@@ -1213,13 +1759,17 @@ export function initMarketingFormularios({
         alert('Informe um telefone ou WhatsApp válido.');
         return;
       }
-      await updateFormularioResposta(respostaEditId, {
-        classificacao: els.respostaClassificacao?.value,
-        notaInterna: els.respostaNota?.value.trim(),
-        participanteTelefone: digits,
-        atualizarLead: true,
-        statusLead: els.respostaClassificacao?.value === 'reprovado' ? 'perda' : undefined,
-      });
+      let payload;
+      try {
+        payload = buildRespostaUpdatePayload({
+          statusLead: els.respostaClassificacao?.value === 'reprovado' ? 'perda' : undefined,
+        });
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+      const { resposta: updated } = await updateFormularioResposta(respostaEditId, payload);
+      applyRespostaAtualizada(updated);
       closeRespostaDetail();
       if (respostasCtx.formulario?.id) {
         await openRespostasPage(respostasCtx.formulario.id, { reload: true });
@@ -1290,6 +1840,178 @@ export function initMarketingFormularios({
     });
   }
 
+  function respostaAtivacaoIso(resposta) {
+    return resposta?.dataAtivacao || resposta?.createdAt || resposta?.leadCreatedAt || null;
+  }
+
+  function formatRespostaData(iso) {
+    return iso ? new Date(iso).toLocaleString('pt-BR') : '—';
+  }
+
+  function getRespostasVisiveis() {
+    let list = respostasCtx.respostas || [];
+    if (respostasFilterClassificacao) {
+      list = list.filter(
+        (r) => (r.classificacao || 'pendente') === respostasFilterClassificacao,
+      );
+    }
+    if (!respostasSort.key) return list;
+
+    const dir = respostasSort.dir === 'asc' ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const valueA =
+        respostasSort.key === 'dataAtivacao'
+          ? respostaAtivacaoIso(a)
+          : respostasSort.key === 'createdAt'
+            ? a.createdAt
+            : null;
+      const valueB =
+        respostasSort.key === 'dataAtivacao'
+          ? respostaAtivacaoIso(b)
+          : respostasSort.key === 'createdAt'
+            ? b.createdAt
+            : null;
+      const timeA = valueA ? new Date(valueA).getTime() : 0;
+      const timeB = valueB ? new Date(valueB).getTime() : 0;
+      if (timeA !== timeB) return (timeA - timeB) * dir;
+      return (Number(b.id) - Number(a.id)) * dir;
+    });
+  }
+
+  function updateRespostasFiltersUi() {
+    els.respostasFilters?.querySelectorAll('[data-respostas-filter]').forEach((btn) => {
+      const active = btn.dataset.respostasFilter === respostasFilterClassificacao;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function getRespostasListConfig(formulario) {
+    const campos = formulario?.campos || [];
+    const colunas = colunasListaFromFormulario(formulario, campos);
+    const fixas = colunas.fixas.length ? colunas.fixas : [...DEFAULT_COLUNAS_LISTA.fixas];
+    const campoMap = new Map(campos.map((c) => [c.id, c]));
+    const listCols = colunas.campos.length
+      ? colunas.campos.map((id) => campoMap.get(id)).filter(Boolean)
+      : null;
+    return { fixas, listCols };
+  }
+
+  function respostasTableColspan() {
+    const { fixas, listCols } = getRespostasListConfig(respostasCtx.formulario);
+    const dynamicCount = listCols ? listCols.length : 1;
+    return fixas.length + dynamicCount + 1;
+  }
+
+  function renderRespostaListCell(campo, resposta) {
+    const text = formatRespostaPlain(campo, resposta.respostas?.[campo.id]) || '—';
+    return escapeHtml(text);
+  }
+
+  function renderRespostaFixedCell(key, resposta) {
+    const ativacaoIso = respostaAtivacaoIso(resposta);
+    switch (key) {
+      case 'nome':
+        return `<td class="marketing-resposta-nome"><strong>${escapeHtml(resposta.participanteNome)}</strong></td>`;
+      case 'telefone':
+        return `<td class="marketing-resposta-telefone">${escapeHtml(formatTelefoneDisplay(resposta.participanteTelefone))}</td>`;
+      case 'classificacao':
+        return `<td><span class="marketing-classif marketing-classif--${resposta.classificacao}">${CLASSIFICACAO_LABELS[resposta.classificacao] || resposta.classificacao}</span></td>`;
+      case 'dataAtivacao':
+        return `<td class="marketing-resposta-data marketing-resposta-ativacao">${escapeHtml(formatRespostaData(ativacaoIso))}</td>`;
+      case 'createdAt':
+        return `<td class="marketing-resposta-data">${escapeHtml(formatRespostaData(resposta.createdAt))}</td>`;
+      default:
+        return '';
+    }
+  }
+
+  function renderRespostaFixedHeader(key) {
+    const coluna = LISTA_COLUNA_FIXAS.find((c) => c.key === key);
+    if (!coluna) return '';
+    if (key === 'dataAtivacao') {
+      const sortClass =
+        respostasSort.key === 'dataAtivacao'
+          ? ` th-sort--${respostasSort.dir === 'asc' ? 'asc' : 'desc'}`
+          : '';
+      return `<th class="th-sortable${sortClass}" data-sort="dataAtivacao" aria-sort="${respostasSort.key === 'dataAtivacao' ? (respostasSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}">${escapeHtml(coluna.label)}</th>`;
+    }
+    if (key === 'createdAt') {
+      const sortClass =
+        respostasSort.key === 'createdAt'
+          ? ` th-sort--${respostasSort.dir === 'asc' ? 'asc' : 'desc'}`
+          : '';
+      return `<th class="th-sortable${sortClass}" data-sort="createdAt" aria-sort="${respostasSort.key === 'createdAt' ? (respostasSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}">${escapeHtml(coluna.label)}</th>`;
+    }
+    return `<th>${escapeHtml(coluna.label)}</th>`;
+  }
+
+  function renderRespostasTableHead() {
+    if (!els.respostasTableHead) return;
+    const { fixas, listCols } = getRespostasListConfig(respostasCtx.formulario);
+    const fixedHeaders = fixas.map((key) => renderRespostaFixedHeader(key)).join('');
+    const dynamicHeaders = listCols
+      ? listCols
+          .map((campo) => `<th class="marketing-resposta-col-campo">${escapeHtml(campo.label)}</th>`)
+          .join('')
+      : '<th>Resumo</th>';
+
+    els.respostasTableHead.innerHTML = `
+      ${fixedHeaders}
+      ${dynamicHeaders}
+      <th>Ações</th>`;
+  }
+
+  function updateRespostasSortHeaders() {
+    renderRespostasTableHead();
+  }
+
+  function setRespostasFilter(classificacao) {
+    respostasFilterClassificacao = classificacao || '';
+    updateRespostasFiltersUi();
+    renderRespostasSub();
+    renderRespostasTableBody();
+  }
+
+  function toggleRespostasSort(key) {
+    if (!key) return;
+    if (respostasSort.key === key) {
+      respostasSort = { key, dir: respostasSort.dir === 'asc' ? 'desc' : 'asc' };
+    } else {
+      respostasSort = { key, dir: 'desc' };
+    }
+    writeRespostasSort(respostasCtx.formulario?.id, respostasSort);
+    updateRespostasSortHeaders();
+    renderRespostasTableBody();
+  }
+
+  function renderRespostasSub() {
+    const total = respostasCtx.respostas?.length || 0;
+    const visiveis = getRespostasVisiveis();
+    const pendentes = (respostasCtx.respostas || []).filter((r) => r.classificacao === 'pendente').length;
+
+    if (!els.respostasSub) return;
+
+    if (!total) {
+      els.respostasSub.textContent = 'Nenhuma resposta recebida ainda.';
+      return;
+    }
+
+    const parts = [
+      `${total} resposta${total === 1 ? '' : 's'} recebida${total === 1 ? '' : 's'}`,
+    ];
+    if (pendentes) {
+      parts.push(`${pendentes} pendente${pendentes === 1 ? '' : 's'}`);
+    }
+    if (respostasFilterClassificacao) {
+      const label = CLASSIFICACAO_LABELS[respostasFilterClassificacao] || respostasFilterClassificacao;
+      parts.push(
+        `exibindo ${visiveis.length} com classificação “${label}”`,
+      );
+    }
+    els.respostasSub.textContent = parts.join(' · ');
+  }
+
   function formatTelefoneDisplay(phone) {
     if (!phone) return '—';
     return formatPhoneDisplay(phone) || phone;
@@ -1298,18 +2020,30 @@ export function initMarketingFormularios({
   function renderRespostasTableBody() {
     if (!els.respostasTable) return;
     const campos = respostasCtx.formulario?.campos || [];
-    const respostas = respostasCtx.respostas || [];
+    const { fixas, listCols } = getRespostasListConfig(respostasCtx.formulario);
+    const respostas = getRespostasVisiveis();
+    const total = respostasCtx.respostas?.length || 0;
+    const colspan = respostasTableColspan();
+
+    renderRespostasTableHead();
+
     els.respostasTable.innerHTML = respostas.length
       ? respostas
           .map((r) => {
             const resumo = buildResumo(r, campos);
+            const fixedCells = fixas.map((key) => renderRespostaFixedCell(key, r)).join('');
+            const dynamicCells = listCols
+              ? listCols
+                  .map((campo) => {
+                    const text = formatRespostaPlain(campo, r.respostas?.[campo.id]) || '—';
+                    return `<td class="marketing-resposta-col-campo" title="${escapeHtml(text)}">${renderRespostaListCell(campo, r)}</td>`;
+                  })
+                  .join('')
+              : `<td class="marketing-resposta-resumo" title="${escapeHtml(resumo)}">${escapeHtml(resumo)}</td>`;
             return `
-              <tr class="marketing-resposta-row" data-id="${r.id}">
-                <td class="marketing-resposta-nome"><strong>${escapeHtml(r.participanteNome)}</strong></td>
-                <td class="marketing-resposta-telefone">${escapeHtml(formatTelefoneDisplay(r.participanteTelefone))}</td>
-                <td class="marketing-resposta-resumo" title="${escapeHtml(resumo)}">${escapeHtml(resumo)}</td>
-                <td><span class="marketing-classif marketing-classif--${r.classificacao}">${CLASSIFICACAO_LABELS[r.classificacao] || r.classificacao}</span></td>
-                <td class="marketing-resposta-data">${r.createdAt ? new Date(r.createdAt).toLocaleString('pt-BR') : '—'}</td>
+              <tr class="marketing-resposta-row${r.classificacao === 'aprovado' ? ' marketing-resposta-row--aprovado' : r.classificacao === 'reprovado' ? ' marketing-resposta-row--reprovado' : ''}" data-id="${r.id}">
+                ${fixedCells}
+                ${dynamicCells}
                 <td class="marketing-resposta-actions">
                   <button class="tbtn" type="button" data-action="open-resposta" data-id="${r.id}">Analisar</button>
                   <button class="tbtn marketing-resposta-delete" type="button" data-action="delete-resposta" data-id="${r.id}">Excluir</button>
@@ -1317,25 +2051,83 @@ export function initMarketingFormularios({
               </tr>`;
           })
           .join('')
-      : '<tr><td colspan="6" class="cell-empty">Nenhuma resposta recebida ainda.</td></tr>';
+      : `<tr><td colspan="${colspan}" class="cell-empty">${
+          total
+            ? 'Nenhuma resposta corresponde ao filtro selecionado.'
+            : 'Nenhuma resposta recebida ainda.'
+        }</td></tr>`;
     bindRespostasTableActions();
+  }
+
+  function openRespostasColunasModal() {
+    const formulario = respostasCtx.formulario;
+    if (!formulario?.id) return;
+
+    const campos = formulario.campos || [];
+    respostasColunasDraft = colunasListaFromFormulario(formulario, campos);
+    renderColunasListaEditor(els.respostasColunasListaWrap, respostasColunasDraft, campos);
+    els.respostasColunasModalBg?.classList.add('open');
+  }
+
+  function closeRespostasColunasModal() {
+    els.respostasColunasModalBg?.classList.remove('open');
+    respostasColunasDraft = cloneColunasLista();
+  }
+
+  async function saveRespostasColunasModal() {
+    const formulario = respostasCtx.formulario;
+    if (!formulario?.id) return;
+
+    const campos = formulario.campos || [];
+    const nextColunas = readColunasListaFromContainer(els.respostasColunasListaWrap, campos);
+
+    if (els.respostasColunasSave) {
+      els.respostasColunasSave.disabled = true;
+      els.respostasColunasSave.textContent = 'Salvando…';
+    }
+
+    try {
+      const updated = await updateMarketingFormulario(formulario.id, { colunasLista: nextColunas });
+      const colunasListaSaved = updated?.formulario?.colunasLista || nextColunas;
+      respostasCtx = {
+        ...respostasCtx,
+        formulario: {
+          ...formulario,
+          colunasLista: colunasListaSaved,
+        },
+      };
+
+      const idx = formularios.findIndex((f) => Number(f.id) === Number(formulario.id));
+      if (idx >= 0) {
+        formularios[idx] = { ...formularios[idx], colunasLista: colunasListaSaved };
+      }
+
+      closeRespostasColunasModal();
+      renderRespostasTableBody();
+    } catch (err) {
+      alert(err.message || 'Não foi possível salvar as colunas.');
+    } finally {
+      if (els.respostasColunasSave) {
+        els.respostasColunasSave.disabled = false;
+        els.respostasColunasSave.textContent = 'Salvar';
+      }
+    }
   }
 
   async function openRespostasPage(formularioId, { reload = false } = {}) {
     try {
       const data = await fetchFormularioRespostas(formularioId);
       respostasCtx = data;
-      const total = data.respostas.length;
-      const pendentes = data.respostas.filter((r) => r.classificacao === 'pendente').length;
+      if (!reload) {
+        respostasFilterClassificacao = '';
+      }
+      respostasSort = readRespostasSort(formularioId);
 
       if (els.respostasTitle) {
         els.respostasTitle.textContent = `Respostas · ${data.formulario.nome}`;
       }
-      if (els.respostasSub) {
-        els.respostasSub.textContent = total
-          ? `${total} resposta${total === 1 ? '' : 's'} recebida${total === 1 ? '' : 's'}${pendentes ? ` · ${pendentes} pendente${pendentes === 1 ? '' : 's'}` : ''}`
-          : 'Nenhuma resposta recebida ainda.';
-      }
+      updateRespostasFiltersUi();
+      renderRespostasSub();
       renderRespostasTableBody();
 
       if (!reload) setRespostasPageVisible(true);
@@ -1358,6 +2150,7 @@ export function initMarketingFormularios({
   els.btnAddCampo?.addEventListener('click', () => {
     syncCampoFromDom();
     campos.push(defaultCampo(campos.length));
+    colunasLista = normalizeColunasListaForCampos(colunasLista, campos);
     renderCamposBuilder();
   });
   els.btnAddSecao?.addEventListener('click', () => {
@@ -1383,12 +2176,44 @@ export function initMarketingFormularios({
     if (editId) deleteFormulario(editId).then(closeFormModal);
   });
   els.respostasBack?.addEventListener('click', closeRespostasPage);
+  els.respostasColunasBtn?.addEventListener('click', () => openRespostasColunasModal());
+  els.respostasColunasCancel?.addEventListener('click', closeRespostasColunasModal);
+  els.respostasColunasSave?.addEventListener('click', () => void saveRespostasColunasModal());
+  els.respostasColunasModalBg?.addEventListener('click', (event) => {
+    if (event.target === els.respostasColunasModalBg) closeRespostasColunasModal();
+  });
+  els.respostasFilters?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-respostas-filter]');
+    if (!btn || btn.disabled) return;
+    setRespostasFilter(btn.dataset.respostasFilter || '');
+  });
+  els.respostasTableWrap?.addEventListener('click', (event) => {
+    const th = event.target.closest('th[data-sort]');
+    if (!th) return;
+    event.preventDefault();
+    toggleRespostasSort(th.dataset.sort);
+  });
   els.respostaDetailBack?.addEventListener('click', closeRespostaDetail);
   els.respostaDetailCancel?.addEventListener('click', closeRespostaDetail);
   els.respostaDetailDelete?.addEventListener('click', () => {
     if (respostaEditId) void deleteResposta(respostaEditId);
   });
+  els.respostaParticipanteNome?.addEventListener('input', syncRespostaDetailTitle);
+  els.respostaParticipanteInstagram?.addEventListener('input', syncRespostaInstagramOpenBtn);
+  els.respostaParticipanteInstagramOpen?.addEventListener('click', (event) => {
+    const url = instagramProfileUrl(els.respostaParticipanteInstagram?.value || '');
+    if (!url) {
+      event.preventDefault();
+    }
+  });
   els.respostaDetailSave?.addEventListener('click', () => void saveRespostaDetail());
+  els.respostaInteracaoForm?.addEventListener('submit', (event) => void submitRespostaInteracao(event));
+  els.respostaInteracoesList?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-action="delete-interacao"]');
+    if (!btn) return;
+    event.preventDefault();
+    void deleteRespostaInteracao(Number(btn.dataset.id));
+  });
   els.respostaTelefone?.addEventListener('input', () => maskPhoneInput(els.respostaTelefone));
   els.respostaDetailPage?.addEventListener('click', (event) => {
     const editBtn = event.target.closest('[data-action="edit-marketing-telefone"]');

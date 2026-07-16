@@ -98,6 +98,9 @@ import {
   listFormularioRespostas,
   updateFormularioResposta,
   deleteFormularioResposta,
+  listFormularioRespostaInteracoes,
+  createFormularioRespostaInteracao,
+  deleteFormularioRespostaInteracao,
   getPublicFormulario,
   submitPublicFormulario,
   readMarketingFormularioLogo,
@@ -1553,6 +1556,76 @@ app.put('/api/marketing/formulario-respostas/:id', requireEvento, async (req, re
     res.status(500).json({ error: 'Falha ao atualizar resposta' });
   }
 });
+
+app.get('/api/marketing/formulario-respostas/:id/interacoes', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const interacoes = await listFormularioRespostaInteracoes(pool, id, req.eventoId);
+    if (!interacoes) return res.status(404).json({ error: 'Resposta não encontrada' });
+    res.json({ interacoes });
+  } catch (err) {
+    console.error('GET /api/marketing/formulario-respostas/:id/interacoes', err);
+    res.status(500).json({ error: 'Falha ao carregar discussão' });
+  }
+});
+
+app.post('/api/marketing/formulario-respostas/:id/interacoes', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (req.body?.action === 'delete') {
+      const interacaoId = Number(req.body.interacaoId ?? req.body.interacao_id);
+      if (!interacaoId) {
+        return res.status(400).json({ error: 'Informe a mensagem a excluir' });
+      }
+      const deleted = await deleteFormularioRespostaInteracao(
+        pool,
+        id,
+        interacaoId,
+        req.eventoId,
+        req.user.id,
+      );
+      if (deleted === null) return res.status(404).json({ error: 'Resposta não encontrada' });
+      if (!deleted) return res.status(404).json({ error: 'Mensagem não encontrada' });
+      return res.json({ ok: true });
+    }
+
+    const interacao = await createFormularioRespostaInteracao(pool, id, req.eventoId, req.user.id, req.body);
+    if (!interacao) return res.status(404).json({ error: 'Resposta não encontrada' });
+    res.status(201).json({ interacao });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/formulario-respostas/:id/interacoes', err);
+    res.status(500).json({ error: 'Falha ao registrar mensagem' });
+  }
+});
+
+app.delete(
+  '/api/marketing/formulario-respostas/:respostaId/interacoes/:interacaoId',
+  requireEvento,
+  async (req, res) => {
+    try {
+      const respostaId = Number(req.params.respostaId);
+      const interacaoId = Number(req.params.interacaoId);
+      const deleted = await deleteFormularioRespostaInteracao(
+        pool,
+        respostaId,
+        interacaoId,
+        req.eventoId,
+        req.user.id,
+      );
+      if (deleted === null) return res.status(404).json({ error: 'Resposta não encontrada' });
+      if (!deleted) return res.status(404).json({ error: 'Mensagem não encontrada' });
+      res.json({ ok: true });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      console.error(
+        'DELETE /api/marketing/formulario-respostas/:respostaId/interacoes/:interacaoId',
+        err,
+      );
+      res.status(500).json({ error: 'Falha ao excluir mensagem' });
+    }
+  },
+);
 
 app.delete('/api/marketing/formulario-respostas/:id', requireEvento, async (req, res) => {
   try {

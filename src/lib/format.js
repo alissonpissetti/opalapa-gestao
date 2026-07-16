@@ -125,6 +125,24 @@ export function toDatetimeLocalValue(value) {
   return `${p.y}-${pad(p.mo)}-${pad(p.d)}T${pad(p.h)}:${pad(p.mi)}`;
 }
 
+/** Valor para input datetime-local a partir de ISO (ex.: createdAt da API). */
+export function isoToDatetimeLocalValue(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Converte valor de input datetime-local para ISO (horário local do navegador). */
+export function datetimeLocalToIso(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
 export function fmtMoney(val) {
   if (val == null || val === '') return '—';
   const n = Number(val);

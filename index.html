@@ -796,17 +796,25 @@
             <p class="marketing-respostas-sub" id="marketing-respostas-sub"></p>
           </div>
         </div>
+        <div class="marketing-respostas-toolbar">
+          <div
+            class="report-filters marketing-respostas-filters"
+            id="marketing-respostas-filters"
+            role="tablist"
+            aria-label="Filtro por classificação"
+          >
+            <button class="tbtn active" type="button" data-respostas-filter="" role="tab" aria-selected="true">Todas</button>
+            <button class="tbtn" type="button" data-respostas-filter="pendente" role="tab" aria-selected="false">Pendente</button>
+            <button class="tbtn" type="button" data-respostas-filter="em_analise" role="tab" aria-selected="false">Em análise</button>
+            <button class="tbtn" type="button" data-respostas-filter="aprovado" role="tab" aria-selected="false">Aprovado</button>
+            <button class="tbtn" type="button" data-respostas-filter="reprovado" role="tab" aria-selected="false">Reprovado</button>
+          </div>
+          <button class="tbtn" type="button" id="marketing-respostas-colunas-btn">Colunas</button>
+        </div>
         <div class="table-wrap marketing-respostas-table-wrap">
           <table class="marketing-respostas-table">
             <thead>
-              <tr>
-                <th>Nome</th>
-                <th>Telefone</th>
-                <th>Resumo</th>
-                <th>Classificação</th>
-                <th>Enviado em</th>
-                <th>Ações</th>
-              </tr>
+              <tr id="marketing-respostas-table-head"></tr>
             </thead>
             <tbody id="marketing-respostas-table"></tbody>
           </table>
@@ -865,11 +873,39 @@
         <div class="marketing-resposta-detail-layout">
           <div class="marketing-resposta-detail-fields-wrap">
             <h3 class="marketing-resposta-detail-section-title">Respostas do formulário</h3>
-            <dl class="marketing-resposta-answers" id="marketing-resposta-detail-body"></dl>
+            <p class="field-hint marketing-resposta-answers-hint">Corrija os dados enviados pelo candidato, se necessário.</p>
+            <div class="marketing-resposta-contact-fields">
+              <div class="field">
+                <label for="marketing-resposta-participante-nome">Nome</label>
+                <input id="marketing-resposta-participante-nome" type="text" autocomplete="off" required />
+              </div>
+              <div class="field">
+                <label for="marketing-resposta-participante-instagram">Instagram</label>
+                <div class="marketing-resposta-instagram-row">
+                  <input id="marketing-resposta-participante-instagram" type="text" autocomplete="off" placeholder="@usuario" />
+                  <a
+                    id="marketing-resposta-participante-instagram-open"
+                    class="tbtn marketing-resposta-instagram-open"
+                    href="#"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Abrir perfil no Instagram"
+                    aria-label="Abrir perfil no Instagram"
+                    hidden
+                  >Abrir</a>
+                </div>
+              </div>
+            </div>
+            <div class="marketing-resposta-answers-form" id="marketing-resposta-detail-body"></div>
           </div>
 
           <aside class="marketing-resposta-detail-sidebar">
             <h3 class="marketing-resposta-detail-section-title">Classificação da equipe</h3>
+            <div class="field">
+              <label for="marketing-resposta-data-ativacao">Data de ativação do lead</label>
+              <input id="marketing-resposta-data-ativacao" type="datetime-local" />
+              <p class="field-hint">Por padrão, corresponde à data de envio do formulário.</p>
+            </div>
             <div class="field">
               <label for="marketing-resposta-classificacao">Classificação</label>
               <select id="marketing-resposta-classificacao">
@@ -879,9 +915,21 @@
                 <option value="reprovado">Reprovado</option>
               </select>
             </div>
-            <div class="field">
-              <label for="marketing-resposta-nota">Nota interna</label>
-              <textarea id="marketing-resposta-nota" rows="6" placeholder="Observações da equipe sobre este candidato."></textarea>
+            <div class="field marketing-resposta-interacoes-field">
+              <label for="marketing-resposta-interacao-texto">Discussão da equipe</label>
+              <div
+                id="marketing-resposta-interacoes-list"
+                class="marketing-resposta-interacoes-list"
+                aria-live="polite"
+              ></div>
+              <form id="marketing-resposta-interacao-form" class="marketing-resposta-interacao-form">
+                <textarea
+                  id="marketing-resposta-interacao-texto"
+                  rows="3"
+                  placeholder="Registre observações ou decisões sobre esta candidatura…"
+                ></textarea>
+                <button class="tbtn primary" type="submit">Enviar</button>
+              </form>
             </div>
           </aside>
         </div>
@@ -890,7 +938,7 @@
           <button class="btn marketing-resposta-detail-delete" type="button" id="marketing-resposta-detail-delete">Excluir resposta</button>
           <div class="marketing-resposta-detail-foot-right">
             <button class="btn" type="button" id="marketing-resposta-detail-cancel">Cancelar</button>
-            <button class="btn primary" type="button" id="marketing-resposta-detail-save">Salvar classificação</button>
+            <button class="btn primary" type="button" id="marketing-resposta-detail-save">Salvar alterações</button>
           </div>
         </div>
       </section>
@@ -1892,15 +1940,39 @@
         </div>
         <div class="marketing-form-campos-wrap">
           <div class="marketing-form-campos-head">
-            <strong>Perguntas do formulário</strong>
+            <div>
+              <strong>Perguntas do formulário</strong>
+              <p class="field-hint">Defina as perguntas que o candidato responderá no formulário público.</p>
+            </div>
             <button class="tbtn" type="button" id="marketing-form-add-campo">Adicionar pergunta</button>
           </div>
           <div id="marketing-form-campos"></div>
+        </div>
+        <div class="marketing-form-colunas-wrap">
+          <div class="marketing-form-colunas-head">
+            <div>
+              <strong>Colunas na lista de respostas</strong>
+              <p class="field-hint">Escolha quais colunas aparecem na tabela de respostas. A configuração é salva com o formulário.</p>
+            </div>
+          </div>
+          <div id="marketing-form-colunas-lista"></div>
         </div>
         <div class="btns">
           <button class="btn" type="button" id="marketing-form-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="marketing-form-delete">Excluir</button>
           <button class="btn primary" type="button" id="marketing-form-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="marketing-respostas-colunas-modal-bg">
+      <div class="modal marketing-respostas-colunas-modal" role="dialog" aria-modal="true" aria-labelledby="marketing-respostas-colunas-title">
+        <h2 id="marketing-respostas-colunas-title">Colunas da lista</h2>
+        <p class="msub">Escolha quais colunas aparecem nesta tabela. A configuração é salva no formulário.</p>
+        <div id="marketing-respostas-colunas-lista"></div>
+        <div class="btns">
+          <button class="btn" type="button" id="marketing-respostas-colunas-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="marketing-respostas-colunas-save">Salvar</button>
         </div>
       </div>
     </div>
