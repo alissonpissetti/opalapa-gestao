@@ -4,12 +4,14 @@ import {
   updateMarketingFormulario,
   deleteMarketingFormulario,
   fetchFormularioRespostas,
+  fetchArrecadacaoById,
   updateFormularioResposta,
+  deleteFormularioResposta,
   fetchMarketingFormularioLogoBlob,
   generateMarketingFormularioIntro,
   generateMarketingFormularioSecao,
 } from '../lib/api.js';
-import { escapeHtml, fmtMoney } from '../lib/format.js';
+import { escapeHtml, fmtMoney, formatPhoneDisplay } from '../lib/format.js';
 import { getActiveEvento } from '../lib/evento.js';
 
 const FIELD_TYPES = [
@@ -73,9 +75,15 @@ function orderButtonsHtml(index, total, prefix) {
     </div>`;
 }
 
-export function initMarketingFormularios({ getMarketingData, onSummaryChange }) {
+export function initMarketingFormularios({
+  getMarketingData,
+  onSummaryChange,
+  onRespostasPageChange,
+  onOpenWhatsappChat,
+}) {
   const els = {
     panel: document.getElementById('marketing-panel-formularios'),
+    respostasPage: document.getElementById('marketing-panel-respostas'),
     table: document.getElementById('marketing-table-formularios'),
     btnNew: document.getElementById('btn-marketing-formulario-new'),
     modalBg: document.getElementById('marketing-form-modal-bg'),
@@ -112,15 +120,25 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     btnSave: document.getElementById('marketing-form-save'),
     btnDelete: document.getElementById('marketing-form-delete'),
     linkPreview: document.getElementById('marketing-form-link'),
-    respostasBg: document.getElementById('marketing-respostas-modal-bg'),
     respostasTitle: document.getElementById('marketing-respostas-title'),
+    respostasSub: document.getElementById('marketing-respostas-sub'),
     respostasTable: document.getElementById('marketing-respostas-table'),
-    respostasClose: document.getElementById('marketing-respostas-close'),
-    respostaDetailBg: document.getElementById('marketing-resposta-detail-bg'),
+    respostasBack: document.getElementById('marketing-respostas-back'),
+    respostaDetailPage: document.getElementById('marketing-panel-resposta-detail'),
+    respostaDetailBack: document.getElementById('marketing-resposta-detail-back'),
     respostaDetailTitle: document.getElementById('marketing-resposta-detail-title'),
+    respostaDetailMeta: document.getElementById('marketing-resposta-detail-meta'),
+    respostaDetailContacts: document.getElementById('marketing-resposta-detail-contacts'),
+    respostaTelefone: document.getElementById('marketing-resposta-telefone'),
+    respostaTelefoneView: document.getElementById('marketing-resposta-telefone-view'),
+    respostaTelefoneEdit: document.getElementById('marketing-resposta-telefone-edit'),
+    respostaTelefoneDisplay: document.getElementById('marketing-resposta-telefone-display'),
+    respostaContactInstagram: document.getElementById('marketing-resposta-contact-instagram'),
+    respostaDetailBadge: document.getElementById('marketing-resposta-detail-badge'),
     respostaDetailBody: document.getElementById('marketing-resposta-detail-body'),
     respostaClassificacao: document.getElementById('marketing-resposta-classificacao'),
     respostaNota: document.getElementById('marketing-resposta-nota'),
+    respostaDetailDelete: document.getElementById('marketing-resposta-detail-delete'),
     respostaDetailCancel: document.getElementById('marketing-resposta-detail-cancel'),
     respostaDetailSave: document.getElementById('marketing-resposta-detail-save'),
   };
@@ -131,6 +149,10 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
   let secoes = [];
   let respostasCtx = { formulario: null, respostas: [] };
   let respostaEditId = null;
+  let respostasPageOpen = false;
+  let respostaDetailOpen = false;
+  let respostaTelefoneOriginal = '';
+  let telefoneEditOpen = false;
   let pendingLogoDataUrl = null;
   let logoPreviewObjectUrl = null;
   let logoPickMode = false;
@@ -863,8 +885,217 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
       });
     });
     els.table?.querySelectorAll('[data-action="view-respostas"]').forEach((btn) => {
-      btn.addEventListener('click', () => void openRespostasModal(Number(btn.dataset.id)));
+      btn.addEventListener('click', () => void openRespostasPage(Number(btn.dataset.id)));
     });
+  }
+
+  function setRespostasFlowVisibility() {
+    const inFlow = respostasPageOpen || respostaDetailOpen;
+    els.respostasPage?.classList.toggle('hidden', !respostasPageOpen || respostaDetailOpen);
+    els.respostaDetailPage?.classList.toggle('hidden', !respostaDetailOpen);
+    els.panel?.classList.toggle('hidden', inFlow);
+    onRespostasPageChange?.(inFlow);
+  }
+
+  function setRespostasPageVisible(visible) {
+    respostasPageOpen = visible;
+    if (!visible) respostaDetailOpen = false;
+    setRespostasFlowVisibility();
+  }
+
+  function closeRespostasPage() {
+    setRespostasPageVisible(false);
+  }
+
+  function renderAnswerRow(label, valueHtml) {
+    return `<div class="marketing-resposta-answer"><dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
+  }
+
+  function maskPhoneInput(el) {
+    if (!el) return;
+    const digits = el.value.replace(/\D/g, '').slice(0, 11);
+    if (!digits) {
+      el.value = '';
+      return;
+    }
+    if (digits.length <= 2) {
+      el.value = `(${digits}`;
+      return;
+    }
+    if (digits.length <= 6) {
+      el.value = `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+      return;
+    }
+    if (digits.length <= 10) {
+      el.value = `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+      return;
+    }
+    el.value = `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+
+  function readTelefoneDigits() {
+    return String(els.respostaTelefone?.value || '').replace(/\D/g, '').slice(0, 11);
+  }
+
+  function setTelefoneViewMode(editing) {
+    telefoneEditOpen = Boolean(editing);
+    els.respostaTelefoneView?.classList.toggle('hidden', telefoneEditOpen);
+    els.respostaTelefoneEdit?.classList.toggle('hidden', !telefoneEditOpen);
+    if (telefoneEditOpen) {
+      requestAnimationFrame(() => {
+        els.respostaTelefone?.focus();
+        els.respostaTelefone?.select();
+      });
+    }
+  }
+
+  function updateTelefoneDisplay(phone) {
+    if (!els.respostaTelefoneDisplay) return;
+    const display = phone ? formatTelefoneDisplay(phone) : '—';
+    els.respostaTelefoneDisplay.textContent = display;
+    const waBtn = els.respostaTelefoneView?.querySelector('[data-action="open-marketing-whatsapp"]');
+    if (waBtn) waBtn.disabled = !phone;
+  }
+
+  function setTelefoneInputValue(phone) {
+    if (!els.respostaTelefone) return;
+    els.respostaTelefone.value = phone ? formatPhoneDisplay(phone) || phone : '';
+    respostaTelefoneOriginal = readTelefoneDigits();
+    updateTelefoneDisplay(phone);
+  }
+
+  function openTelefoneEditor() {
+    const resposta = getRespostaAtual();
+    setTelefoneInputValue(resposta?.participanteTelefone || '');
+    setTelefoneViewMode(true);
+  }
+
+  function cancelTelefoneEditor() {
+    const resposta = getRespostaAtual();
+    setTelefoneInputValue(resposta?.participanteTelefone || '');
+    setTelefoneViewMode(false);
+  }
+
+  async function confirmTelefoneEditor() {
+    const saved = await saveRespostaTelefone();
+    if (saved) setTelefoneViewMode(false);
+  }
+
+  function telefoneFoiAlterado() {
+    return readTelefoneDigits() !== respostaTelefoneOriginal;
+  }
+
+  function applyRespostaAtualizada(updated) {
+    if (!updated) return;
+    const idx = respostasCtx.respostas.findIndex((r) => Number(r.id) === Number(updated.id));
+    if (idx >= 0) respostasCtx.respostas[idx] = { ...respostasCtx.respostas[idx], ...updated };
+    setTelefoneInputValue(updated.participanteTelefone || '');
+    if (!telefoneEditOpen) updateTelefoneDisplay(updated.participanteTelefone || '');
+    renderRespostasTableBody();
+  }
+
+  async function saveRespostaTelefone({ silent = false } = {}) {
+    if (!respostaEditId) return false;
+    const digits = readTelefoneDigits();
+    if (!digits) {
+      if (!silent) alert('Informe um telefone ou WhatsApp válido.');
+      return false;
+    }
+    if (!telefoneFoiAlterado()) return true;
+
+    try {
+      const { resposta: updated } = await updateFormularioResposta(respostaEditId, {
+        classificacao: els.respostaClassificacao?.value || 'pendente',
+        notaInterna: els.respostaNota?.value.trim(),
+        participanteTelefone: digits,
+        atualizarLead: true,
+      });
+      applyRespostaAtualizada(updated);
+      return true;
+    } catch (err) {
+      if (!silent) alert(err.message || 'Não foi possível salvar o telefone.');
+      return false;
+    }
+  }
+
+  function getRespostaAtual() {
+    if (!respostaEditId) return null;
+    return respostasCtx.respostas.find((r) => Number(r.id) === Number(respostaEditId)) || null;
+  }
+
+  async function resolveRespostaParticipanteId(resposta) {
+    let participanteId = Number(resposta?.participanteId);
+    if (Number.isInteger(participanteId) && participanteId > 0) return participanteId;
+
+    const arrecadacaoId = Number(resposta?.arrecadacaoId);
+    if (!Number.isInteger(arrecadacaoId) || arrecadacaoId < 1) return null;
+
+    try {
+      const data = await fetchArrecadacaoById(arrecadacaoId);
+      participanteId = Number(data?.item?.participanteId ?? data?.participanteId);
+      if (Number.isInteger(participanteId) && participanteId > 0) {
+        resposta.participanteId = participanteId;
+        return participanteId;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return null;
+  }
+
+  async function handleOpenWhatsappFromResposta(resposta) {
+    if (typeof onOpenWhatsappChat !== 'function') return;
+    if (telefoneFoiAlterado()) {
+      const saved = await saveRespostaTelefone();
+      if (!saved) return;
+      resposta = getRespostaAtual();
+      if (!resposta) return;
+    }
+    const participanteId = await resolveRespostaParticipanteId(resposta);
+    if (!participanteId) {
+      alert(
+        'Não foi possível abrir a conversa. Verifique se o lead está vinculado a um participante com WhatsApp cadastrado.',
+      );
+      return;
+    }
+    await onOpenWhatsappChat(participanteId);
+  }
+
+  function formatInstagramDisplay(ig) {
+    if (!ig) return '';
+    const handle = String(ig).trim();
+    return handle.startsWith('@') ? handle : `@${handle.replace(/^@+/, '')}`;
+  }
+
+  function instagramProfileUrl(ig) {
+    const handle = String(ig || '')
+      .trim()
+      .replace(/^@+/, '')
+      .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+      .replace(/\/.*$/, '')
+      .split('/')[0];
+    if (!handle) return '';
+    return `https://www.instagram.com/${encodeURIComponent(handle)}/`;
+  }
+
+  function renderInstagramContact(ig) {
+    if (!els.respostaContactInstagram) return;
+    if (!ig) {
+      els.respostaContactInstagram.innerHTML = '';
+      return;
+    }
+    els.respostaContactInstagram.innerHTML = renderInstagramChip(ig);
+  }
+
+  function renderInstagramChip(ig) {
+    if (!ig) return '';
+    const url = instagramProfileUrl(ig);
+    const label = formatInstagramDisplay(ig);
+    const inner = `<span class="marketing-resposta-contact-chip-label">Instagram</span><span class="marketing-resposta-contact-chip-value">${escapeHtml(label)}</span>`;
+    if (!url) {
+      return `<span class="marketing-resposta-contact-chip marketing-resposta-contact-chip--ig marketing-resposta-contact-chip--static">${inner}</span>`;
+    }
+    return `<a class="marketing-resposta-contact-chip marketing-resposta-contact-chip--ig" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
   }
 
   function renderTable() {
@@ -901,11 +1132,49 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     return escapeHtml(String(value));
   }
 
+  function formatRespostaPlain(campo, value) {
+    if (value == null || value === '') return '';
+    if (campo?.type === 'checkbox') return value ? 'Sim' : 'Não';
+    if (campo?.type === 'money') return fmtMoney(value);
+    return String(value).replace(/\s+/g, ' ').trim();
+  }
+
+  function buildResumo(resposta, campos, maxLen = 140) {
+    const parts = (campos || [])
+      .map((campo) => {
+        const plain = formatRespostaPlain(campo, resposta.respostas?.[campo.id]);
+        return plain ? `${campo.label}: ${plain}` : '';
+      })
+      .filter(Boolean);
+    const text = parts.join(' · ') || '—';
+    if (text.length <= maxLen) return text;
+    return `${text.slice(0, maxLen - 1)}…`;
+  }
+
   function openRespostaDetail(resposta) {
     respostaEditId = resposta.id;
+    respostaDetailOpen = true;
     const form = respostasCtx.formulario;
+
     if (els.respostaDetailTitle) {
-      els.respostaDetailTitle.textContent = resposta.participanteNome || 'Resposta';
+      els.respostaDetailTitle.textContent = resposta.participanteNome || 'Candidato';
+    }
+    if (els.respostaDetailMeta) {
+      const metaParts = [];
+      if (form?.nome) metaParts.push(form.nome);
+      if (resposta.createdAt) {
+        metaParts.push(`Enviado em ${new Date(resposta.createdAt).toLocaleString('pt-BR')}`);
+      }
+      els.respostaDetailMeta.textContent = metaParts.join(' · ');
+    }
+    setTelefoneInputValue(resposta.participanteTelefone || '');
+    setTelefoneViewMode(false);
+    renderInstagramContact(resposta.participanteInstagram);
+    if (els.respostaDetailBadge) {
+      const classif = resposta.classificacao || 'pendente';
+      els.respostaDetailBadge.hidden = false;
+      els.respostaDetailBadge.className = `marketing-resposta-head-badge marketing-classif marketing-classif--${classif}`;
+      els.respostaDetailBadge.textContent = CLASSIFICACAO_LABELS[classif] || classif;
     }
     if (els.respostaClassificacao) {
       els.respostaClassificacao.value = resposta.classificacao || 'pendente';
@@ -914,46 +1183,46 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
       els.respostaNota.value = resposta.notaInterna || '';
     }
 
-    const camposById = new Map((form.campos || []).map((c) => [c.id, c]));
-    const rows = (form.campos || []).map((campo) => {
+    const answerRows = (form.campos || []).map((campo) => {
       const value = resposta.respostas?.[campo.id];
-      return `<tr><th>${escapeHtml(campo.label)}</th><td>${renderRespostaValue(campo, value)}</td></tr>`;
+      return renderAnswerRow(campo.label, renderRespostaValue(campo, value));
     });
 
-    const fixedRows = `
-      <tr><th>Nome</th><td>${escapeHtml(resposta.participanteNome || '—')}</td></tr>
-      <tr><th>Telefone</th><td>${escapeHtml(resposta.participanteTelefone || '—')}</td></tr>
-      <tr><th>Instagram</th><td>${escapeHtml(resposta.participanteInstagram || '—')}</td></tr>
-    `;
-
     if (els.respostaDetailBody) {
-      els.respostaDetailBody.innerHTML = `
-        <table class="marketing-resposta-detail-table">
-          <tbody>${fixedRows}${rows.join('')}</tbody>
-        </table>`;
+      els.respostaDetailBody.innerHTML = answerRows.length
+        ? answerRows.join('')
+        : '<p class="marketing-resposta-answers-empty">Este formulário não possui perguntas adicionais além dos dados de contato.</p>';
     }
 
-    els.respostaDetailBg?.classList.add('open');
+    setRespostasFlowVisibility();
   }
 
   function closeRespostaDetail() {
-    els.respostaDetailBg?.classList.remove('open');
+    respostaDetailOpen = false;
     respostaEditId = null;
+    telefoneEditOpen = false;
+    setRespostasFlowVisibility();
   }
 
   async function saveRespostaDetail() {
     if (!respostaEditId) return;
     els.respostaDetailSave.disabled = true;
     try {
+      const digits = readTelefoneDigits();
+      if (!digits) {
+        alert('Informe um telefone ou WhatsApp válido.');
+        return;
+      }
       await updateFormularioResposta(respostaEditId, {
         classificacao: els.respostaClassificacao?.value,
         notaInterna: els.respostaNota?.value.trim(),
+        participanteTelefone: digits,
         atualizarLead: true,
         statusLead: els.respostaClassificacao?.value === 'reprovado' ? 'perda' : undefined,
       });
       closeRespostaDetail();
       if (respostasCtx.formulario?.id) {
-        await openRespostasModal(respostasCtx.formulario.id, { keepOpen: true });
+        await openRespostasPage(respostasCtx.formulario.id, { reload: true });
       }
       await loadFormularios();
     } catch (err) {
@@ -963,45 +1232,113 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
     }
   }
 
-  async function openRespostasModal(formularioId, { keepOpen = false } = {}) {
+  async function deleteResposta(respostaId) {
+    const id = Number(respostaId);
+    const resposta = respostasCtx.respostas.find((r) => Number(r.id) === id);
+    const nome = resposta?.participanteNome || 'esta resposta';
+    if (
+      !confirm(
+        `Excluir a resposta de "${nome}"?\n\nO lead vinculado no marketing não será removido automaticamente.`,
+      )
+    ) {
+      return;
+    }
+
+    const deleteBtn = els.respostasTable?.querySelector(`[data-action="delete-resposta"][data-id="${id}"]`);
+    if (deleteBtn) deleteBtn.disabled = true;
+
+    try {
+      await deleteFormularioResposta(id);
+      if (respostaEditId === id) closeRespostaDetail();
+      if (respostasCtx.formulario?.id) {
+        await openRespostasPage(respostasCtx.formulario.id, { reload: true });
+      }
+      await loadFormularios();
+    } catch (err) {
+      alert(err.message || 'Não foi possível excluir a resposta.');
+    } finally {
+      if (deleteBtn) deleteBtn.disabled = false;
+    }
+  }
+
+  function bindRespostasTableActions() {
+    if (els.respostasTable?.dataset.actionsBound === '1') return;
+    if (els.respostasTable) els.respostasTable.dataset.actionsBound = '1';
+
+    els.respostasTable?.addEventListener('click', (event) => {
+      const deleteBtn = event.target.closest('[data-action="delete-resposta"]');
+      if (deleteBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        void deleteResposta(Number(deleteBtn.dataset.id));
+        return;
+      }
+
+      const openBtn = event.target.closest('[data-action="open-resposta"]');
+      if (openBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        const resposta = respostasCtx.respostas.find((r) => Number(r.id) === Number(openBtn.dataset.id));
+        if (resposta) openRespostaDetail(resposta);
+        return;
+      }
+
+      const row = event.target.closest('.marketing-resposta-row');
+      if (!row || event.target.closest('button, a')) return;
+      const resposta = respostasCtx.respostas.find((r) => Number(r.id) === Number(row.dataset.id));
+      if (resposta) openRespostaDetail(resposta);
+    });
+  }
+
+  function formatTelefoneDisplay(phone) {
+    if (!phone) return '—';
+    return formatPhoneDisplay(phone) || phone;
+  }
+
+  function renderRespostasTableBody() {
+    if (!els.respostasTable) return;
+    const campos = respostasCtx.formulario?.campos || [];
+    const respostas = respostasCtx.respostas || [];
+    els.respostasTable.innerHTML = respostas.length
+      ? respostas
+          .map((r) => {
+            const resumo = buildResumo(r, campos);
+            return `
+              <tr class="marketing-resposta-row" data-id="${r.id}">
+                <td class="marketing-resposta-nome"><strong>${escapeHtml(r.participanteNome)}</strong></td>
+                <td class="marketing-resposta-telefone">${escapeHtml(formatTelefoneDisplay(r.participanteTelefone))}</td>
+                <td class="marketing-resposta-resumo" title="${escapeHtml(resumo)}">${escapeHtml(resumo)}</td>
+                <td><span class="marketing-classif marketing-classif--${r.classificacao}">${CLASSIFICACAO_LABELS[r.classificacao] || r.classificacao}</span></td>
+                <td class="marketing-resposta-data">${r.createdAt ? new Date(r.createdAt).toLocaleString('pt-BR') : '—'}</td>
+                <td class="marketing-resposta-actions">
+                  <button class="tbtn" type="button" data-action="open-resposta" data-id="${r.id}">Analisar</button>
+                  <button class="tbtn marketing-resposta-delete" type="button" data-action="delete-resposta" data-id="${r.id}">Excluir</button>
+                </td>
+              </tr>`;
+          })
+          .join('')
+      : '<tr><td colspan="6" class="cell-empty">Nenhuma resposta recebida ainda.</td></tr>';
+    bindRespostasTableActions();
+  }
+
+  async function openRespostasPage(formularioId, { reload = false } = {}) {
     try {
       const data = await fetchFormularioRespostas(formularioId);
       respostasCtx = data;
+      const total = data.respostas.length;
+      const pendentes = data.respostas.filter((r) => r.classificacao === 'pendente').length;
+
       if (els.respostasTitle) {
         els.respostasTitle.textContent = `Respostas · ${data.formulario.nome}`;
       }
-      if (els.respostasTable) {
-        const campos = data.formulario.campos || [];
-        const extraHeaders = campos.slice(0, 2).map((c) => `<th>${escapeHtml(c.label)}</th>`).join('');
-        els.respostasTable.innerHTML = data.respostas.length
-          ? data.respostas
-              .map((r) => {
-                const extras = campos
-                  .slice(0, 2)
-                  .map((c) => `<td>${renderRespostaValue(c, r.respostas?.[c.id])}</td>`)
-                  .join('');
-                return `
-              <tr>
-                <td><strong>${escapeHtml(r.participanteNome)}</strong></td>
-                <td>${escapeHtml(r.participanteTelefone || '—')}</td>
-                ${extras}
-                <td><span class="marketing-classif marketing-classif--${r.classificacao}">${CLASSIFICACAO_LABELS[r.classificacao] || r.classificacao}</span></td>
-                <td>${r.createdAt ? new Date(r.createdAt).toLocaleString('pt-BR') : '—'}</td>
-                <td><button class="tbtn" type="button" data-action="open-resposta" data-id="${r.id}">Analisar</button></td>
-              </tr>`;
-              })
-              .join('')
-          : '<tr><td colspan="7" class="cell-empty">Nenhuma resposta recebida ainda.</td></tr>';
+      if (els.respostasSub) {
+        els.respostasSub.textContent = total
+          ? `${total} resposta${total === 1 ? '' : 's'} recebida${total === 1 ? '' : 's'}${pendentes ? ` · ${pendentes} pendente${pendentes === 1 ? '' : 's'}` : ''}`
+          : 'Nenhuma resposta recebida ainda.';
       }
+      renderRespostasTableBody();
 
-      els.respostasTable?.querySelectorAll('[data-action="open-resposta"]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const resposta = respostasCtx.respostas.find((r) => r.id === Number(btn.dataset.id));
-          if (resposta) openRespostaDetail(resposta);
-        });
-      });
-
-      if (!keepOpen) els.respostasBg?.classList.add('open');
+      if (!reload) setRespostasPageVisible(true);
     } catch (err) {
       alert(err.message || 'Não foi possível carregar respostas.');
     }
@@ -1045,15 +1382,58 @@ export function initMarketingFormularios({ getMarketingData, onSummaryChange }) 
   els.btnDelete?.addEventListener('click', () => {
     if (editId) deleteFormulario(editId).then(closeFormModal);
   });
-  els.respostasClose?.addEventListener('click', () => els.respostasBg?.classList.remove('open'));
+  els.respostasBack?.addEventListener('click', closeRespostasPage);
+  els.respostaDetailBack?.addEventListener('click', closeRespostaDetail);
   els.respostaDetailCancel?.addEventListener('click', closeRespostaDetail);
+  els.respostaDetailDelete?.addEventListener('click', () => {
+    if (respostaEditId) void deleteResposta(respostaEditId);
+  });
   els.respostaDetailSave?.addEventListener('click', () => void saveRespostaDetail());
+  els.respostaTelefone?.addEventListener('input', () => maskPhoneInput(els.respostaTelefone));
+  els.respostaDetailPage?.addEventListener('click', (event) => {
+    const editBtn = event.target.closest('[data-action="edit-marketing-telefone"]');
+    if (editBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      openTelefoneEditor();
+      return;
+    }
+
+    const saveBtn = event.target.closest('[data-action="save-marketing-telefone"]');
+    if (saveBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      void confirmTelefoneEditor();
+      return;
+    }
+
+    const cancelBtn = event.target.closest('[data-action="cancel-marketing-telefone"]');
+    if (cancelBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelTelefoneEditor();
+      return;
+    }
+
+    const btn = event.target.closest('[data-action="open-marketing-whatsapp"]');
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const resposta = getRespostaAtual();
+    if (resposta) void handleOpenWhatsappFromResposta(resposta);
+  });
+  bindRespostasTableActions();
 
   return {
     showPanel(visible) {
-      els.panel?.classList.toggle('hidden', !visible);
-      if (visible) void loadFormularios();
+      if (!visible) {
+        closeRespostaDetail();
+        closeRespostasPage();
+      }
+      els.panel?.classList.toggle('hidden', !visible || respostasPageOpen || respostaDetailOpen);
+      if (visible && !respostasPageOpen && !respostaDetailOpen) void loadFormularios();
     },
+    closeRespostasPage,
     loadFormularios,
     renderTable,
   };

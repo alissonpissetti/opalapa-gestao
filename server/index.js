@@ -97,6 +97,7 @@ import {
   deleteMarketingFormulario,
   listFormularioRespostas,
   updateFormularioResposta,
+  deleteFormularioResposta,
   getPublicFormulario,
   submitPublicFormulario,
   readMarketingFormularioLogo,
@@ -1538,6 +1539,11 @@ app.get('/api/marketing/formularios/:id/respostas', requireEvento, async (req, r
 app.put('/api/marketing/formulario-respostas/:id', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
+    if (req.body?.action === 'delete') {
+      const ok = await deleteFormularioResposta(pool, id, req.eventoId);
+      if (!ok) return res.status(404).json({ error: 'Resposta não encontrada' });
+      return res.json({ ok: true });
+    }
     const resposta = await updateFormularioResposta(pool, id, req.eventoId, req.body);
     if (!resposta) return res.status(404).json({ error: 'Resposta não encontrada' });
     res.json({ resposta });
@@ -1545,6 +1551,18 @@ app.put('/api/marketing/formulario-respostas/:id', requireEvento, async (req, re
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PUT /api/marketing/formulario-respostas/:id', err);
     res.status(500).json({ error: 'Falha ao atualizar resposta' });
+  }
+});
+
+app.delete('/api/marketing/formulario-respostas/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteFormularioResposta(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Resposta não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/marketing/formulario-respostas/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir resposta' });
   }
 });
 

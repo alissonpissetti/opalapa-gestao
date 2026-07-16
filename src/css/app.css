@@ -553,9 +553,32 @@ textarea {
 }
 
 .nav-drawer-links .nav-link,
-.nav-drawer-links .nav-dropdown {
+.nav-drawer-links .nav-dropdown,
+.nav-drawer-links .nav-section {
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.nav-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nav-section-label {
+  display: none;
+}
+
+.nav-section-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nav-section-links.nav-dropdown {
+  position: relative;
 }
 
 .nav-drawer-links.is-dragging {
@@ -3658,12 +3681,443 @@ body.lead-workspace-open .lead-workspace {
   -webkit-overflow-scrolling: touch;
 }
 
-#marketing-form-modal-bg.modal-bg.open,
-#marketing-respostas-modal-bg.modal-bg.open,
-#marketing-resposta-detail-bg.modal-bg.open {
+#marketing-form-modal-bg.modal-bg.open {
   align-items: flex-start;
   padding: 1.25rem 0 2rem;
   overflow-y: auto;
+}
+
+.marketing-respostas-page {
+  margin-top: 0.5rem;
+}
+
+.marketing-respostas-page-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.marketing-respostas-back {
+  font-size: 0.88rem;
+}
+
+.marketing-respostas-page-intro h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.marketing-respostas-sub {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-respostas-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--content-border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--content-surface, #fff);
+}
+
+.marketing-respostas-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.marketing-respostas-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.75rem 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--content-text-muted, #64748b);
+  background: var(--content-surface-muted, #f8fafc);
+  border-bottom: 1px solid var(--content-border, #e2e8f0);
+  white-space: nowrap;
+}
+
+.marketing-respostas-table tbody tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.marketing-respostas-table tbody tr:hover {
+  background: var(--content-surface-muted, #f8fafc);
+}
+
+.marketing-respostas-table tbody td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--content-border, #e2e8f0);
+  color: var(--content-text, #0f172a);
+  vertical-align: top;
+}
+
+.marketing-respostas-table .marketing-resposta-nome {
+  min-width: 10rem;
+  white-space: nowrap;
+}
+
+.marketing-respostas-table .marketing-resposta-telefone {
+  min-width: 8.5rem;
+  white-space: nowrap;
+}
+
+.marketing-respostas-table .marketing-resposta-resumo {
+  min-width: 14rem;
+  max-width: 28rem;
+  line-height: 1.45;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-respostas-table .marketing-resposta-data {
+  min-width: 9.5rem;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-respostas-table .marketing-resposta-actions {
+  min-width: 10.5rem;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.marketing-respostas-table .marketing-resposta-actions .tbtn {
+  margin-right: 0.35rem;
+}
+
+.marketing-respostas-table .marketing-resposta-delete {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.25);
+}
+
+.marketing-respostas-table .marketing-resposta-delete:hover {
+  background: rgba(185, 28, 28, 0.08);
+  color: #991b1b;
+}
+
+/* ── Página de análise de candidatura ── */
+
+.marketing-resposta-detail-page {
+  margin-top: 0.5rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+.marketing-resposta-detail-hero {
+  padding: 1rem 1.1rem 1.15rem;
+  background: linear-gradient(
+    180deg,
+    var(--content-surface-muted, #f8fafc) 0%,
+    var(--content-surface, #fff) 100%
+  );
+  border-bottom: 1px solid var(--content-border, #e2e8f0);
+}
+
+.marketing-resposta-detail-hero-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem 1.25rem;
+  margin-top: 0.85rem;
+}
+
+.marketing-resposta-detail-hero-main {
+  flex: 1;
+  min-width: min(100%, 220px);
+}
+
+.marketing-resposta-detail-kicker {
+  margin: 0 0 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-detail-hero h2 {
+  margin: 0 0 0.3rem;
+  font-size: clamp(1.4rem, 2.8vw, 1.85rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+  color: var(--content-text, #0f172a);
+}
+
+.marketing-resposta-detail-meta {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-head-badge {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.8rem;
+}
+
+.marketing-resposta-detail-contacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+.marketing-resposta-contact-phone {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+}
+
+.marketing-resposta-contact-phone-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.marketing-resposta-contact-edit {
+  flex-shrink: 0;
+}
+
+.marketing-resposta-contact-phone-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.marketing-resposta-contact-phone-edit input {
+  flex: 1 1 180px;
+  min-width: 160px;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgba(29, 158, 117, 0.35);
+  border-radius: 999px;
+  background: var(--content-surface, #fff);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent, #1d9e75);
+}
+
+.marketing-resposta-contact-phone-edit input:focus {
+  outline: none;
+  border-color: var(--accent, #1d9e75);
+  box-shadow: 0 0 0 2px rgba(29, 158, 117, 0.15);
+}
+
+#marketing-resposta-contact-instagram {
+  display: flex;
+  align-items: center;
+}
+
+.marketing-resposta-detail-contacts-empty {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-contact-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.9rem;
+  border: 1px solid var(--content-border, #e2e8f0);
+  border-radius: 999px;
+  background: var(--content-surface, #fff);
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--content-text, #0f172a);
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.marketing-resposta-contact-chip--static {
+  cursor: default;
+}
+
+.marketing-resposta-contact-chip-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-contact-chip-value {
+  font-weight: 600;
+  color: inherit;
+}
+
+.marketing-resposta-contact-chip--wa {
+  border-color: rgba(29, 158, 117, 0.35);
+  color: var(--accent, #1d9e75);
+}
+
+.marketing-resposta-contact-chip--wa:hover {
+  background: rgba(29, 158, 117, 0.06);
+  border-color: rgba(29, 158, 117, 0.55);
+  box-shadow: 0 1px 2px rgba(29, 158, 117, 0.12);
+}
+
+.marketing-resposta-contact-chip--ig {
+  border-color: rgba(193, 53, 132, 0.3);
+  color: #be185d;
+}
+
+.marketing-resposta-contact-chip--ig:hover {
+  background: rgba(193, 53, 132, 0.06);
+  border-color: rgba(193, 53, 132, 0.5);
+  box-shadow: 0 1px 2px rgba(193, 53, 132, 0.1);
+}
+
+.marketing-resposta-contact-chip.wa-phone-btn {
+  min-height: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.marketing-resposta-contact-chip.wa-phone-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.marketing-resposta-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 1.25rem;
+  align-items: start;
+  padding: 1.15rem 1.1rem 0;
+}
+
+.marketing-resposta-detail-fields-wrap,
+.marketing-resposta-detail-sidebar {
+  border: 1px solid var(--content-border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--content-surface, #fff);
+  padding: 1.15rem 1.25rem;
+}
+
+.marketing-resposta-detail-section-title {
+  margin: 0 0 0.85rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--content-text, #0f172a);
+}
+
+.marketing-resposta-answers {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.marketing-resposta-answer {
+  display: grid;
+  grid-template-columns: minmax(120px, 34%) minmax(0, 1fr);
+  gap: 0.65rem 1.25rem;
+  padding: 0.8rem 0;
+  margin: 0;
+  border-bottom: 1px solid var(--content-border, #e2e8f0);
+}
+
+.marketing-resposta-answer:first-child {
+  padding-top: 0.15rem;
+}
+
+.marketing-resposta-answer:last-child {
+  border-bottom: none;
+  padding-bottom: 0.15rem;
+}
+
+.marketing-resposta-answer dt {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--content-text-muted, #64748b);
+  background: none;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.marketing-resposta-answer dd {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--content-text, #0f172a);
+  word-break: break-word;
+}
+
+.marketing-resposta-answers-empty {
+  margin: 0;
+  padding: 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-detail-sidebar .field label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-text-muted, #64748b);
+}
+
+.marketing-resposta-detail-sidebar select,
+.marketing-resposta-detail-sidebar textarea {
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.marketing-resposta-detail-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0;
+  padding: 1rem 1.1rem 1.1rem;
+  border-top: 1px solid var(--content-border, #e2e8f0);
+}
+
+.marketing-resposta-detail-foot-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.marketing-resposta-detail-delete {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.35);
+}
+
+.marketing-resposta-detail-delete:hover {
+  background: rgba(185, 28, 28, 0.08);
+}
+
+@media (max-width: 900px) {
+  .marketing-resposta-detail-layout {
+    grid-template-columns: 1fr;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .marketing-resposta-answer {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+  }
 }
 
 .modal.modal-form-xl {
@@ -5658,26 +6112,6 @@ tbody tr:hover {
   color: #b91c1c;
 }
 
-.marketing-resposta-detail-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 1rem;
-}
-
-.marketing-resposta-detail-table th,
-.marketing-resposta-detail-table td {
-  padding: 0.55rem 0.65rem;
-  border-bottom: 1px solid var(--content-border, #e2e8f0);
-  text-align: left;
-  vertical-align: top;
-}
-
-.marketing-resposta-detail-table th {
-  width: 34%;
-  color: var(--text-muted, #6b7280);
-  font-weight: 500;
-}
-
 .lw-whatsapp-action {
   margin-bottom: 1.5rem;
   padding: 1rem 1.1rem;
@@ -7439,8 +7873,43 @@ body.wa-inbox-open {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 4px;
+    gap: 0;
     width: 100%;
+  }
+
+  .nav.nav-drawer .nav-section {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 4px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .nav.nav-drawer .nav-section:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .nav.nav-drawer .nav-section-label {
+    display: block;
+    padding: 6px 14px 2px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--shell-text-muted);
+  }
+
+  .nav.nav-drawer .nav-section-links {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 4px;
   }
 
   body.nav-drawer-open .nav.nav-drawer {
@@ -7481,30 +7950,8 @@ body.wa-inbox-open {
     box-shadow: none;
   }
 
-  .nav.nav-drawer #nav-arrecadacao .nav-dropdown-menu::before {
-    content: 'Arrecadação';
-  }
-
-  .nav.nav-drawer #nav-producao .nav-dropdown-menu::before {
-    content: 'Produção';
-  }
-
-  .nav.nav-drawer #nav-financeiro .nav-dropdown-menu::before {
-    content: 'Financeiro';
-  }
-
-  .nav.nav-drawer #nav-acessos .nav-dropdown-menu::before {
-    content: 'Acessos';
-  }
-
   .nav.nav-drawer .nav-dropdown-menu::before {
-    display: block;
-    padding: 10px 14px 4px;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--shell-text-muted);
+    display: none;
   }
 
   .header-evento-selector {
