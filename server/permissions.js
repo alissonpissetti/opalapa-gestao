@@ -17,6 +17,9 @@ export const PERMISSION_CATALOG = [
 
 export const ALL_VIEW_KEYS = PERMISSION_CATALOG.map((item) => item.key);
 
+const USER_ACCESS_CACHE_TTL_MS = 30_000;
+const userAccessCache = new Map();
+
 /** Telas cujo fluxo usa conversas WhatsApp com participantes/leads. */
 export const WHATSAPP_VIEWS = [
   'espacos',
@@ -132,6 +135,22 @@ export async function migratePermissions(pool) {
 }
 
 export async function getUserAccess(pool, userId) {
+  const cached = userAccessCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.access;
+  }
+
+  const access = await loadUserAccessFromDb(pool, userId);
+  userAccessCache.set(userId, { access, expiresAt: Date.now() + USER_ACCESS_CACHE_TTL_MS });
+  return access;
+}
+
+export function invalidateUserAccessCache(userId) {
+  if (userId != null) userAccessCache.delete(userId);
+  else userAccessCache.clear();
+}
+
+async function loadUserAccessFromDb(pool, userId) {
   const [rows] = await pool.query(
     `SELECT u.permission_group_id, pg.name AS group_name, pg.is_system
      FROM users u
@@ -396,7 +415,11 @@ export function loadUserPermissions(pool) {
       next();
     } catch (err) {
       console.error('loadUserPermissions', err);
-      res.status(500).json({ error: 'Falha ao carregar permissões' });
+      const message =
+        err?.code === 'ETIMEDOUT' || err?.code === 'ECONNREFUSED' || err?.fatal
+          ? 'Banco de dados indisponível no momento. Tente novamente em instantes.'
+          : 'Falha ao carregar permissões';
+      res.status(503).json({ error: message });
     }
   };
 }

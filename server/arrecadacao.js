@@ -195,6 +195,15 @@ export async function migrateArrecadacao(pool) {
       [row.id, row.participante_id, row.valor_pago, row.id, row.id],
     );
   }
+
+  await pool.query(
+    `UPDATE arrecadacao esp
+     JOIN arrecadacao pat ON pat.participante_id = esp.participante_id
+       AND pat.evento_id = esp.evento_id
+       AND pat.tipo = 'patrocinio'
+     SET esp.valor_total = 0
+     WHERE esp.tipo = 'espaco' AND esp.valor_total <> 0`,
+  );
 }
 
 function rowToPagamento(row) {
@@ -301,6 +310,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
     const descricao = `${e.label || `Espaço ${e.numero}`} — ${e.grupo_nome}`;
     const grupoSuffix = e.sale_group ? ' · venda em grupo' : '';
     const patrocinio = await findPatrocinioVinculo(pool, eventoId, e.participante_id);
+    const valorArrecadacao = patrocinio ? 0 : valorTotal;
     const statusFromPatrocinio =
       patrocinio?.status && !perdas.has(patrocinio.status) ? patrocinio.status : null;
     const arrecadacaoStatus = statusFromPatrocinio || e.status;
@@ -320,7 +330,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
         `UPDATE arrecadacao SET
            participante_id = ?, descricao = ?, valor_total = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
          WHERE id = ?`,
-        [e.participante_id, descricao + grupoSuffix, valorTotal, arrecadacaoStatus, existing[0].id],
+        [e.participante_id, descricao + grupoSuffix, valorArrecadacao, arrecadacaoStatus, existing[0].id],
       );
       if (espacoStatus !== e.status) {
         await pool.query(
@@ -360,7 +370,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
           arrecadacaoStatus,
           e.id,
           descricao + grupoSuffix,
-          valorTotal,
+          valorArrecadacao,
           patrocinio?.marketing_canal_id ?? null,
           patrocinio?.marketing_campanha_id ?? null,
           patrocinio?.marketing_criativo_id ?? null,
@@ -1016,6 +1026,9 @@ export async function deletePagamento(pool, arrecadacaoId, pagamentoId, eventoId
 export async function registerPagamento(pool, arrecadacaoId, raw) {
   const existing = await findArrecadacaoById(pool, arrecadacaoId);
   if (!existing) return null;
+  if (!existing.participanteId) {
+    throw Object.assign(new Error('Registro sem participante vinculado'), { status: 400 });
+  }
 
   const valor = parseMoney(raw.valor ?? raw.valorPagamento, 'Valor do pagamento');
   if (valor <= 0) {
@@ -1072,15 +1085,27 @@ export async function registerPagamento(pool, arrecadacaoId, raw) {
   }
 }
 
+function filterItemsForFinancialTotals(items) {
+  const patrocinioParticipantes = new Set(
+    items.filter((i) => i.tipo === 'patrocinio').map((i) => i.participanteId),
+  );
+  return items.filter(
+    (i) => i.tipo !== 'espaco' || !patrocinioParticipantes.has(i.participanteId),
+  );
+}
+
 export function summarizeArrecadacao(items, etapas = []) {
   const perdas = perdaStatuses(etapas);
   let total = 0;
   let pago = 0;
   let count = 0;
-  for (const item of items) {
-    if (perdas.has(item.status)) continue;
+  const active = items.filter((item) => !perdas.has(item.status));
+  const financial = filterItemsForFinancialTotals(active);
+  for (const item of financial) {
     total += item.valorTotal;
     pago += item.valorPago;
+  }
+  for (const item of active) {
     count += 1;
   }
   return {

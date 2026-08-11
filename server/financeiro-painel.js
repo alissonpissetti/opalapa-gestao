@@ -58,6 +58,12 @@ function realizadoFromLinha(linha) {
   return parseMoneyLoose(linha.status) ?? (Number(linha.posEvento) || 0);
 }
 
+function realizadoEditavelFromLinha(linha) {
+  if (!linha) return 0;
+  if (linha.posEvento != null) return Number(linha.posEvento) || 0;
+  return parseMoneyLoose(linha.status) ?? 0;
+}
+
 function buildLinhaSumario({
   chave,
   nome,
@@ -66,11 +72,15 @@ function buildLinhaSumario({
   refAnterior = null,
   realizado = null,
   previstoEditavel = true,
+  realizadoEditavel = false,
   posEvento = false,
 }) {
   const previstoManual =
     previstoEditavel && linha?.realizadoPago != null ? Number(linha.realizadoPago) : null;
   const previsto = previstoManual != null ? previstoManual : previstoCalculado;
+  const realizadoValor =
+    realizado ??
+    (realizadoEditavel ? realizadoEditavelFromLinha(linha) : realizadoFromLinha(linha));
   return {
     id: chave,
     linhaId: linha?.id ?? null,
@@ -80,9 +90,10 @@ function buildLinhaSumario({
     previstoManual: previstoManual != null,
     previstoCalculado,
     previstoEditavel,
+    realizadoEditavel,
     posEvento,
     fase: posEvento ? 'pos' : null,
-    realizado: realizado ?? realizadoFromLinha(linha),
+    realizado: realizadoValor,
   };
 }
 
@@ -106,6 +117,7 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
   const linhas = SUMARIO_ARRECADACAO_DEFS.map((def) => {
     const linha = findSumarioArrecadacaoLinha(resultadoLinhas, def.chave);
     const previstoEditavel = def.previstoEditavel !== false;
+    const realizadoEditavel = def.realizadoEditavel === true;
     const posEvento = def.posEvento === true;
     if (def.chave === 'bonificado-prefeitura') {
       return buildLinhaSumario({
@@ -116,6 +128,7 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
         realizado: bonificadoTemContas ? bonificadoContas.realizado : realizadoFromLinha(linha),
         previstoEditavel,
         posEvento,
+        realizadoEditavel,
       });
     }
     if (def.chave === 'patrocinios-espacos') {
@@ -127,6 +140,7 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
         realizado: entradas.total.realizado,
         previstoEditavel,
         posEvento,
+        realizadoEditavel,
       });
     }
     if (def.chave === 'vendas-hora') {
@@ -138,6 +152,7 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
         realizado: vendasHora.totais.realizado,
         previstoEditavel: false,
         posEvento: true,
+        realizadoEditavel,
       });
     }
     if (def.chave === 'bebidas') {
@@ -149,6 +164,7 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
         realizado: bebidas.totais.realizadoReceita,
         previstoEditavel: false,
         posEvento: true,
+        realizadoEditavel,
       });
     }
     return buildLinhaSumario({
@@ -158,6 +174,7 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
       previstoCalculado: 0,
       previstoEditavel,
       posEvento,
+      realizadoEditavel,
     });
   });
 

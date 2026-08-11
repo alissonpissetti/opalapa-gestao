@@ -88,7 +88,25 @@ import {
   deleteMarketingCampanha,
   deleteMarketingCriativo,
 } from './marketing.js';
-import { previewComunicacao, enviarComunicacaoItem, COMUNICACAO_TEMPLATE_VARS } from './marketing-comunicacao.js';
+import {
+  previewComunicacao,
+  enviarComunicacaoItem,
+  COMUNICACAO_TEMPLATE_VARS,
+  migrateComunicacoes,
+  listComunicacoes,
+  getComunicacaoById,
+  createComunicacao,
+  updateComunicacao,
+  deleteComunicacao,
+  gerarPreviewComunicacao,
+  updateComunicacaoItem,
+  deleteComunicacaoItem,
+  atualizarConteudoComunicacaoItem,
+  setComunicacaoItemPausado,
+  limparPreviewComunicacao,
+  marcarComunicacaoEnviando,
+  pausarComunicacao,
+} from './marketing-comunicacao.js';
 import {
   migrateMarketingFormularios,
   listMarketingFormularios,
@@ -134,6 +152,7 @@ import {
   clearFinanceiroResultado,
   carregarModeloFinanceiroResultado,
   patchSumarioArrecadacaoPrevisto,
+  patchSumarioArrecadacaoRealizado,
   patchFaturamentoPracaAlimentacao,
 } from './financeiro-resultado.js';
 import { buildFinanceiroPainel } from './financeiro-painel.js';
@@ -1436,6 +1455,199 @@ app.post('/api/marketing/comunicacao/enviar', requireEvento, async (req, res) =>
   }
 });
 
+app.get('/api/marketing/comunicacoes', requireEvento, async (req, res) => {
+  try {
+    const comunicacoes = await listComunicacoes(pool, req.eventoId);
+    res.json({ comunicacoes });
+  } catch (err) {
+    console.error('GET /api/marketing/comunicacoes', err);
+    res.status(500).json({ error: 'Falha ao listar comunicações' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes', requireEvento, async (req, res) => {
+  try {
+    const data = await createComunicacao(pool, req.eventoId, req.body);
+    res.status(201).json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes', err);
+    res.status(500).json({ error: 'Falha ao criar comunicação' });
+  }
+});
+
+app.get('/api/marketing/comunicacoes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await getComunicacaoById(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/marketing/comunicacoes/:id', err);
+    res.status(500).json({ error: 'Falha ao carregar comunicação' });
+  }
+});
+
+app.put('/api/marketing/comunicacoes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await updateComunicacao(pool, id, req.eventoId, req.body);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/comunicacoes/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar comunicação' });
+  }
+});
+
+app.delete('/api/marketing/comunicacoes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteComunicacao(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/marketing/comunicacoes/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir comunicação' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes/:id/preview', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await gerarPreviewComunicacao(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/preview', err);
+    res.status(500).json({ error: 'Falha ao gerar prévia' });
+  }
+});
+
+app.put('/api/marketing/comunicacoes/:comunicacaoId/itens/:itemId', requireEvento, async (req, res) => {
+  try {
+    const comunicacaoId = Number(req.params.comunicacaoId);
+    const itemId = Number(req.params.itemId);
+    const item = await updateComunicacaoItem(pool, comunicacaoId, itemId, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Item não encontrado' });
+    res.json({ item });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/marketing/comunicacoes/:comunicacaoId/itens/:itemId', err);
+    res.status(500).json({ error: 'Falha ao atualizar mensagem' });
+  }
+});
+
+app.post(
+  '/api/marketing/comunicacoes/:comunicacaoId/itens/:itemId/atualizar-conteudo',
+  requireEvento,
+  async (req, res) => {
+    try {
+      const comunicacaoId = Number(req.params.comunicacaoId);
+      const itemId = Number(req.params.itemId);
+      const item = await atualizarConteudoComunicacaoItem(pool, comunicacaoId, itemId, req.eventoId);
+      if (!item) return res.status(404).json({ error: 'Item não encontrado' });
+      res.json({ item });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      console.error(
+        'POST /api/marketing/comunicacoes/:comunicacaoId/itens/:itemId/atualizar-conteudo',
+        err,
+      );
+      res.status(500).json({ error: 'Falha ao atualizar conteúdo' });
+    }
+  },
+);
+
+app.post(
+  '/api/marketing/comunicacoes/:comunicacaoId/itens/:itemId/pausar',
+  requireEvento,
+  async (req, res) => {
+    try {
+      const comunicacaoId = Number(req.params.comunicacaoId);
+      const itemId = Number(req.params.itemId);
+      const pausado =
+        req.body?.pausado !== undefined
+          ? Boolean(req.body.pausado)
+          : req.body?.pausadoComunicacao !== undefined
+            ? Boolean(req.body.pausadoComunicacao)
+            : undefined;
+      const item = await setComunicacaoItemPausado(
+        pool,
+        comunicacaoId,
+        itemId,
+        req.eventoId,
+        pausado,
+      );
+      if (!item) return res.status(404).json({ error: 'Item não encontrado' });
+      res.json({ item });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      console.error(
+        'POST /api/marketing/comunicacoes/:comunicacaoId/itens/:itemId/pausar',
+        err,
+      );
+      res.status(500).json({ error: 'Falha ao pausar comunicação do destinatário' });
+    }
+  },
+);
+
+app.delete('/api/marketing/comunicacoes/:comunicacaoId/itens/:itemId', requireEvento, async (req, res) => {
+  try {
+    const comunicacaoId = Number(req.params.comunicacaoId);
+    const itemId = Number(req.params.itemId);
+    const data = await deleteComunicacaoItem(pool, comunicacaoId, itemId, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Item não encontrado' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/marketing/comunicacoes/:comunicacaoId/itens/:itemId', err);
+    res.status(500).json({ error: 'Falha ao remover destinatário' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes/:id/limpar-preview', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await limparPreviewComunicacao(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/limpar-preview', err);
+    res.status(500).json({ error: 'Falha ao limpar prévia' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes/:id/iniciar-envio', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await marcarComunicacaoEnviando(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/iniciar-envio', err);
+    res.status(500).json({ error: 'Falha ao iniciar envio' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes/:id/pausar', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await pausarComunicacao(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/pausar', err);
+    res.status(500).json({ error: 'Falha ao pausar envio' });
+  }
+});
+
 async function handleGerarFormularioTextoIa(req, res, modo = 'intro') {
   try {
     if (modo === 'secao') {
@@ -1985,16 +2197,27 @@ app.get('/api/financeiro/painel', requireEvento, async (req, res) => {
 app.patch('/api/financeiro/sumario-arrecadacao', requireEvento, async (req, res) => {
   try {
     const chave = String(req.body?.chave || '').trim();
-    const { previsto } = req.body ?? {};
+    const { previsto, realizado } = req.body ?? {};
     if (!chave) return res.status(400).json({ error: 'Informe a categoria do sumário' });
-    const result = await patchSumarioArrecadacaoPrevisto(pool, req.eventoId, chave, previsto);
+    if (previsto === undefined && realizado === undefined) {
+      return res.status(400).json({ error: 'Informe o previsto ou o realizado' });
+    }
+
+    let result = { chave };
+    if (previsto !== undefined) {
+      result = { ...result, ...(await patchSumarioArrecadacaoPrevisto(pool, req.eventoId, chave, previsto)) };
+    }
+    if (realizado !== undefined) {
+      result = { ...result, ...(await patchSumarioArrecadacaoRealizado(pool, req.eventoId, chave, realizado)) };
+    }
+
     const painel = await buildFinanceiroPainel(pool, req.eventoId);
     const sumarioLinha = painel.sumarioArrecadacao?.linhas?.find((l) => l.id === chave) || null;
     res.json({ ...result, sumarioLinha, sumarioArrecadacao: painel.sumarioArrecadacao, resultadoFinal: painel.resultadoFinal });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PATCH /api/financeiro/sumario-arrecadacao', err);
-    res.status(500).json({ error: 'Falha ao salvar previsto do sumário' });
+    res.status(500).json({ error: 'Falha ao salvar sumário de arrecadação' });
   }
 });
 
@@ -2410,6 +2633,7 @@ async function start() {
   await migrateFunil(pool);
   await migrateInteracoes(pool);
   await migrateMarketing(pool);
+  await migrateComunicacoes(pool);
   await migrateMarketingFormularios(pool);
   await migrateProducaoCronologia(pool);
   await migrateProducaoPremiacoes(pool);

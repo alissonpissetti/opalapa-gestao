@@ -1,6 +1,7 @@
 import {
   fetchFinanceiroPainel,
   patchSumarioArrecadacaoPrevisto,
+  patchSumarioArrecadacaoRealizado,
   patchVendaHora,
   carregarModeloVendasHora,
   patchBebida,
@@ -42,6 +43,13 @@ function renderPrevistoCell(l) {
   return `<input type="text" class="fin-inline-input fin-inline-money fin-sumario-previsto" data-chave="${escapeHtml(l.id)}" title="Valor previsto editável" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(l.previsto))}" />`;
 }
 
+function renderRealizadoCell(l) {
+  if (l.realizadoEditavel === true) {
+    return `<input type="text" class="fin-inline-input fin-inline-money fin-sumario-realizado" data-chave="${escapeHtml(l.id)}" title="Valor realizado editável manualmente" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(l.realizado))}" />`;
+  }
+  return cellMoney(l.realizado);
+}
+
 function resolveSumarioGrupos(sumario) {
   const linhas = sumario?.linhas || [];
   const linhasPre = sumario.linhasPre?.length ? sumario.linhasPre : linhas.filter((l) => !l.posEvento);
@@ -65,7 +73,7 @@ function renderSumarioLinha(l, colorIndex, arrecadacaoColors) {
               <tr data-sumario-chave="${escapeHtml(l.id)}">
                 <td class="fin-custo-cat"><span class="fin-cat-with-swatch">${renderFinSwatch(arrecadacaoColors[colorIndex])}<span>${escapeHtml(l.nome)}</span></span></td>
                 <td class="fin-col-money fin-col-previsto">${renderPrevistoCell(l)}</td>
-                <td class="fin-col-money fin-col-realizado">${cellMoney(l.realizado)}</td>
+                <td class="fin-col-money fin-col-realizado">${renderRealizadoCell(l)}</td>
               </tr>`;
 }
 
@@ -104,7 +112,7 @@ function renderSumarioArrecadacao(sumario) {
       <section class="financeiro-arrecadacao" id="financeiro-sumario-arrecadacao" aria-label="Sumário de arrecadação">
         <div class="financeiro-custos-head">
           <h2 class="financeiro-custos-title">Sumário de arrecadação</h2>
-          <span class="financeiro-painel-lead">Previsto editável por categoria</span>
+          <span class="financeiro-painel-lead">Previsto editável por categoria · realizado manual em ingressos digitais</span>
         </div>
         <div class="financeiro-chart-row">
         <div class="table-wrap">
@@ -736,6 +744,52 @@ export function initFinanceiroGestaoModule() {
     });
   }
 
+  async function saveSumarioRealizado(input) {
+    if (sumarioSaving || !input) return;
+    const chave = input.dataset.chave;
+    const linha = painel?.sumarioArrecadacao?.linhas?.find((l) => l.id === chave);
+    if (!linha || linha.realizadoEditavel !== true) return;
+
+    const parsed = parseValor(input.value);
+    if (parsed == null) {
+      input.value = formatValorInput(linha.realizado);
+      return;
+    }
+    if (Math.abs(parsed - (Number(linha.realizado) || 0)) < 0.005) {
+      input.value = formatValorInput(linha.realizado);
+      return;
+    }
+
+    const prev = linha.realizado;
+    sumarioSaving = true;
+    input.disabled = true;
+    input.classList.add('fin-sumario-realizado--saving');
+
+    try {
+      const res = await patchSumarioArrecadacaoRealizado(chave, parsed);
+      if (res?.sumarioArrecadacao) {
+        painel.sumarioArrecadacao = res.sumarioArrecadacao;
+      } else {
+        linha.realizado = parsed;
+        if (res?.linha?.id) linha.linhaId = res.linha.id;
+        recalcSumarioTotais();
+      }
+      refreshSumarioArrecadacao();
+      refreshFaseComparativoCharts();
+      applyResultadoFinalFromResponse(res);
+    } catch (err) {
+      linha.realizado = prev;
+      input.value = formatValorInput(prev);
+      input.classList.add('fin-sumario-realizado--error');
+      setTimeout(() => input.classList.remove('fin-sumario-realizado--error'), 2000);
+      console.error(err);
+    } finally {
+      sumarioSaving = false;
+      input.disabled = false;
+      input.classList.remove('fin-sumario-realizado--saving');
+    }
+  }
+
   function bindSumarioArrecadacaoEditors() {
     const section = document.getElementById('financeiro-sumario-arrecadacao');
     if (!section) return;
@@ -743,6 +797,17 @@ export function initFinanceiroGestaoModule() {
     section.querySelectorAll('.fin-sumario-previsto').forEach((input) => {
       input.addEventListener('input', () => maskValorInput(input));
       input.addEventListener('blur', () => saveSumarioPrevisto(input));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          input.blur();
+        }
+      });
+    });
+
+    section.querySelectorAll('.fin-sumario-realizado').forEach((input) => {
+      input.addEventListener('input', () => maskValorInput(input));
+      input.addEventListener('blur', () => saveSumarioRealizado(input));
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();

@@ -453,9 +453,15 @@
         <div class="stats arrecadacao-stats" id="arrecadacao-stats"></div>
       </div>
       <div class="arrecadacao-toolbar">
-        <div class="report-filters" role="tablist" aria-label="Visualização da arrecadação">
-          <button class="tbtn active" type="button" data-arr-view="lista" data-arr-scope="comercial" role="tab" aria-selected="true">Lista</button>
-          <button class="tbtn" type="button" data-arr-view="kanban" data-arr-scope="comercial" role="tab" aria-selected="false">Kanban</button>
+        <div class="arrecadacao-toolbar-filters">
+          <div class="report-filters" role="tablist" aria-label="Visualização da arrecadação">
+            <button class="tbtn active" type="button" data-arr-view="lista" data-arr-scope="comercial" role="tab" aria-selected="true">Lista</button>
+            <button class="tbtn" type="button" data-arr-view="kanban" data-arr-scope="comercial" role="tab" aria-selected="false">Kanban</button>
+          </div>
+          <div class="report-filters" id="arrecadacao-financial-filters" role="tablist" aria-label="Filtro financeiro">
+            <button class="tbtn active" type="button" data-arr-financial="all" role="tab" aria-selected="true">Todos</button>
+            <button class="tbtn" type="button" data-arr-financial="pendentes" role="tab" aria-selected="false">Pendentes</button>
+          </div>
         </div>
         <div class="arrecadacao-toolbar-actions">
           <button class="tbtn" type="button" id="btn-arrecadacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
@@ -614,6 +620,7 @@
         <button class="marketing-tab" type="button" data-marketing-tab="canais" role="tab">Origens</button>
         <button class="marketing-tab" type="button" data-marketing-tab="campanhas" role="tab">Campanhas</button>
         <button class="marketing-tab" type="button" data-marketing-tab="criativos" role="tab">Criativos</button>
+        <button class="marketing-tab" type="button" data-marketing-tab="comunicacao" role="tab">Comunicação</button>
         <button class="marketing-tab" type="button" data-marketing-tab="formularios" role="tab">Formulários</button>
       </div>
 
@@ -645,26 +652,72 @@
           <article class="marketing-tool-card marketing-tool-card--wide" aria-labelledby="marketing-tool-com-title">
             <h3 class="marketing-tool-card-title" id="marketing-tool-com-title">Comunicação</h3>
             <p class="marketing-tool-card-sub">
-              Disparo em massa de WhatsApp com template personalizado. Apenas contatos com telefone válido.
+              Disparo em massa de WhatsApp com template personalizado, prévia obrigatória e histórico salvo.
             </p>
+            <button class="tbtn primary" type="button" id="btn-marketing-com-open">Abrir comunicações</button>
+          </article>
+        </div>
+      </section>
+
+      <section id="marketing-panel-comunicacao" class="marketing-panel hidden">
+        <div class="marketing-com-page" id="marketing-com-list-view">
+          <div class="marketing-panel-head">
+            <h2>Comunicações WhatsApp</h2>
+            <button class="tbtn primary" type="button" id="btn-marketing-com-new">Nova comunicação</button>
+          </div>
+          <p class="subtitle marketing-com-list-hint">
+            Monte o template, gere a prévia por lead e só então dispare. Cada comunicação fica salva para revisão.
+          </p>
+          <div class="table-wrap">
+            <table class="marketing-com-list-table">
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Status</th>
+                  <th>Destinatários</th>
+                  <th>Enviados</th>
+                  <th>Atualizado</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="marketing-com-list-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="marketing-com-page hidden" id="marketing-com-editor-view">
+          <div class="marketing-com-editor-head">
+            <button class="tbtn" type="button" id="marketing-com-back">← Voltar à lista</button>
+            <div>
+              <h2 id="marketing-com-editor-title">Nova comunicação</h2>
+              <p class="marketing-com-editor-sub" id="marketing-com-editor-sub"></p>
+            </div>
+          </div>
+
+          <div class="marketing-com-setup" id="marketing-com-setup">
+            <div class="field">
+              <label for="marketing-com-nome">Nome da comunicação</label>
+              <input id="marketing-com-nome" type="text" placeholder="Ex.: Cobrança patrocínios out/2026" />
+            </div>
+
             <div class="marketing-com-filters" id="marketing-com-filters" role="group" aria-label="Tipos de lead">
               <label class="marketing-origem-check"><input type="checkbox" value="espaco" checked /> Espaço</label>
               <label class="marketing-origem-check"><input type="checkbox" value="patrocinio" checked /> Patrocínio</label>
               <label class="marketing-origem-check"><input type="checkbox" value="artistico" /> Artístico</label>
               <label class="marketing-origem-check"><input type="checkbox" value="contato" /> Contato</label>
             </div>
+
+            <label class="marketing-origem-check marketing-com-saldo-check">
+              <input type="checkbox" id="marketing-com-somente-saldo" checked />
+              Somente leads com valor em aberto &gt; 0
+            </label>
+
             <div class="field marketing-com-field">
               <label for="marketing-com-template">Template da mensagem</label>
-              <textarea
-                id="marketing-com-template"
-                class="marketing-tool-textarea"
-                rows="4"
-                placeholder="Olá {{nome}}, tudo bem? Seu espaço {{espaco}} está confirmado."
-              ></textarea>
-              <p class="field-hint" id="marketing-com-vars-hint">
-                Variáveis: {{nome}}, {{tipo}}, {{espaco}}, {{grupo}}, {{instagram}}, {{telefone}}, {{contato}}, {{descricao}}, {{status}}
-              </p>
+              <textarea id="marketing-com-template" class="marketing-tool-textarea" rows="12"></textarea>
+              <p class="field-hint" id="marketing-com-vars-hint"></p>
             </div>
+
             <div class="marketing-com-interval">
               <label class="marketing-com-interval-label">
                 Intervalo mín. (s)
@@ -675,32 +728,42 @@
                 <input type="number" id="marketing-com-interval-max" min="5" max="600" value="45" />
               </label>
             </div>
+
             <div class="marketing-tool-actions marketing-com-actions-top">
-              <button class="tbtn primary" type="button" id="btn-marketing-com-preview">Gerar lista</button>
+              <button class="tbtn" type="button" id="btn-marketing-com-save">Salvar rascunho</button>
+              <button class="tbtn primary" type="button" id="btn-marketing-com-preview">Gerar prévia</button>
             </div>
-            <div class="marketing-com-preview hidden" id="marketing-com-preview">
+          </div>
+
+          <div class="marketing-com-preview hidden" id="marketing-com-preview">
+            <h3 class="marketing-com-preview-title">Prévia dos destinatários</h3>
+            <div class="marketing-com-preview-head">
               <p class="marketing-com-meta" id="marketing-com-meta"></p>
-              <div class="table-wrap marketing-com-table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Destinatário</th>
-                      <th>Telefone</th>
-                      <th>Tipo</th>
-                      <th>Mensagem</th>
-                    </tr>
-                  </thead>
-                  <tbody id="marketing-com-table"></tbody>
-                </table>
+              <div class="marketing-com-preview-head-actions">
+                <button class="tbtn" type="button" id="btn-marketing-com-clear">Limpar lista</button>
               </div>
-              <div class="marketing-tool-actions">
-                <button class="tbtn primary" type="button" id="btn-marketing-com-start">Iniciar disparo</button>
-                <button class="tbtn hidden" type="button" id="btn-marketing-com-pause">Pausar</button>
-                <span class="marketing-tool-meta" id="marketing-com-progress"></span>
-              </div>
-              <ul class="marketing-com-errors hidden" id="marketing-com-errors" aria-live="polite"></ul>
             </div>
-          </article>
+            <div class="table-wrap marketing-com-table-wrap">
+              <table class="marketing-com-preview-table">
+                <thead>
+                  <tr>
+                    <th>Destinatário</th>
+                    <th>Tipo / Em aberto</th>
+                    <th>Mensagem</th>
+                    <th>Status</th>
+                    <th class="marketing-com-col-actions">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="marketing-com-table"></tbody>
+              </table>
+            </div>
+            <div class="marketing-tool-actions marketing-com-preview-actions">
+              <button class="tbtn primary" type="button" id="btn-marketing-com-start" disabled>Iniciar disparo</button>
+              <button class="tbtn hidden" type="button" id="btn-marketing-com-pause">Pausar disparo</button>
+              <span class="marketing-tool-meta" id="marketing-com-progress"></span>
+            </div>
+            <ul class="marketing-com-errors hidden" id="marketing-com-errors" aria-live="polite"></ul>
+          </div>
         </div>
       </section>
 

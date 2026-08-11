@@ -63,13 +63,30 @@ export function formatDatabaseStartupError(err, databaseUrl) {
 }
 
 export function createPool(databaseUrl) {
-  return mysql.createPool({
+  const pool = mysql.createPool({
     ...parseDatabaseUrl(databaseUrl),
     waitForConnections: true,
-    connectionLimit: 10,
-    connectTimeout: 15000,
+    connectionLimit: 20,
+    maxIdle: 10,
+    idleTimeout: 60_000,
+    connectTimeout: 10_000,
     enableKeepAlive: true,
-    keepAliveInitialDelay: 0,
+    keepAliveInitialDelay: 10_000,
     timezone: 'Z',
   });
+
+  pool.on('connection', (conn) => {
+    conn.on('error', (err) => {
+      if (err?.fatal || err?.code === 'PROTOCOL_CONNECTION_LOST') {
+        console.warn('Conexão MySQL encerrada:', err.message);
+      }
+    });
+  });
+
+  return pool;
+}
+
+export function isDatabaseConnectionError(err) {
+  const code = err?.code || err?.errno;
+  return NETWORK_ERROR_CODES.has(code) || code === 'PROTOCOL_CONNECTION_LOST';
 }

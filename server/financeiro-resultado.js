@@ -19,6 +19,7 @@ export const SUMARIO_ARRECADACAO_DEFS = [
     chave: 'ingressos-digitais',
     item: 'ARRECADAÇÃO INGRESSOS DIGITAIS',
     pattern: /^ARRECADAÇÃO INGRESSOS DIGITAIS/i,
+    realizadoEditavel: true,
   },
   {
     chave: 'patrocinios-espacos',
@@ -567,6 +568,48 @@ export async function patchSumarioArrecadacaoPrevisto(pool, eventoId, chave, pre
     realizadoPago: previstoVal,
   });
   return { chave, previsto: previstoVal, linha };
+}
+
+export async function patchSumarioArrecadacaoRealizado(pool, eventoId, chave, realizado) {
+  const def = SUMARIO_ARRECADACAO_DEFS.find((d) => d.chave === chave);
+  if (!def) {
+    throw Object.assign(new Error('Categoria do sumário inválida'), { status: 400 });
+  }
+  if (def.realizadoEditavel !== true) {
+    throw Object.assign(
+      new Error('O realizado desta categoria é calculado automaticamente e não pode ser editado'),
+      { status: 403 },
+    );
+  }
+
+  const realizadoVal = moneyToDb(realizado);
+  if (realizadoVal == null) {
+    throw Object.assign(new Error('Informe um valor realizado válido'), { status: 400 });
+  }
+
+  const linhas = await listFinanceiroResultado(pool, eventoId);
+  const existente = findSumarioArrecadacaoLinha(linhas, chave);
+
+  if (existente) {
+    await pool.query(
+      `UPDATE financeiro_resultado_linhas
+       SET pos_evento = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND evento_id = ?`,
+      [realizadoVal, existente.id, eventoId],
+    );
+    const [rows] = await pool.query(
+      'SELECT id, evento_id, ordem, tipo, item, orcamento_categoria, sub_item, previsto_qtde, diaria, orcamento, valor_unit, valor_bonificado, valor_total, pre_evento, pos_evento, realizado_pago, status, dt_prevista, dt_realiz, quem, reembolso FROM financeiro_resultado_linhas WHERE id = ?',
+      [existente.id],
+    );
+    return { chave, realizado: realizadoVal, linha: rows[0] ? rowToLinha(rows[0]) : null };
+  }
+
+  const linha = await createFinanceiroLinha(pool, eventoId, {
+    item: def.item,
+    tipo: 'resumo',
+    posEvento: realizadoVal,
+  });
+  return { chave, realizado: realizadoVal, linha };
 }
 
 export async function clearFinanceiroResultado(pool, eventoId) {
