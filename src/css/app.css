@@ -1950,6 +1950,13 @@ polygon.selected {
   flex-shrink: 0;
 }
 
+.arrecadacao-toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .arrecadacao-toolbar-actions {
   display: flex;
   align-items: center;
@@ -7962,6 +7969,12 @@ body.wa-inbox-open {
   }
 
   .arrecadacao-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .arrecadacao-toolbar-filters {
+    width: 100%;
     flex-direction: column;
     align-items: stretch;
   }

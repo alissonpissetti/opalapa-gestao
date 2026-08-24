@@ -48,9 +48,34 @@ function rowToArrecadacao(row) {
     marketingCanalNome: row.marketing_canal_nome || '',
     marketingCampanhaNome: row.marketing_campanha_nome || '',
     marketingCriativoNome: row.marketing_criativo_nome || '',
+    dataAcionamento: formatDateOnlyField(row.data_acionamento),
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
+}
+
+function formatDateOnlyField(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(value).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+function parseDataAcionamento(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  throw Object.assign(new Error('Data de acionamento inválida'), { status: 400 });
 }
 
 const ESPACO_STATUS = new Set(['disp', 'lead', 'neg', 'res', 'vend']);
@@ -126,6 +151,18 @@ export async function migrateArrecadacao(pool) {
       `ALTER TABLE arrecadacao
          ADD COLUMN motivo_perda VARCHAR(100) NULL AFTER obs,
          ADD COLUMN motivo_perda_outro TEXT NULL AFTER motivo_perda`,
+    );
+  }
+
+  const [dataAcionamentoCol] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao' AND COLUMN_NAME = 'data_acionamento'`,
+  );
+  if (dataAcionamentoCol.length === 0) {
+    await pool.query(
+      `ALTER TABLE arrecadacao
+         ADD COLUMN data_acionamento DATE NULL AFTER obs,
+         ADD INDEX idx_arrecadacao_data_acionamento (data_acionamento)`,
     );
   }
 
@@ -404,7 +441,7 @@ export async function syncAllArrecadacaoFromEspacos(pool) {
 
 function scopeTipoClause(scope) {
   if (scope === 'artistico') return " AND a.tipo = 'artistico'";
-  return " AND a.tipo IN ('espaco', 'patrocinio', 'alimentacao')";
+  return " AND a.tipo IN ('espaco', 'patrocinio')";
 }
 
 function parseLeadTipo(raw) {
@@ -425,7 +462,7 @@ function isLeadTipoManual(tipo) {
 
 const ARRECADACAO_SELECT = `
   SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.produto_id, a.descricao,
-         a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
+         a.valor_total, a.valor_pago, a.obs, a.data_acionamento, a.motivo_perda, a.motivo_perda_outro,
          a.marketing_canal_id, a.marketing_campanha_id, a.marketing_criativo_id,
          a.created_at, a.updated_at, p.nome AS participante_nome,
          e.tipo AS espaco_tipo, e.numero AS espaco_numero,
@@ -501,6 +538,7 @@ export async function createPatrocinio(pool, eventoId, raw) {
     const descricaoPadrao = descricaoPadraoForTipo(tipo);
     const descricao = String(raw.descricao || descricaoPadrao).trim() || descricaoPadrao;
     const obs = String(raw.obs || '').trim();
+    const dataAcionamento = parseDataAcionamento(raw.dataAcionamento ?? raw.data_acionamento);
     const status = parseStatus(raw.status, 'neg');
     let produtoId = null;
     if (tipo === 'patrocinio') {
@@ -517,8 +555,8 @@ export async function createPatrocinio(pool, eventoId, raw) {
 
     const [result] = await conn.query(
       `INSERT INTO arrecadacao
-         (evento_id, participante_id, tipo, status, espaco_id, produto_id, descricao, valor_total, valor_pago, obs, updated_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+         (evento_id, participante_id, tipo, status, espaco_id, produto_id, descricao, valor_total, valor_pago, obs, data_acionamento, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
       [
         eventoId,
         participanteId,
@@ -529,6 +567,7 @@ export async function createPatrocinio(pool, eventoId, raw) {
         valorTotal,
         valorPago,
         obs || null,
+        dataAcionamento,
       ],
     );
 
@@ -578,6 +617,11 @@ export async function updateArrecadacao(pool, id, raw) {
   }
 
   const obs = raw.obs !== undefined ? String(raw.obs || '').trim() : existing.obs;
+  let dataAcionamento = existing.dataAcionamento ?? null;
+  if (raw.dataAcionamento !== undefined || raw.data_acionamento !== undefined) {
+    const v = raw.dataAcionamento ?? raw.data_acionamento;
+    dataAcionamento = v === null || v === '' ? null : parseDataAcionamento(v);
+  }
   let descricao = existing.descricao;
   if (isLeadTipoManual(existing.tipo) && raw.descricao !== undefined) {
     const padrao = descricaoPadraoForTipo(existing.tipo);
@@ -687,7 +731,7 @@ export async function updateArrecadacao(pool, id, raw) {
 
   await pool.query(
     `UPDATE arrecadacao SET
-       participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, status = ?,
+       participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, data_acionamento = ?, status = ?,
        marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?, produto_id = ?,
        updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
@@ -698,6 +742,7 @@ export async function updateArrecadacao(pool, id, raw) {
       valorTotal,
       valorPago,
       obs || null,
+      dataAcionamento,
       status,
       marketingCanalId,
       marketingCampanhaId,
@@ -816,7 +861,7 @@ export async function registerPerdaLead(pool, id, raw) {
 
   const [rows] = await pool.query(
     `SELECT a.id, a.participante_id, a.tipo, a.status, a.espaco_id, a.descricao,
-            a.valor_total, a.valor_pago, a.obs, a.motivo_perda, a.motivo_perda_outro,
+            a.valor_total, a.valor_pago, a.obs, a.data_acionamento, a.motivo_perda, a.motivo_perda_outro,
             a.created_at, a.updated_at, p.nome AS participante_nome
      FROM arrecadacao a
      JOIN participantes p ON p.id = a.participante_id

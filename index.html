@@ -453,9 +453,22 @@
         <div class="stats arrecadacao-stats" id="arrecadacao-stats"></div>
       </div>
       <div class="arrecadacao-toolbar">
-        <div class="report-filters" role="tablist" aria-label="Visualização da arrecadação">
-          <button class="tbtn active" type="button" data-arr-view="lista" data-arr-scope="comercial" role="tab" aria-selected="true">Lista</button>
-          <button class="tbtn" type="button" data-arr-view="kanban" data-arr-scope="comercial" role="tab" aria-selected="false">Kanban</button>
+        <div class="arrecadacao-toolbar-filters">
+          <div class="report-filters" role="tablist" aria-label="Visualização da arrecadação">
+            <button class="tbtn active" type="button" data-arr-view="lista" data-arr-scope="comercial" role="tab" aria-selected="true">Lista</button>
+            <button class="tbtn" type="button" data-arr-view="kanban" data-arr-scope="comercial" role="tab" aria-selected="false">Kanban</button>
+          </div>
+          <div class="report-filters" role="tablist" aria-label="Filtro de situação">
+            <button class="tbtn active" type="button" data-arr-situacao="ativos" role="tab" aria-selected="true">Ativos</button>
+            <button class="tbtn" type="button" data-arr-situacao="cancelados" role="tab" aria-selected="false">Cancelados</button>
+            <button class="tbtn" type="button" data-arr-situacao="todos" role="tab" aria-selected="false">Todos</button>
+          </div>
+          <div class="report-filters" role="tablist" aria-label="Filtro de pagamento">
+            <button class="tbtn active" type="button" data-arr-pagamento="todos" role="tab" aria-selected="true">Todos</button>
+            <button class="tbtn" type="button" data-arr-pagamento="quitado" role="tab" aria-selected="false">Quitado</button>
+            <button class="tbtn" type="button" data-arr-pagamento="parcial" role="tab" aria-selected="false">Parcialmente pago</button>
+            <button class="tbtn" type="button" data-arr-pagamento="nada" role="tab" aria-selected="false">Nada pago</button>
+          </div>
         </div>
         <div class="arrecadacao-toolbar-actions">
           <button class="tbtn" type="button" id="btn-arrecadacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
@@ -625,7 +638,7 @@
           <article class="marketing-tool-card" aria-labelledby="marketing-tool-ig-title">
             <h3 class="marketing-tool-card-title" id="marketing-tool-ig-title">@ Instagram dos espaços</h3>
             <p class="marketing-tool-card-sub">
-              Gera a lista de menções dos participantes vinculados aos espaços do evento, pronta para colar em postagens.
+              Gera a lista de @ dos leads comerciais ativos no funil (espaço, patrocínio e afins), pronta para colar em postagens.
             </p>
             <button class="tbtn primary" type="button" id="btn-marketing-ig-generate">Gerar lista</button>
             <div class="marketing-tool-output hidden" id="marketing-ig-output">
@@ -1353,6 +1366,11 @@
         <div class="field" id="a-descricao-field">
           <label for="a-descricao">Referência / descrição</label>
           <input id="a-descricao" type="text" placeholder="Ex.: Patrocínio master" />
+        </div>
+        <div class="field" id="a-data-acionamento-field">
+          <label for="a-data-acionamento">Data de acionamento</label>
+          <input id="a-data-acionamento" type="date" />
+          <p class="field-hint">Quando o contato entrou em contato conosco (opcional).</p>
         </div>
         <div class="field hidden" id="a-produto-field">
           <label for="a-produto">Plano / Cota</label>

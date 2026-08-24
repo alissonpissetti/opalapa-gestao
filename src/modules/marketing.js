@@ -1,7 +1,6 @@
 import {
   fetchMarketing,
-  fetchGrupos,
-  fetchGrupoSpaces,
+  fetchArrecadacao,
   createMarketingCanal,
   updateMarketingCanal,
   deleteMarketingCanal,
@@ -32,29 +31,43 @@ function instagramHandleKey(value) {
   return normalizeInstagramHandle(value).slice(1).toLowerCase();
 }
 
-async function collectInstagramMentionsFromEspacos() {
-  const { grupos = [] } = await fetchGrupos();
-  if (!grupos.length) return [];
+const IG_LIST_TIPOS = new Set(['espaco', 'patrocinio', 'alimentacao', 'contato']);
 
-  const gruposData = await Promise.all(grupos.map((g) => fetchGrupoSpaces(g.slug)));
-  const participanteById = new Map();
-
-  for (const data of gruposData) {
-    for (const p of data.participantes || []) {
-      participanteById.set(p.id, p);
-    }
+function perdaStatusSet(funilEtapas) {
+  const set = new Set(['perda']);
+  for (const etapa of funilEtapas || []) {
+    if (etapa.tipo === 'perda') set.add(etapa.status);
   }
+  return set;
+}
 
+function leadIncluidoNaListaInstagram(status, funilEtapas) {
+  if (!status) return false;
+  if (perdaStatusSet(funilEtapas).has(status)) return false;
+  const etapa = funilEtapas?.find((e) => e.status === status);
+  if (etapa?.tipo === 'perda') return false;
+  return true;
+}
+
+function addInstagramHandle(handles, participante) {
+  const mention = normalizeInstagramHandle(participante?.instagram);
+  if (!mention) return;
+  const key = instagramHandleKey(mention);
+  if (!handles.has(key)) handles.set(key, mention);
+}
+
+async function collectInstagramMentionsFromLeads() {
+  const { items = [], participantes = [], funilEtapas = [] } = await fetchArrecadacao({
+    scope: 'comercial',
+  });
+  const participanteById = new Map((participantes || []).map((p) => [p.id, p]));
   const handles = new Map();
-  for (const data of gruposData) {
-    for (const space of Object.values(data.spaces || {})) {
-      if (!space?.participanteId) continue;
-      const participante = participanteById.get(space.participanteId);
-      const mention = normalizeInstagramHandle(participante?.instagram);
-      if (!mention) continue;
-      const key = instagramHandleKey(mention);
-      if (!handles.has(key)) handles.set(key, mention);
-    }
+
+  for (const item of items) {
+    if (!IG_LIST_TIPOS.has(item.tipo)) continue;
+    if (!leadIncluidoNaListaInstagram(item.status, funilEtapas)) continue;
+    if (!item.participanteId) continue;
+    addInstagramHandle(handles, participanteById.get(item.participanteId));
   }
 
   return [...handles.values()].sort((a, b) =>
@@ -381,14 +394,14 @@ export function initMarketingModule({ onOpenWhatsappChat } = {}) {
     if (els.igMeta) els.igMeta.textContent = '';
 
     try {
-      const mentions = await collectInstagramMentionsFromEspacos();
+      const mentions = await collectInstagramMentionsFromLeads();
       const text = mentions.join(' ');
       els.igResult.value = text;
       els.igOutput?.classList.remove('hidden');
       if (els.igMeta) {
         els.igMeta.textContent = mentions.length
-          ? `${mentions.length} perfil(is) · evento atual`
-          : 'Nenhum espaço com Instagram cadastrado no evento.';
+          ? `${mentions.length} perfil(is) · leads comerciais ativos`
+          : 'Nenhum lead comercial ativo com Instagram cadastrado.';
       }
     } catch (err) {
       alert(err.message || 'Não foi possível gerar a lista.');

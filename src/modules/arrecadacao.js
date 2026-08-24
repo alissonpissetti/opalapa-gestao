@@ -27,6 +27,8 @@ import {
 import {
   fmtMoney,
   fmtDate,
+  fmtDateOnly,
+  toDateInputValue,
   fmtAgendadoComAs,
   combineDateAndTime,
   isTarefaAtrasada,
@@ -98,7 +100,33 @@ function tipoBadgeClass(tipo) {
 
 function itemsForScope(list, scope) {
   if (scope === 'artistico') return list.filter((i) => i.tipo === 'artistico');
-  return list.filter((i) => i.tipo === 'espaco' || i.tipo === 'patrocinio' || i.tipo === 'alimentacao');
+  return list.filter((i) => i.tipo === 'espaco' || i.tipo === 'patrocinio');
+}
+
+function paymentStatusForGroup(group) {
+  const pago = Number(group.valorPago) || 0;
+  const falta = Number(group.valorFalta) || 0;
+  if (pago <= 0) return 'nada';
+  if (falta <= 0) return 'quitado';
+  return 'parcial';
+}
+
+function applyPagamentoFilter(list, filter) {
+  if (filter === 'todos') return list;
+  const allowedIds = new Set(
+    groupItemsForTable(list)
+      .filter((group) => paymentStatusForGroup(group) === filter)
+      .map((group) => group.participanteId),
+  );
+  return list.filter((item) => allowedIds.has(item.participanteId));
+}
+
+function applySituacaoFilter(list, filter, etapas = []) {
+  if (filter === 'todos') return list;
+  if (filter === 'cancelados') {
+    return list.filter((item) => isPerdaStatusForEtapas(item.status, etapas));
+  }
+  return list.filter((item) => !isPerdaStatusForEtapas(item.status, etapas));
 }
 
   async function notifyEspacosDataChanged(item) {
@@ -331,6 +359,7 @@ export function initArrecadacaoModule(
     whatsapp: document.getElementById('a-whatsapp'),
     proximoContato: document.getElementById('a-proximo-contato'),
     obsContato: document.getElementById('a-obs-contato'),
+    dataAcionamento: document.getElementById('a-data-acionamento'),
     funilModalBg: document.getElementById('funil-modal-bg'),
     funilModalTitle: document.getElementById('funil-modal-title'),
     funilModalSub: document.getElementById('funil-modal-sub'),
@@ -385,6 +414,8 @@ export function initArrecadacaoModule(
   let leadOrigemSaving = false;
   let draftFunilEtapas = [];
   let viewMode = 'lista';
+  let pagamentoFilter = 'todos';
+  let situacaoFilter = 'ativos';
   const overviewVisible = {
     comercial: true,
     artistico: true,
@@ -393,6 +424,52 @@ export function initArrecadacaoModule(
   let tableContatoEdit = null;
   let tableContatoSaving = false;
   let tableProdutoSaving = false;
+
+  function visibleItems() {
+    if (isArtisticoScope(leadScope)) return items;
+    let list = applySituacaoFilter(items, situacaoFilter, funilEtapas);
+    list = applyPagamentoFilter(list, pagamentoFilter);
+    return list;
+  }
+
+  function refreshFilteredView() {
+    renderStats(summarizeItems(visibleItems(), funilEtapas));
+    if (viewMode === 'kanban') renderKanban();
+    else renderTable();
+  }
+
+  function setPagamentoFilter(value) {
+    const allowed = new Set(['todos', 'quitado', 'parcial', 'nada']);
+    pagamentoFilter = allowed.has(value) ? value : 'todos';
+    localStorage.setItem('arrecadacao-pagamento-filter', pagamentoFilter);
+    document.querySelectorAll('[data-arr-pagamento]').forEach((btn) => {
+      const active = btn.dataset.arrPagamento === pagamentoFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    refreshFilteredView();
+  }
+
+  function setSituacaoFilter(value) {
+    const allowed = new Set(['ativos', 'cancelados', 'todos']);
+    situacaoFilter = allowed.has(value) ? value : 'ativos';
+    localStorage.setItem('arrecadacao-situacao-filter', situacaoFilter);
+    document.querySelectorAll('[data-arr-situacao]').forEach((btn) => {
+      const active = btn.dataset.arrSituacao === situacaoFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    refreshFilteredView();
+  }
+
+  function listFilterHint(displayCount) {
+    const hints = [];
+    if (situacaoFilter === 'ativos') hints.push('cancelados ocultos');
+    else if (situacaoFilter === 'cancelados') hints.push('só cancelados');
+    if (pagamentoFilter !== 'todos') hints.push('filtro de pagamento');
+    if (!hints.length || displayCount === items.length) return '';
+    return ` · ${hints.join(' · ')}`;
+  }
 
   function applyLeadScope(scope) {
     leadScope = PAGE_CONFIG[scope] ? scope : 'comercial';
@@ -544,6 +621,7 @@ export function initArrecadacaoModule(
     if (els.whatsapp) els.whatsapp.value = '';
     if (els.proximoContato) els.proximoContato.value = '';
     if (els.obsContato) els.obsContato.value = '';
+    if (els.dataAcionamento) els.dataAcionamento.value = '';
   }
 
   function etapaForStatus(status) {
@@ -832,6 +910,9 @@ export function initArrecadacaoModule(
       els.valorPagoHint.textContent = 'Atualizado pelos registros de pagamento.';
     }
     els.obs.value = item?.obs || '';
+    if (els.dataAcionamento) {
+      els.dataAcionamento.value = toDateInputValue(item?.dataAcionamento);
+    }
     if (isArtistico) {
       if (isCreate) resetNovoParticipanteFields();
       syncArtisticoLeadUi(item);
@@ -1085,6 +1166,9 @@ export function initArrecadacaoModule(
       valorTotal: parseValor(els.valorTotal.value) ?? 0,
       obs: els.obs.value.trim(),
     };
+    if (isCreateMode && els.dataAcionamento?.value) {
+      form.dataAcionamento = els.dataAcionamento.value;
+    }
     if (editTipo === 'patrocinio' || (!editTipo && !isArtisticoScope(leadScope))) {
       const produtoVal = els.produto?.value;
       form.produtoId = produtoVal ? Number(produtoVal) : null;
@@ -1349,6 +1433,21 @@ export function initArrecadacaoModule(
   function renderStats(resumo) {
     if (isArtisticoScope(leadScope)) {
       renderArtisticoStats(items);
+      return;
+    }
+    if (situacaoFilter === 'cancelados') {
+      const cancelled = visibleItems();
+      if (els.donut) {
+        els.donut.innerHTML =
+          '<p class="cell-muted" style="margin:0;padding:12px 0">Leads cancelados não entram no total acordado.</p>';
+      }
+      if (!els.stats) return;
+      els.stats.innerHTML = `
+        <div class="stat">
+          <div class="lbl">Cancelados</div>
+          <div class="val">${cancelled.length}</div>
+        </div>
+      `;
       return;
     }
     renderDonut(resumo);
@@ -1672,6 +1771,8 @@ export function initArrecadacaoModule(
         return item.participanteNome || '—';
       case 'contatoNome':
         return p?.contatoNome?.trim() || '—';
+      case 'dataAcionamento':
+        return item.dataAcionamento ? fmtDateOnly(item.dataAcionamento) : '—';
       case 'instagram':
         return p?.instagram ? formatInstagram(p.instagram) : '—';
       case 'seguidores':
@@ -1725,6 +1826,7 @@ export function initArrecadacaoModule(
     const map = {
       participante: isArtistico ? 'Artista / lead' : 'Nome do lead',
       contatoNome: 'Nome do contato',
+      dataAcionamento: 'Data de acionamento',
       instagram: 'Instagram',
       seguidores: 'Seguidores',
       tipoComercio: 'Tipo de comércio',
@@ -1896,8 +1998,7 @@ export function initArrecadacaoModule(
     const falta = Math.max(0, item.valorTotal - item.valorPago);
     const quitado = falta <= 0 && isVendaEtapaStatus(item.status);
 
-    const fields = ['participante', 'contatoNome'];
-    fields.push('instagram', 'whatsapp');
+    const fields = ['participante', 'contatoNome', 'dataAcionamento', 'instagram', 'whatsapp'];
     if (hasParticipanteInstagram(p)) {
       fields.push('seguidores');
     }
@@ -2345,6 +2446,11 @@ export function initArrecadacaoModule(
       input.className = 'lw-field-editor';
       input.placeholder = 'Ex.: Maria (responsável pelo WhatsApp)';
       input.value = p?.contatoNome || '';
+    } else if (field === 'dataAcionamento') {
+      input = document.createElement('input');
+      input.type = 'date';
+      input.className = 'lw-field-editor';
+      input.value = toDateInputValue(item.dataAcionamento);
     } else if (field === 'whatsapp') {
       input = document.createElement('input');
       input.type = 'text';
@@ -2411,6 +2517,8 @@ export function initArrecadacaoModule(
         patch.participanteNome = input.value.trim();
       } else if (field === 'contatoNome') {
         patch.participanteContatoNome = input.value.trim();
+      } else if (field === 'dataAcionamento') {
+        patch.dataAcionamento = input.value || null;
       } else if (field === 'instagram') {
         patch.participanteInstagram = input.value.trim();
       } else if (field === 'whatsapp') {
@@ -3056,13 +3164,14 @@ export function initArrecadacaoModule(
   function renderKanban() {
     if (!els.kanbanView) return;
 
+    const displayItems = visibleItems();
     const etapas = activeFunilEtapas();
     const activeStatuses = new Set(etapas.map((e) => e.status));
-    const outros = items.filter((item) => !activeStatuses.has(item.status));
+    const outros = displayItems.filter((item) => !activeStatuses.has(item.status));
 
     const columns = [
       ...etapas.map((etapa) => {
-        const colItems = items.filter((item) => item.status === etapa.status);
+        const colItems = displayItems.filter((item) => item.status === etapa.status);
         const colGroups = groupItemsForTable(colItems);
         const total = colItems.reduce((s, i) => s + Number(i.valorTotal || 0), 0);
         return `
@@ -3093,11 +3202,13 @@ export function initArrecadacaoModule(
     els.kanbanView.innerHTML = columns || '<p class="cell-empty">Configure ao menos uma etapa ativa no funil.</p>';
     bindKanbanInteractions(els.kanbanView);
 
-    const total = items.length;
+    const total = displayItems.length;
     els.summary.textContent =
       total > 0
-        ? `${total} registro(s) no kanban · ${etapas.length} etapa(s) ativa(s)`
-        : 'Nenhum registro de arrecadação no kanban.';
+        ? `${total} registro(s) no kanban · ${etapas.length} etapa(s) ativa(s)${listFilterHint(total)}`
+        : items.length > 0
+          ? 'Nenhum registro com os filtros selecionados.'
+          : 'Nenhum registro de arrecadação no kanban.';
   }
 
   function syncDraftFunilFromDom() {
@@ -3353,7 +3464,7 @@ export function initArrecadacaoModule(
     funilEscopoAtual = data.funilEscopo || funilEscopoForLeadScope(scope);
     store?.setParticipantes(participantes);
     renderParticipantesDatalist();
-    renderStats(summarizeItems(items, funilEtapas));
+    renderStats(summarizeItems(visibleItems(), funilEtapas));
     setViewMode(viewMode);
     renderDisponiveisTable();
     await refreshLeadWorkspace();
@@ -3436,7 +3547,7 @@ export function initArrecadacaoModule(
           produtoNome: updated.produtoNome,
           produtoValor: updated.produtoValor,
         });
-        renderStats(summarizeItems(items, funilEtapas));
+        renderStats(summarizeItems(visibleItems(), funilEtapas));
         if (viewMode === 'kanban') renderKanban();
         else renderTable();
       }
@@ -3720,7 +3831,15 @@ export function initArrecadacaoModule(
       return;
     }
 
-    const groups = groupItemsForTable(items);
+    const displayItems = visibleItems();
+    if (!displayItems.length) {
+      els.table.innerHTML =
+        '<tr><td colspan="7" class="cell-empty">Nenhum registro com os filtros selecionados.</td></tr>';
+      els.summary.textContent = 'Ajuste os filtros para ver outros registros.';
+      return;
+    }
+
+    const groups = groupItemsForTable(displayItems);
 
     els.table.innerHTML = groups
       .map((group) => {
@@ -3810,8 +3929,8 @@ export function initArrecadacaoModule(
     const mergedCount = groups.filter((g) => g.merged).length;
     els.summary.textContent =
       mergedCount > 0
-        ? `${groups.length} linha(s) · ${items.length} registro(s) (${mergedCount} agrupada(s))`
-        : `${items.length} registro(s) de arrecadação`;
+        ? `${groups.length} linha(s) · ${displayItems.length} registro(s) (${mergedCount} agrupada(s))${listFilterHint(displayItems.length)}`
+        : `${displayItems.length} registro(s) de arrecadação${listFilterHint(displayItems.length)}`;
 
     bindTableAction('edit', (item) => openLeadDetailModal(item.id));
     bindTableAction('migrar-artistico', (item) => migrateToArtistico(item.id));
@@ -3933,6 +4052,30 @@ export function initArrecadacaoModule(
       setViewMode(btn.dataset.arrView);
     });
   });
+  document.querySelectorAll('[data-arr-pagamento]').forEach((btn) => {
+    btn.addEventListener('click', () => setPagamentoFilter(btn.dataset.arrPagamento));
+  });
+  document.querySelectorAll('[data-arr-situacao]').forEach((btn) => {
+    btn.addEventListener('click', () => setSituacaoFilter(btn.dataset.arrSituacao));
+  });
+  const savedPagamentoFilter = localStorage.getItem('arrecadacao-pagamento-filter');
+  if (savedPagamentoFilter && ['todos', 'quitado', 'parcial', 'nada'].includes(savedPagamentoFilter)) {
+    pagamentoFilter = savedPagamentoFilter;
+    document.querySelectorAll('[data-arr-pagamento]').forEach((btn) => {
+      const active = btn.dataset.arrPagamento === pagamentoFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+  const savedSituacaoFilter = localStorage.getItem('arrecadacao-situacao-filter');
+  if (savedSituacaoFilter && ['ativos', 'cancelados', 'todos'].includes(savedSituacaoFilter)) {
+    situacaoFilter = savedSituacaoFilter;
+    document.querySelectorAll('[data-arr-situacao]').forEach((btn) => {
+      const active = btn.dataset.arrSituacao === situacaoFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
   document.getElementById('btn-arrecadacao-toggle-overview')?.addEventListener('click', () => {
     toggleOverviewVisible('comercial');
   });

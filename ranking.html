@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Ranking Opalapa Stock Experience — simulador Stock Car Opala anos 70." />
+    <title>Opalapa Stock Experience — Ranking</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏁</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/css/ranking.css" />
+  </head>
+  <body>
+    <div class="ranking-screen" id="ranking-screen">
+      <div class="ranking-checker-top" aria-hidden="true"></div>
+
+      <header class="ranking-header">
+        <div class="ranking-stripe" aria-hidden="true"></div>
+        <p class="ranking-era">Stock Car Brasil · Anos 70</p>
+        <h1 class="ranking-title">
+          <span class="ranking-title-opala">Opalapa</span>
+          <span class="ranking-title-stock">Stock Experience</span>
+        </h1>
+        <p class="ranking-subtitle" id="ranking-evento">Carregando ranking…</p>
+        <div class="ranking-opala-badge" aria-hidden="true">
+          <span class="ranking-opala-year">1974</span>
+          <span class="ranking-opala-model">Chevrolet Opala</span>
+        </div>
+      </header>
+
+      <main class="ranking-main">
+        <ol class="ranking-list" id="ranking-list" aria-live="polite" aria-label="Classificação"></ol>
+      </main>
+
+      <footer class="ranking-footer">
+        <div class="ranking-checker-bottom" aria-hidden="true"></div>
+        <p class="ranking-footer-text">
+          <span class="ranking-footer-flag" aria-hidden="true">🏁</span>
+          Velocidade, estilo e tradição Opala
+          <span class="ranking-updated" id="ranking-updated"></span>
+        </p>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/ranking.js"></script>
+  </body>
+</html>
