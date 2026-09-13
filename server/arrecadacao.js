@@ -232,6 +232,15 @@ export async function migrateArrecadacao(pool) {
       [row.id, row.participante_id, row.valor_pago, row.id, row.id],
     );
   }
+
+  await pool.query(
+    `UPDATE arrecadacao esp
+     JOIN arrecadacao pat ON pat.participante_id = esp.participante_id
+       AND pat.evento_id = esp.evento_id
+       AND pat.tipo = 'patrocinio'
+     SET esp.valor_total = 0
+     WHERE esp.tipo = 'espaco' AND esp.valor_total <> 0`,
+  );
 }
 
 function rowToPagamento(row) {
@@ -338,6 +347,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
     const descricao = `${e.label || `Espaço ${e.numero}`} — ${e.grupo_nome}`;
     const grupoSuffix = e.sale_group ? ' · venda em grupo' : '';
     const patrocinio = await findPatrocinioVinculo(pool, eventoId, e.participante_id);
+    const valorArrecadacao = patrocinio ? 0 : valorTotal;
     const statusFromPatrocinio =
       patrocinio?.status && !perdas.has(patrocinio.status) ? patrocinio.status : null;
     const arrecadacaoStatus = statusFromPatrocinio || e.status;
@@ -357,7 +367,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
         `UPDATE arrecadacao SET
            participante_id = ?, descricao = ?, valor_total = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
          WHERE id = ?`,
-        [e.participante_id, descricao + grupoSuffix, valorTotal, arrecadacaoStatus, existing[0].id],
+        [e.participante_id, descricao + grupoSuffix, valorArrecadacao, arrecadacaoStatus, existing[0].id],
       );
       if (espacoStatus !== e.status) {
         await pool.query(
@@ -397,7 +407,7 @@ export async function syncArrecadacaoForGrupo(pool, grupoId) {
           arrecadacaoStatus,
           e.id,
           descricao + grupoSuffix,
-          valorTotal,
+          valorArrecadacao,
           patrocinio?.marketing_canal_id ?? null,
           patrocinio?.marketing_campanha_id ?? null,
           patrocinio?.marketing_criativo_id ?? null,
@@ -642,7 +652,53 @@ export async function updateArrecadacao(pool, id, raw) {
   if (isLeadTipoManual(existing.tipo) && shouldUpdateParticipante) {
     const conn = await pool.getConnection();
     try {
-      participanteId = await resolveParticipanteFromBody(conn, raw);
+      const targetId =
+        raw.participanteId != null && raw.participanteId !== ''
+          ? Number(raw.participanteId)
+          : raw.participante_id != null && raw.participante_id !== ''
+            ? Number(raw.participante_id)
+            : existing.participanteId;
+
+      const nomePatch =
+        raw.participanteNome !== undefined || raw.participante_nome !== undefined
+          ? String(raw.participanteNome ?? raw.participante_nome ?? '').trim()
+          : undefined;
+
+      if (targetId) {
+        participanteId = await ensureParticipante(conn, {
+          id: targetId,
+          instagram:
+            raw.participanteInstagram !== undefined || raw.participante_instagram !== undefined
+              ? (raw.participanteInstagram ?? raw.participante_instagram)
+              : undefined,
+          contatoTelefone:
+            raw.participanteWhatsapp !== undefined || raw.participante_whatsapp !== undefined
+              ? (raw.participanteWhatsapp ?? raw.participante_whatsapp)
+              : undefined,
+          seguidores:
+            raw.participanteSeguidores !== undefined || raw.participante_seguidores !== undefined
+              ? (raw.participanteSeguidores ?? raw.participante_seguidores)
+              : undefined,
+        });
+        if (!participanteId) {
+          throw Object.assign(new Error('Participante vinculado não encontrado'), { status: 400 });
+        }
+        if (nomePatch) {
+          await conn.query(
+            'UPDATE participantes SET nome = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+            [nomePatch, participanteId],
+          );
+        }
+      } else {
+        participanteId = await resolveParticipanteFromBody(conn, {
+          participanteNome: nomePatch || existing.participanteNome,
+          participanteWhatsapp: raw.participanteWhatsapp ?? raw.participante_whatsapp,
+          participanteInstagram: raw.participanteInstagram ?? raw.participante_instagram,
+        });
+        if (!participanteId) {
+          throw Object.assign(new Error('Informe o participante ou patrocinador'), { status: 400 });
+        }
+      }
     } finally {
       conn.release();
     }
@@ -715,6 +771,18 @@ export async function updateArrecadacao(pool, id, raw) {
     marketingCriativoId = v != null && v !== '' ? Number(v) : null;
   }
 
+  let createdAt = null;
+  if (raw.createdAt !== undefined || raw.created_at !== undefined) {
+    const val = raw.createdAt ?? raw.created_at;
+    if (val == null || val === '') {
+      throw Object.assign(new Error('Data de cadastro inválida'), { status: 400 });
+    }
+    createdAt = new Date(val);
+    if (Number.isNaN(createdAt.getTime())) {
+      throw Object.assign(new Error('Data de cadastro inválida'), { status: 400 });
+    }
+  }
+
   let produtoId = existing.produtoId ?? null;
   if (raw.produtoId !== undefined || raw.produto_id !== undefined) {
     if (existing.tipo !== 'espaco' && existing.tipo !== 'patrocinio') {
@@ -733,6 +801,7 @@ export async function updateArrecadacao(pool, id, raw) {
     `UPDATE arrecadacao SET
        participante_id = ?, tipo = ?, descricao = ?, valor_total = ?, valor_pago = ?, obs = ?, data_acionamento = ?, status = ?,
        marketing_canal_id = ?, marketing_campanha_id = ?, marketing_criativo_id = ?, produto_id = ?,
+       created_at = COALESCE(?, created_at),
        updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ?`,
     [
@@ -748,6 +817,7 @@ export async function updateArrecadacao(pool, id, raw) {
       marketingCampanhaId,
       marketingCriativoId,
       produtoId,
+      createdAt,
       id,
     ],
   );
@@ -1001,6 +1071,9 @@ export async function deletePagamento(pool, arrecadacaoId, pagamentoId, eventoId
 export async function registerPagamento(pool, arrecadacaoId, raw) {
   const existing = await findArrecadacaoById(pool, arrecadacaoId);
   if (!existing) return null;
+  if (!existing.participanteId) {
+    throw Object.assign(new Error('Registro sem participante vinculado'), { status: 400 });
+  }
 
   const valor = parseMoney(raw.valor ?? raw.valorPagamento, 'Valor do pagamento');
   if (valor <= 0) {
@@ -1057,15 +1130,27 @@ export async function registerPagamento(pool, arrecadacaoId, raw) {
   }
 }
 
+function filterItemsForFinancialTotals(items) {
+  const patrocinioParticipantes = new Set(
+    items.filter((i) => i.tipo === 'patrocinio').map((i) => i.participanteId),
+  );
+  return items.filter(
+    (i) => i.tipo !== 'espaco' || !patrocinioParticipantes.has(i.participanteId),
+  );
+}
+
 export function summarizeArrecadacao(items, etapas = []) {
   const perdas = perdaStatuses(etapas);
   let total = 0;
   let pago = 0;
   let count = 0;
-  for (const item of items) {
-    if (perdas.has(item.status)) continue;
+  const active = items.filter((item) => !perdas.has(item.status));
+  const financial = filterItemsForFinancialTotals(active);
+  for (const item of financial) {
     total += item.valorTotal;
     pago += item.valorPago;
+  }
+  for (const item of active) {
     count += 1;
   }
   return {

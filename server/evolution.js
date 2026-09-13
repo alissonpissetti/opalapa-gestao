@@ -18,6 +18,44 @@ export function getEvolutionConfig() {
   };
 }
 
+const CONNECTION_CLOSED_HINT =
+  'WhatsApp desconectado na Evolution API. Use "Conectar WhatsApp" no menu superior; se não aparecer QR Code, reinicie o container da Evolution no servidor.';
+
+function collectEvolutionErrorParts(body) {
+  const parts = [];
+  const push = (value) => {
+    if (value == null || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach(push);
+      return;
+    }
+    if (typeof value === 'object') {
+      push(value.message);
+      push(value.error);
+      return;
+    }
+    parts.push(String(value));
+  };
+
+  push(body?.response?.message);
+  push(body?.output?.payload?.message);
+  push(body?.message);
+  push(body?.error);
+  return parts;
+}
+
+export function isConnectionClosedError(err) {
+  const parts = [err?.message, ...collectEvolutionErrorParts(err?.body), JSON.stringify(err?.body || '')];
+  return parts.some((part) => /connection\s+closed/i.test(String(part || '')));
+}
+
+export function formatEvolutionErrorMessage(body, fallback = '') {
+  const parts = collectEvolutionErrorParts(body);
+  const detail = parts.join(' ').trim() || String(fallback || '').trim();
+  if (/connection\s+closed/i.test(detail)) return CONNECTION_CLOSED_HINT;
+  return detail || fallback || 'Erro na Evolution API';
+}
+
 async function evoFetch(path, options = {}) {
   const { baseUrl, apiKey } = getEvolutionConfig();
   if (!baseUrl || !apiKey) {
@@ -48,11 +86,14 @@ async function evoFetch(path, options = {}) {
     }
 
     if (!res.ok) {
-      const msg =
-        (body && (body.message || body.error || body.response?.message)) ||
-        (typeof body === 'string' ? body : '') ||
-        `Evolution HTTP ${res.status}`;
-      throw Object.assign(new Error(String(msg)), { status: res.status, body });
+      const fallback =
+        (typeof body === 'string' ? body : '') || `Evolution HTTP ${res.status}`;
+      const msg = formatEvolutionErrorMessage(
+        body && typeof body === 'object' ? body : null,
+        fallback,
+      );
+      const status = isConnectionClosedError({ message: msg, body }) ? 503 : res.status;
+      throw Object.assign(new Error(msg), { status, body });
     }
 
     return body;
@@ -113,6 +154,58 @@ export async function connectInstance(number) {
   const { instance } = getEvolutionConfig();
   const qs = number ? `?number=${encodeURIComponent(number)}` : '';
   return evoFetch(`/instance/connect/${encodeURIComponent(instance)}${qs}`, { method: 'GET' });
+}
+
+export async function restartInstance() {
+  const { instance } = getEvolutionConfig();
+  return evoFetch(`/instance/restart/${encodeURIComponent(instance)}`, { method: 'POST' });
+}
+
+/** Verifica se a sessão Baileys responde (o estado "open" da Evolution pode estar desatualizado). */
+export async function probeInstanceConnection() {
+  const { instance } = getEvolutionConfig();
+  try {
+    await evoFetch(`/chat/whatsappNumbers/${encodeURIComponent(instance)}`, {
+      method: 'POST',
+      body: JSON.stringify({ numbers: ['5511999999999'] }),
+      timeoutMs: 8000,
+    });
+    return { ok: true, stale: false };
+  } catch (err) {
+    if (isConnectionClosedError(err)) {
+      return { ok: false, stale: true, message: err.message || CONNECTION_CLOSED_HINT };
+    }
+    return { ok: false, stale: false, message: err.message || 'Falha ao verificar conexão WhatsApp' };
+  }
+}
+
+/** Cruza metadados da instância com um probe real (Evolution pode marcar "open" com sessão morta). */
+export async function inspectInstanceConnection() {
+  const item = await findConfiguredInstance();
+  if (!item) {
+    return { exists: false, ok: false, stale: false, state: 'not_found' };
+  }
+
+  const reportedState = String(
+    item.connectionStatus || item.instance?.state || item.state || '',
+  ).toLowerCase();
+  const reportedOpen = isConnectedState(reportedState);
+
+  if (!reportedOpen) {
+    return { exists: true, ok: false, stale: false, state: reportedState || 'close', reportedState };
+  }
+
+  // Histórico de desconexão (disconnectionAt/reason) não reflete o estado atual — o probe decide.
+  const probe = await probeInstanceConnection();
+  return {
+    exists: true,
+    ok: probe.ok,
+    stale: Boolean(probe.stale),
+    needsServerRestart: Boolean(probe.stale),
+    state: probe.ok ? reportedState : probe.stale ? 'stale' : reportedState,
+    reportedState,
+    message: probe.message || null,
+  };
 }
 
 export async function logoutInstance() {

@@ -142,9 +142,10 @@ function isPerdaStatusForEtapas(status, etapas = []) {
 
 function summarizeItems(list, funilEtapas = []) {
   const active = list.filter((i) => !isPerdaStatusForEtapas(i.status, funilEtapas));
+  const financial = filterItemsForFinancialTotals(active);
   let total = 0;
   let pago = 0;
-  for (const item of active) {
+  for (const item of financial) {
     total += Number(item.valorTotal) || 0;
     pago += Number(item.valorPago) || 0;
   }
@@ -215,6 +216,31 @@ function pickPrimaryPlanoItem(items) {
   return items.find((i) => isComercialPlanoTipo(i.tipo)) || null;
 }
 
+/** Espaço vinculado a patrocínio não gera cobrança separada — evita total dobrado na lista. */
+function filterItemsForFinancialTotals(items) {
+  const patrocinioParticipantes = new Set(
+    items.filter((i) => i.tipo === 'patrocinio').map((i) => i.participanteId),
+  );
+  return items.filter(
+    (i) => i.tipo !== 'espaco' || !patrocinioParticipantes.has(i.participanteId),
+  );
+}
+
+function sumFinancialTotals(items) {
+  const financial = filterItemsForFinancialTotals(items);
+  const valorTotal = financial.reduce((s, i) => s + Number(i.valorTotal || 0), 0);
+  const valorPago = financial.reduce((s, i) => s + Number(i.valorPago || 0), 0);
+  return {
+    valorTotal,
+    valorPago,
+    valorFalta: Math.max(0, valorTotal - valorPago),
+  };
+}
+
+function isQuitadoValor({ valorFalta, valorTotal, valorPago }) {
+  return Number(valorFalta || 0) <= 0 && (Number(valorTotal) > 0 || Number(valorPago) > 0);
+}
+
 function resolveGroupProdutoId(items) {
   const planoItems = items.filter((i) => isComercialPlanoTipo(i.tipo));
   const primary = pickPrimaryPlanoItem(planoItems);
@@ -240,9 +266,7 @@ function groupItemsForTable(list) {
       if (oa !== ob) return oa - ob;
       return (a.descricao || '').localeCompare(b.descricao || '', 'pt-BR');
     });
-    const valorTotal = sorted.reduce((s, i) => s + Number(i.valorTotal || 0), 0);
-    const valorPago = sorted.reduce((s, i) => s + Number(i.valorPago || 0), 0);
-    const valorFalta = Math.max(0, valorTotal - valorPago);
+    const { valorTotal, valorPago, valorFalta } = sumFinancialTotals(sorted);
     const statuses = [...new Set(sorted.map((i) => i.status || 'neg'))];
     const tipos = [...new Set(sorted.map((i) => i.tipo))];
 
@@ -416,6 +440,7 @@ export function initArrecadacaoModule(
   let viewMode = 'lista';
   let pagamentoFilter = 'todos';
   let situacaoFilter = 'ativos';
+  let financialFilter = localStorage.getItem('arrecadacao-financial-filter') === 'pendentes' ? 'pendentes' : 'all';
   const overviewVisible = {
     comercial: true,
     artistico: true,
@@ -483,6 +508,34 @@ export function initArrecadacaoModule(
       viewMode = localStorage.getItem(cfg.viewModeKey) === 'kanban' ? 'kanban' : 'lista';
     }
     applyOverviewLayout(leadScope);
+    syncFinancialFilterUi();
+  }
+
+  function isGroupFinanciallyPending(group) {
+    if (group.items.every((i) => isPerdaItem(i))) return false;
+    return Number(group.valorFalta) > 0;
+  }
+
+  function filterGroupsByFinancial(groups) {
+    if (financialFilter !== 'pendentes') return groups;
+    return groups.filter((g) => isGroupFinanciallyPending(g));
+  }
+
+  function syncFinancialFilterUi() {
+    const wrap = document.getElementById('arrecadacao-financial-filters');
+    wrap?.classList.toggle('hidden', leadScope !== 'comercial');
+    document.querySelectorAll('[data-arr-financial]').forEach((btn) => {
+      const active = btn.dataset.arrFinancial === financialFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function setFinancialFilter(mode) {
+    financialFilter = mode === 'pendentes' ? 'pendentes' : 'all';
+    localStorage.setItem('arrecadacao-financial-filter', financialFilter);
+    syncFinancialFilterUi();
+    setViewMode(viewMode);
   }
 
   function funilEscopoLabel(escopo) {
@@ -1305,22 +1358,33 @@ export function initArrecadacaoModule(
     els.pagamentoObs.value = '';
   }
 
+  async function applyPaymentUpdate(updated) {
+    if (!updated) return;
+    const idx = items.findIndex((x) => x.id === updated.id);
+    if (idx >= 0) items[idx] = updated;
+    renderPagamentoResumo(updated);
+    if (editId === updated.id) {
+      els.valorPago.value = formatValorInput(updated.valorPago);
+    }
+    renderStats(summarizeItems(items, funilEtapas));
+    if (viewMode === 'kanban') renderKanban();
+    else renderTable();
+    void refreshLeadWorkspace();
+    void notifyEspacosDataChanged(updated);
+  }
+
   async function removePagamento(pagamentoId) {
     if (!pagamentoItemId) return;
     if (!confirm('Remover este registro de pagamento? O valor pago será recalculado.')) return;
 
     try {
       const result = await deletePagamento(pagamentoItemId, pagamentoId);
-      await loadArrecadacao();
       const updated = items.find((x) => x.id === pagamentoItemId) || result.item;
       if (updated) {
-        renderPagamentoResumo(updated);
+        await applyPaymentUpdate(result.item || updated);
         await loadPagamentoHistorico(updated);
-        if (editId === pagamentoItemId) {
-          els.valorPago.value = formatValorInput(updated.valorPago);
-        }
-        await notifyEspacosDataChanged(updated);
       }
+      void loadArrecadacao();
     } catch (err) {
       alert(err.message);
     }
@@ -1346,16 +1410,12 @@ export function initArrecadacaoModule(
       });
       els.pagamentoValor.value = '';
       els.pagamentoObs.value = '';
-      await loadArrecadacao();
-      const updated = items.find((x) => x.id === pagamentoItemId) || result.item;
+      const updated = result.item;
       if (updated) {
-        renderPagamentoResumo(updated);
+        await applyPaymentUpdate(updated);
         await loadPagamentoHistorico(updated);
-        if (editId === pagamentoItemId) {
-          els.valorPago.value = formatValorInput(updated.valorPago);
-        }
-        await notifyEspacosDataChanged(updated);
       }
+      void loadArrecadacao();
     } catch (err) {
       alert(err.message);
     } finally {
@@ -1566,8 +1626,7 @@ export function initArrecadacaoModule(
   function renderKanbanGroupCard(group) {
     const primary = group.items[0];
     const falta = group.valorFalta;
-    const quitado =
-      falta <= 0 && group.items.every((item) => isVendaEtapaStatus(item.status));
+    const quitado = isQuitadoValor(group);
     const faltaHtml = quitado
       ? '<span class="arr-valor-quitado">Quitado</span>'
       : falta > 0
@@ -1593,16 +1652,25 @@ export function initArrecadacaoModule(
           .join('')}</div>`
       : `<div class="arr-kanban-card-actions row-actions-icons">${renderItemActions(primary)}</div>`;
 
+    const planoHtml = planoBadgesHtml(group.items, produtoNomeById);
+    const planoRow = planoHtml
+      ? `<div class="arr-kanban-card-plano">${planoHtml}</div>`
+      : '';
+
     const groupIds = group.items.map((item) => item.id).join(',');
 
     return `
       <article class="arr-kanban-card${group.merged ? ' arr-kanban-card--grouped' : ''}" draggable="true" data-id="${primary.id}" data-group-ids="${groupIds}">
         <div class="arr-kanban-card-head">
-          <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
-          ${renderTipoBadges(group.tipos || [group.tipo])}
-          ${planoBadgesHtml(group.items, produtoNomeById)}
+          <div class="arr-kanban-card-title">
+            <strong title="${escapeHtml(group.participanteNome)}">${escapeHtml(truncateText(group.participanteNome, 28))}</strong>
+          </div>
+          <div class="arr-kanban-card-badges">
+            ${renderTipoBadges(group.tipos || [group.tipo])}
+          </div>
         </div>
         ${refsHtml}
+        ${planoRow}
         <div class="arr-kanban-card-valores">
           <span>${fmtMoney(group.valorTotal)}</span>
           ${faltaHtml}
@@ -1996,7 +2064,11 @@ export function initArrecadacaoModule(
     const isArtistico = item.tipo === 'artistico';
     const isEspaco = item.tipo === 'espaco';
     const falta = Math.max(0, item.valorTotal - item.valorPago);
-    const quitado = falta <= 0 && isVendaEtapaStatus(item.status);
+    const quitado = isQuitadoValor({
+      valorFalta: falta,
+      valorTotal: item.valorTotal,
+      valorPago: item.valorPago,
+    });
 
     const fields = ['participante', 'contatoNome', 'dataAcionamento', 'instagram', 'whatsapp'];
     if (hasParticipanteInstagram(p)) {
@@ -2894,6 +2966,11 @@ export function initArrecadacaoModule(
   function openLeadWorkspaceUi() {
     els.leadWorkspace?.classList.remove('hidden');
     document.body.classList.add('lead-workspace-open');
+    const bodyEl = els.leadWorkspace?.querySelector('.lw-body');
+    bodyEl?.scrollTo(0, 0);
+    els.leadWorkspace?.querySelectorAll('.lw-panel').forEach((panel) => {
+      panel.scrollTop = 0;
+    });
   }
 
   function closeLeadWorkspace() {
@@ -3172,8 +3249,8 @@ export function initArrecadacaoModule(
     const columns = [
       ...etapas.map((etapa) => {
         const colItems = displayItems.filter((item) => item.status === etapa.status);
-        const colGroups = groupItemsForTable(colItems);
-        const total = colItems.reduce((s, i) => s + Number(i.valorTotal || 0), 0);
+        const colGroups = filterGroupsByFinancial(groupItemsForTable(colItems));
+        const total = sumFinancialTotals(colItems).valorTotal;
         return `
           <div class="arr-kanban-col" data-status="${escapeHtml(etapa.status)}">
             <header class="arr-kanban-col-head" style="--col-color:${escapeHtml(etapa.cor)}">
@@ -3190,10 +3267,10 @@ export function initArrecadacaoModule(
         <div class="arr-kanban-col arr-kanban-col-outros" data-status="">
           <header class="arr-kanban-col-head" style="--col-color:#666">
             <span class="arr-kanban-col-title">Outros status</span>
-            <span class="arr-kanban-col-meta">${groupItemsForTable(outros).length}</span>
+            <span class="arr-kanban-col-meta">${filterGroupsByFinancial(groupItemsForTable(outros)).length}</span>
           </header>
           <div class="arr-kanban-col-body arr-kanban-col-body-readonly">
-            ${groupItemsForTable(outros).map(renderKanbanGroupCard).join('')}
+            ${filterGroupsByFinancial(groupItemsForTable(outros)).map(renderKanbanGroupCard).join('')}
           </div>
         </div>`
         : '',
@@ -3203,12 +3280,17 @@ export function initArrecadacaoModule(
     bindKanbanInteractions(els.kanbanView);
 
     const total = displayItems.length;
+    const pendingGroups = filterGroupsByFinancial(groupItemsForTable(displayItems)).length;
     els.summary.textContent =
-      total > 0
-        ? `${total} registro(s) no kanban · ${etapas.length} etapa(s) ativa(s)${listFilterHint(total)}`
-        : items.length > 0
-          ? 'Nenhum registro com os filtros selecionados.'
-          : 'Nenhum registro de arrecadação no kanban.';
+      financialFilter === 'pendentes'
+        ? pendingGroups > 0
+          ? `${pendingGroups} lead(s) com saldo em aberto no kanban${listFilterHint(total)}`
+          : 'Nenhum lead com saldo em aberto no kanban.'
+        : total > 0
+          ? `${total} registro(s) no kanban · ${etapas.length} etapa(s) ativa(s)${listFilterHint(total)}`
+          : items.length > 0
+            ? 'Nenhum registro com os filtros selecionados.'
+            : 'Nenhum registro de arrecadação no kanban.';
   }
 
   function syncDraftFunilFromDom() {
@@ -3832,20 +3914,32 @@ export function initArrecadacaoModule(
     }
 
     const displayItems = visibleItems();
-    if (!displayItems.length) {
+    const allGroups = groupItemsForTable(displayItems);
+    const groups = filterGroupsByFinancial(allGroups);
+
+    if (!groups.length) {
       els.table.innerHTML =
-        '<tr><td colspan="7" class="cell-empty">Nenhum registro com os filtros selecionados.</td></tr>';
-      els.summary.textContent = 'Ajuste os filtros para ver outros registros.';
+        financialFilter === 'pendentes'
+          ? '<tr><td colspan="7" class="cell-empty">Nenhum lead com saldo em aberto.</td></tr>'
+          : displayItems.length
+            ? '<tr><td colspan="7" class="cell-empty">Nenhum registro com os filtros selecionados.</td></tr>'
+            : '<tr><td colspan="7" class="cell-empty">Nenhum registro de arrecadação.</td></tr>';
+      els.summary.textContent =
+        financialFilter === 'pendentes'
+          ? allGroups.length
+            ? 'Nenhum lead com saldo em aberto no momento.'
+            : displayItems.length
+              ? 'Ajuste os filtros para ver outros registros.'
+              : 'Crie leads na arrecadação ou vincule participantes aos espaços para acompanhar os pagamentos.'
+          : displayItems.length
+            ? 'Ajuste os filtros para ver outros registros.'
+            : 'Crie leads na arrecadação ou vincule participantes aos espaços para acompanhar os pagamentos.';
       return;
     }
 
-    const groups = groupItemsForTable(displayItems);
-
     els.table.innerHTML = groups
       .map((group) => {
-        const quitado =
-          group.valorFalta <= 0 &&
-          group.items.every((item) => isVendaEtapaStatus(item.status));
+        const quitado = isQuitadoValor(group);
         const obsParts = [
           ...new Set(group.items.map((i) => String(i.obs || '').trim()).filter(Boolean)),
         ];
@@ -3878,14 +3972,7 @@ export function initArrecadacaoModule(
 
         const singleId = group.merged ? '' : `data-id="${group.items[0].id}"`;
 
-        const acoesHtml = group.merged
-          ? `<div class="arr-acoes-merged">${group.items
-              .map(
-                (item) =>
-                  `<div class="arr-acoes-item row-actions-icons">${renderItemActions(item)}</div>`,
-              )
-              .join('')}</div>`
-          : renderItemActions(group.items[0]);
+        const acoesHtml = renderItemActions(group.items[0]);
 
         return `
         <tr class="${group.merged ? 'arr-row-grouped' : ''}" ${singleId}>
@@ -3927,10 +4014,16 @@ export function initArrecadacaoModule(
       .join('');
 
     const mergedCount = groups.filter((g) => g.merged).length;
+    const pendingHint =
+      financialFilter === 'pendentes' && allGroups.length !== groups.length
+        ? ` · filtro: saldo em aberto`
+        : '';
     els.summary.textContent =
       mergedCount > 0
-        ? `${groups.length} linha(s) · ${displayItems.length} registro(s) (${mergedCount} agrupada(s))${listFilterHint(displayItems.length)}`
-        : `${displayItems.length} registro(s) de arrecadação${listFilterHint(displayItems.length)}`;
+        ? `${groups.length} linha(s) · ${displayItems.length} registro(s) (${mergedCount} agrupada(s))${listFilterHint(displayItems.length)}${pendingHint}`
+        : financialFilter === 'pendentes'
+          ? `${groups.length} lead(s) com saldo em aberto${listFilterHint(displayItems.length)}`
+          : `${displayItems.length} registro(s) de arrecadação${listFilterHint(displayItems.length)}`;
 
     bindTableAction('edit', (item) => openLeadDetailModal(item.id));
     bindTableAction('migrar-artistico', (item) => migrateToArtistico(item.id));
@@ -3987,7 +4080,7 @@ export function initArrecadacaoModule(
   function renderDisponiveisTable() {
     if (!els.disponiveisSection || !els.disponiveisTable) return;
 
-    if (viewMode === 'kanban') {
+    if (viewMode === 'kanban' || financialFilter === 'pendentes') {
       els.disponiveisSection.classList.add('hidden');
       return;
     }
@@ -4058,6 +4151,12 @@ export function initArrecadacaoModule(
   document.querySelectorAll('[data-arr-situacao]').forEach((btn) => {
     btn.addEventListener('click', () => setSituacaoFilter(btn.dataset.arrSituacao));
   });
+  document.querySelectorAll('[data-arr-financial]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (leadScope !== 'comercial') return;
+      setFinancialFilter(btn.dataset.arrFinancial);
+    });
+  });
   const savedPagamentoFilter = localStorage.getItem('arrecadacao-pagamento-filter');
   if (savedPagamentoFilter && ['todos', 'quitado', 'parcial', 'nada'].includes(savedPagamentoFilter)) {
     pagamentoFilter = savedPagamentoFilter;
@@ -4076,6 +4175,7 @@ export function initArrecadacaoModule(
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
   }
+  syncFinancialFilterUi();
   document.getElementById('btn-arrecadacao-toggle-overview')?.addEventListener('click', () => {
     toggleOverviewVisible('comercial');
   });

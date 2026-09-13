@@ -9,6 +9,9 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   docker-build:
     name: Validar build Docker
@@ -16,6 +19,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build da imagem
         uses: docker/build-push-action@v6
@@ -31,24 +37,28 @@ jobs:
 
   deploy:
     name: Disparar deploy no Coolify
+    needs: docker-build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via webhook
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via Coolify API
         env:
           COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
-          if [ -z "$COOLIFY_WEBHOOK" ]; then
-            echo "::warning::COOLIFY_WEBHOOK não configurado."
-            echo "O deploy depende do Auto Deploy do Coolify (GitHub App) ou do secret COOLIFY_WEBHOOK."
-            echo "Coolify → Application → General → Auto Deploy (ON) e Build Pack = Dockerfile."
-            exit 0
+          chmod +x scripts/coolify-deploy.sh
+          if [ -z "${COOLIFY_WEBHOOK:-}" ]; then
+            echo "::error::Secret COOLIFY_WEBHOOK não configurado no GitHub."
+            echo "Coolify → Application → Webhooks → Deploy Webhook URL"
+            echo "GitHub → Settings → Secrets and variables → Actions"
+            exit 1
           fi
-
-          args=(-fsS --request GET "$COOLIFY_WEBHOOK")
-          if [ -n "$COOLIFY_TOKEN" ]; then
-            args+=(--header "Authorization: Bearer $COOLIFY_TOKEN")
+          if [ -z "${COOLIFY_TOKEN:-}" ]; then
+            echo "::error::Secret COOLIFY_TOKEN não configurado no GitHub."
+            echo "Coolify → Keys & Tokens → API token com permissão Deploy"
+            echo "Coolify → Settings → Advanced → API Access (habilitar)"
+            exit 1
           fi
-
-          curl "${args[@]}"
-          echo "Deploy disparado no Coolify."
+          ./scripts/coolify-deploy.sh

@@ -302,7 +302,9 @@ export function initWhatsappInbox({ onOpenLead } = {}) {
       return;
     }
     if (!current.connected) {
-      statusEl.textContent = 'WhatsApp desconectado — conecte pelo botão no menu superior.';
+      statusEl.textContent = current.staleConnection || current.state === 'stale'
+        ? 'WhatsApp com sessão expirada — reconecte pelo botão no menu superior.'
+        : 'WhatsApp desconectado — conecte pelo botão no menu superior.';
       return;
     }
     const wsLabel = wsConnected ? 'tempo real ativo' : 'atualizando a cada 5s';

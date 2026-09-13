@@ -37,7 +37,7 @@ export async function apiRequest(path, options = {}) {
   } catch (err) {
     if (err.name === 'AbortError') {
       throw new ApiError(
-        'A requisição demorou demais. Verifique se a API e o banco de dados estão acessíveis.',
+        'A requisição demorou demais. Verifique sua conexão e se a API está rodando (npm run dev).',
         0,
       );
     }
@@ -277,6 +277,7 @@ export function registerPagamento(arrecadacaoId, data) {
   return apiRequest(`/api/arrecadacao/${arrecadacaoId}/pagamentos`, {
     method: 'POST',
     body: JSON.stringify(data),
+    timeoutMs: 60_000,
   });
 }
 
@@ -394,6 +395,75 @@ export function enviarMarketingComunicacaoItem(data) {
   });
 }
 
+export function fetchMarketingComunicacoes() {
+  return apiRequest('/api/marketing/comunicacoes');
+}
+
+export function fetchMarketingComunicacao(id) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}`);
+}
+
+export function createMarketingComunicacao(data) {
+  return apiRequest('/api/marketing/comunicacoes', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateMarketingComunicacao(id, data) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteMarketingComunicacao(id) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}`, { method: 'DELETE' });
+}
+
+export function gerarPreviewMarketingComunicacao(id) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}/preview`, { method: 'POST' });
+}
+
+export function updateMarketingComunicacaoItem(comunicacaoId, itemId, data) {
+  return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/itens/${itemId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function atualizarConteudoMarketingComunicacaoItem(comunicacaoId, itemId) {
+  return apiRequest(
+    `/api/marketing/comunicacoes/${comunicacaoId}/itens/${itemId}/atualizar-conteudo`,
+    { method: 'POST' },
+  );
+}
+
+export function pausarMarketingComunicacaoItem(comunicacaoId, itemId, pausado) {
+  return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/itens/${itemId}/pausar`, {
+    method: 'POST',
+    body: JSON.stringify({ pausado }),
+  });
+}
+
+export function deleteMarketingComunicacaoItem(comunicacaoId, itemId) {
+  return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/itens/${itemId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function limparPreviewMarketingComunicacao(id) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}/limpar-preview`, { method: 'POST' });
+}
+
+export function iniciarEnvioMarketingComunicacao(id) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}/iniciar-envio`, { method: 'POST' });
+}
+
+export function pausarMarketingComunicacao(id) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}/pausar`, { method: 'POST' });
+}
+
 export function fetchMarketingFormularios() {
   return apiRequest('/api/marketing/formularios');
 }
@@ -461,6 +531,32 @@ export function updateFormularioResposta(id, data) {
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+export function fetchFormularioRespostaInteracoes(respostaId) {
+  return apiRequest(`/api/marketing/formulario-respostas/${respostaId}/interacoes`);
+}
+
+export function createFormularioRespostaInteracao(respostaId, data) {
+  return apiRequest(`/api/marketing/formulario-respostas/${respostaId}/interacoes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteFormularioRespostaInteracao(respostaId, interacaoId) {
+  try {
+    return await apiRequest(
+      `/api/marketing/formulario-respostas/${respostaId}/interacoes/${interacaoId}`,
+      { method: 'DELETE' },
+    );
+  } catch (err) {
+    if (err.status !== 404) throw err;
+    return apiRequest(`/api/marketing/formulario-respostas/${respostaId}/interacoes`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'delete', interacaoId }),
+    });
+  }
 }
 
 export async function deleteFormularioResposta(id) {
@@ -544,6 +640,13 @@ export function patchSumarioArrecadacaoPrevisto(chave, previsto) {
   return apiRequest('/api/financeiro/sumario-arrecadacao', {
     method: 'PATCH',
     body: JSON.stringify({ chave, previsto }),
+  });
+}
+
+export function patchSumarioArrecadacaoRealizado(chave, realizado) {
+  return apiRequest('/api/financeiro/sumario-arrecadacao', {
+    method: 'PATCH',
+    body: JSON.stringify({ chave, realizado }),
   });
 }
 
