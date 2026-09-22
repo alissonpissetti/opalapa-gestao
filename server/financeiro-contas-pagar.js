@@ -282,6 +282,194 @@ export async function migrateFinanceiroContasPagar(pool) {
        ADD COLUMN bonificado_ref VARCHAR(120) NULL AFTER bonificado`,
     );
   }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS financeiro_contas_pagar_baixas (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      conta_id INT UNSIGNED NOT NULL,
+      valor DECIMAL(14,2) NOT NULL,
+      dt_pagamento VARCHAR(20) NULL,
+      obs TEXT NULL,
+      registrado_em DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      INDEX idx_fin_cp_baixa_conta (conta_id),
+      CONSTRAINT fk_fin_cp_baixa_conta
+        FOREIGN KEY (conta_id) REFERENCES financeiro_contas_pagar(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await pool.query(`
+    INSERT INTO financeiro_contas_pagar_baixas (conta_id, valor, dt_pagamento, obs, registrado_em)
+    SELECT cp.id, cp.valor_pago, cp.dt_pagamento,
+           'Importado do valor pago anterior',
+           COALESCE(cp.updated_at, cp.created_at, CURRENT_TIMESTAMP(3))
+    FROM financeiro_contas_pagar cp
+    WHERE cp.valor_pago > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM financeiro_contas_pagar_baixas b WHERE b.conta_id = cp.id
+      )
+  `);
+}
+
+function rowToBaixa(row) {
+  return {
+    id: Number(row.id),
+    contaId: Number(row.conta_id),
+    valor: Number(row.valor),
+    dtPagamento: formatDateOnlyIso(row.dt_pagamento),
+    obs: row.obs || '',
+    registradoEm: row.registrado_em ? new Date(row.registrado_em).toISOString() : null,
+  };
+}
+
+async function syncContaFromBaixas(conn, contaId) {
+  const [sumRows] = await conn.query(
+    `SELECT COALESCE(SUM(valor), 0) AS total
+     FROM financeiro_contas_pagar_baixas WHERE conta_id = ?`,
+    [contaId],
+  );
+  const total = Number(sumRows[0]?.total || 0);
+
+  const [lastRows] = await conn.query(
+    `SELECT dt_pagamento, registrado_em
+     FROM financeiro_contas_pagar_baixas
+     WHERE conta_id = ?
+     ORDER BY COALESCE(dt_pagamento, DATE(registrado_em)) DESC, id DESC
+     LIMIT 1`,
+    [contaId],
+  );
+  let dtPagamento = null;
+  if (lastRows[0]) {
+    const rawDt = lastRows[0].dt_pagamento;
+    if (rawDt) {
+      try {
+        dtPagamento = normalizeDateOnly(rawDt, { label: 'Data de pagamento' });
+      } catch {
+        dtPagamento = null;
+      }
+    }
+    if (!dtPagamento && lastRows[0].registrado_em) {
+      dtPagamento = new Date(lastRows[0].registrado_em).toISOString().slice(0, 10);
+    }
+  }
+
+  const [contaRows] = await conn.query(
+    'SELECT valor_previsto, status FROM financeiro_contas_pagar WHERE id = ? LIMIT 1',
+    [contaId],
+  );
+  const prev = Number(contaRows[0]?.valor_previsto) || 0;
+  let status = contaRows[0]?.status || 'pendente';
+  if (status !== 'cancelado') {
+    status = inferStatus(prev, total);
+  }
+
+  await conn.query(
+    `UPDATE financeiro_contas_pagar
+     SET valor_pago = ?, dt_pagamento = ?, status = ?, updated_at = CURRENT_TIMESTAMP(3)
+     WHERE id = ?`,
+    [total, dtPagamento, status, contaId],
+  );
+  return total;
+}
+
+export async function listBaixasContaPagar(pool, contaId, eventoId) {
+  const conta = await findContaPagarById(pool, contaId, eventoId);
+  if (!conta) return null;
+  const [rows] = await pool.query(
+    `SELECT b.id, b.conta_id, b.valor, b.dt_pagamento, b.obs, b.registrado_em
+     FROM financeiro_contas_pagar_baixas b
+     JOIN financeiro_contas_pagar cp ON cp.id = b.conta_id
+     WHERE b.conta_id = ? AND cp.evento_id = ?
+     ORDER BY b.registrado_em DESC, b.id DESC`,
+    [contaId, eventoId],
+  );
+  return rows.map(rowToBaixa);
+}
+
+export async function registerBaixaContaPagar(pool, contaId, eventoId, raw) {
+  const conta = await findContaPagarById(pool, contaId, eventoId);
+  if (!conta) return null;
+  if (conta.status === 'cancelado') {
+    throw Object.assign(new Error('Não é possível registrar baixa em conta cancelada'), { status: 400 });
+  }
+
+  const valor = parseMoney(raw.valor ?? raw.valorPagamento, 'Valor da baixa');
+  if (valor <= 0) {
+    throw Object.assign(new Error('Informe um valor de baixa maior que zero'), { status: 400 });
+  }
+
+  const novoPago = conta.valorPago + valor;
+  const previsto = Number(conta.valorPrevisto) || 0;
+  if (previsto > 0 && novoPago > previsto) {
+    const falta = Math.max(0, previsto - conta.valorPago);
+    throw Object.assign(
+      new Error(`Baixa excede o saldo. Falta pagar: ${falta.toFixed(2)}`),
+      { status: 400 },
+    );
+  }
+
+  let dtPagamento = null;
+  const rawDt = raw.dtPagamento ?? raw.dt_pagamento;
+  if (rawDt != null && String(rawDt).trim()) {
+    dtPagamento = normalizeDateOnly(rawDt, { label: 'Data de pagamento' });
+  }
+  const obs = String(raw.obs ?? '').trim() || null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [result] = await conn.query(
+      `INSERT INTO financeiro_contas_pagar_baixas (conta_id, valor, dt_pagamento, obs)
+       VALUES (?, ?, ?, ?)`,
+      [contaId, valor, dtPagamento, obs],
+    );
+    await syncContaFromBaixas(conn, contaId);
+    await conn.commit();
+
+    const [rows] = await conn.query(
+      `SELECT id, conta_id, valor, dt_pagamento, obs, registrado_em
+       FROM financeiro_contas_pagar_baixas WHERE id = ? LIMIT 1`,
+      [result.insertId],
+    );
+
+    return {
+      baixa: rows[0] ? rowToBaixa(rows[0]) : null,
+      conta: await findContaPagarById(pool, contaId, eventoId),
+    };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function deleteBaixaContaPagar(pool, contaId, baixaId, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT b.id
+     FROM financeiro_contas_pagar_baixas b
+     JOIN financeiro_contas_pagar cp ON cp.id = b.conta_id
+     WHERE b.id = ? AND b.conta_id = ? AND cp.evento_id = ?
+     LIMIT 1`,
+    [baixaId, contaId, eventoId],
+  );
+  if (!rows[0]) return null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM financeiro_contas_pagar_baixas WHERE id = ? AND conta_id = ?', [
+      baixaId,
+      contaId,
+    ]);
+    await syncContaFromBaixas(conn, contaId);
+    await conn.commit();
+    return { conta: await findContaPagarById(pool, contaId, eventoId) };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 }
 
 async function ensureDefaultCategorias(pool, eventoId) {
@@ -648,6 +836,12 @@ export async function createContaPagar(pool, eventoId, raw) {
   await validateContaRefs(pool, eventoId, data);
   await inferFaseOnSave(pool, eventoId, data);
 
+  data.valorPago = 0;
+  data.dtPagamento = null;
+  if (data.status !== 'cancelado') {
+    data.status = 'pendente';
+  }
+
   const [result] = await pool.query(
     `INSERT INTO financeiro_contas_pagar (
        evento_id, categoria_id, plano_conta_id, fornecedor, descricao, fase,
@@ -676,9 +870,18 @@ export async function createContaPagar(pool, eventoId, raw) {
 }
 
 export async function updateContaPagar(pool, id, eventoId, raw) {
+  const current = await findContaPagarById(pool, id, eventoId);
+  if (!current) return null;
+
   const data = normalizeContaInput(raw);
   await validateContaRefs(pool, eventoId, data);
   await inferFaseOnSave(pool, eventoId, data);
+
+  data.valorPago = current.valorPago;
+  data.dtPagamento = current.dtPagamento;
+  if (data.status !== 'cancelado') {
+    data.status = inferStatus(data.valorPrevisto, data.valorPago, data.status);
+  }
 
   const [result] = await pool.query(
     `UPDATE financeiro_contas_pagar SET

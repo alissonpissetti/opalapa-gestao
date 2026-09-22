@@ -9,9 +9,13 @@ import {
   deleteContaPagar,
   bulkUpdateContasPagarFase,
   bulkUpdateContasPagar,
+  fetchBaixasContaPagar,
+  registerBaixaContaPagar,
+  deleteBaixaContaPagar,
 } from '../lib/api.js';
 import {
   escapeHtml,
+  fmtDate,
   fmtDateOnly,
   fmtMoney,
   formatValorInput,
@@ -39,6 +43,22 @@ const FASE_LABEL = {
 
 const DRAFT_SAVE_DEBOUNCE_MS = 400;
 const SORT_STORAGE_KEY = 'contas-pagar-sort';
+const VIEW_LAYOUT_STORAGE_KEY = 'contas-pagar-view-layout';
+const STATUS_FILTER_STORAGE_KEY = 'contas-pagar-status-filter';
+const BONIFICADO_FILTER_STORAGE_KEY = 'contas-pagar-bonificado-filter';
+const TABLE_COL_COUNT = 11;
+
+function tableColCount(viewLayout) {
+  return viewLayout === 'fase' ? TABLE_COL_COUNT - 1 : TABLE_COL_COUNT;
+}
+
+function tableLabelColspan(viewLayout) {
+  return viewLayout === 'fase' ? 5 : 6;
+}
+
+function tableTrailingColspan(viewLayout) {
+  return tableColCount(viewLayout) - tableLabelColspan(viewLayout) - 1;
+}
 
 const STATUS_SORT_ORDER = {
   pendente: 0,
@@ -51,6 +71,19 @@ const FASE_SORT_ORDER = {
   pre: 0,
   pos: 1,
 };
+
+const STATUS_FILTER_KEYS = ['pendente', 'parcial', 'pago', 'cancelado'];
+
+const ICON_BAIXA = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>`;
+const ICON_DUPLICATE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`;
+
+function contaActionIconBtn(action, title, icon, { danger = false, id = null } = {}) {
+  const label = escapeHtml(title);
+  const cls = danger ? 'icon-btn danger' : 'icon-btn';
+  const dataId = id != null ? ` data-id="${id}"` : '';
+  return `<button class="${cls}" type="button" data-action="${action}"${dataId} title="${label}" aria-label="${label}">${icon}</button>`;
+}
 
 function compareText(a, b) {
   const sa = String(a ?? '').trim().toLowerCase();
@@ -262,10 +295,18 @@ export function initContasPagarModule() {
     fieldQuantidadePrevista: document.getElementById('contas-pagar-modal-quantidade-prevista'),
     fieldValorUnitario: document.getElementById('contas-pagar-modal-valor-unitario'),
     fieldValorPrevisto: document.getElementById('contas-pagar-modal-valor-previsto'),
-    fieldValorPago: document.getElementById('contas-pagar-modal-valor-pago'),
     fieldDtVencimento: document.getElementById('contas-pagar-modal-dt-vencimento'),
-    fieldDtPagamento: document.getElementById('contas-pagar-modal-dt-pagamento'),
+    dtPagamentoLabel: document.getElementById('contas-pagar-modal-dt-pagamento-label'),
     fieldStatus: document.getElementById('contas-pagar-modal-status'),
+    baixaModalBg: document.getElementById('conta-pagar-baixa-modal-bg'),
+    baixaModalSub: document.getElementById('conta-pagar-baixa-modal-sub'),
+    baixaResumo: document.getElementById('conta-pagar-baixa-resumo'),
+    baixaValor: document.getElementById('conta-pagar-baixa-valor'),
+    baixaDt: document.getElementById('conta-pagar-baixa-dt'),
+    baixaObs: document.getElementById('conta-pagar-baixa-obs'),
+    baixaHistorico: document.getElementById('conta-pagar-baixa-historico'),
+    btnBaixaCancel: document.getElementById('conta-pagar-baixa-btn-cancel'),
+    btnBaixaSave: document.getElementById('conta-pagar-baixa-btn-save'),
     fieldObs: document.getElementById('contas-pagar-modal-obs'),
     fieldBonificado: document.getElementById('contas-pagar-modal-bonificado'),
     fieldBonificadoRefWrap: document.getElementById('contas-pagar-modal-bonificado-ref-wrap'),
@@ -277,7 +318,7 @@ export function initContasPagarModule() {
     draftDiscard: document.getElementById('contas-pagar-modal-draft-discard'),
   };
 
-  [els.fieldValorPago, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
+  [els.baixaValor, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
     input.addEventListener('input', () => maskValorInput(input));
   });
 
@@ -356,12 +397,252 @@ export function initContasPagarModule() {
   let bulkUpdating = false;
   const selectedIds = new Set();
   let sortState = readSortState();
+  let baixaContaId = null;
+  let viewLayout = readViewLayout();
+  let statusFilter = readStatusFilter();
+  let bonificadoFilter = readBonificadoFilter();
 
-  function getSortedContas() {
+  function readViewLayout() {
+    try {
+      const v = localStorage.getItem(VIEW_LAYOUT_STORAGE_KEY);
+      return v === 'fase' ? 'fase' : 'unica';
+    } catch {
+      return 'unica';
+    }
+  }
+
+  function readStatusFilter() {
+    try {
+      const raw = localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
+      if (!raw) return new Set();
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return new Set(parsed.filter((s) => STATUS_FILTER_KEYS.includes(s)));
+        }
+      } catch {
+        /* legado: string única */
+      }
+      if (raw === 'todos') return new Set();
+      if (STATUS_FILTER_KEYS.includes(raw)) return new Set([raw]);
+      return new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  function statusFilterShowsAll() {
+    return statusFilter.size === 0;
+  }
+
+  function writeStatusFilter() {
+    try {
+      if (statusFilterShowsAll()) {
+        localStorage.setItem(STATUS_FILTER_STORAGE_KEY, '[]');
+      } else {
+        localStorage.setItem(STATUS_FILTER_STORAGE_KEY, JSON.stringify([...statusFilter]));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readBonificadoFilter() {
+    try {
+      const v = localStorage.getItem(BONIFICADO_FILTER_STORAGE_KEY);
+      const allowed = new Set(['todos', 'sim', 'nao']);
+      return allowed.has(v) ? v : 'todos';
+    } catch {
+      return 'todos';
+    }
+  }
+
+  function syncFilterUi() {
+    document.querySelectorAll('[data-cp-view]').forEach((btn) => {
+      const active = btn.dataset.cpView === viewLayout;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-cp-status]').forEach((btn) => {
+      const key = btn.dataset.cpStatus;
+      const active =
+        key === 'todos' ? statusFilterShowsAll() : statusFilter.has(key);
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-cp-bonificado]').forEach((btn) => {
+      const active = btn.dataset.cpBonificado === bonificadoFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function setViewLayout(layout) {
+    viewLayout = layout === 'fase' ? 'fase' : 'unica';
+    try {
+      localStorage.setItem(VIEW_LAYOUT_STORAGE_KEY, viewLayout);
+    } catch {
+      /* ignore */
+    }
+    syncFilterUi();
+    renderTable();
+  }
+
+  function toggleStatusFilter(value) {
+    if (value === 'todos') {
+      statusFilter = new Set();
+      writeStatusFilter();
+      syncFilterUi();
+      renderTable();
+      return;
+    }
+    if (!STATUS_FILTER_KEYS.includes(value)) return;
+
+    const next = new Set(statusFilter);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    statusFilter = next;
+    writeStatusFilter();
+    syncFilterUi();
+    renderTable();
+  }
+
+  function setBonificadoFilter(value) {
+    const allowed = new Set(['todos', 'sim', 'nao']);
+    bonificadoFilter = allowed.has(value) ? value : 'todos';
+    try {
+      localStorage.setItem(BONIFICADO_FILTER_STORAGE_KEY, bonificadoFilter);
+    } catch {
+      /* ignore */
+    }
+    syncFilterUi();
+    renderTable();
+  }
+
+  function applyContasFilters(list) {
+    let out = list;
+    if (statusFilter.size > 0) {
+      out = out.filter((c) => statusFilter.has(c.status));
+    }
+    if (bonificadoFilter === 'sim') {
+      out = out.filter((c) => Boolean(c.bonificado));
+    } else if (bonificadoFilter === 'nao') {
+      out = out.filter((c) => !c.bonificado);
+    }
+    return out;
+  }
+
+  function getFilteredContas() {
+    return applyContasFilters(contas);
+  }
+
+  function sortContasList(list) {
     const compare = sortState.key ? SORT_COLUMNS[sortState.key] : null;
-    if (!compare) return contas;
+    if (!compare) return list;
     const dir = sortState.dir === 'desc' ? -1 : 1;
-    return [...contas].sort((a, b) => compare(a, b) * dir);
+    return [...list].sort((a, b) => compare(a, b) * dir);
+  }
+
+  function filterHint() {
+    const hints = [];
+    if (statusFilter.size > 0) {
+      const labels = [...statusFilter]
+        .map((s) => STATUS_LABEL[s] || s)
+        .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      hints.push(`status: ${labels.join(', ')}`);
+    }
+    if (bonificadoFilter === 'sim') hints.push('bonificados');
+    else if (bonificadoFilter === 'nao') hints.push('não bonificados');
+    if (!hints.length) return '';
+    return ` · filtro: ${hints.join(' · ')}`;
+  }
+
+  function sumMoneyTotals(rows) {
+    let totalPrev = 0;
+    let totalPago = 0;
+    for (const c of rows) {
+      if (c.status === 'cancelado') continue;
+      totalPrev += Number(c.valorPrevisto) || 0;
+      totalPago += Number(c.valorPago) || 0;
+    }
+    return { totalPrev, totalPago };
+  }
+
+  function renderGroupHeaderRow(grupo, titulo) {
+    return `
+      <tr class="contas-pagar-grupo-head" data-contas-grupo="${grupo}">
+        <td colspan="${tableColCount(viewLayout)}">${escapeHtml(titulo)}</td>
+      </tr>`;
+  }
+
+  function renderValoresStackHtml({ prev, pago, falta, qtd, unit }) {
+    const unitLine =
+      qtd > 1 && unit != null
+        ? `<div class="cp-valor-linha cp-valor-linha--unit"><span class="cp-valor-lbl">Unit.</span><span class="cp-valor-num">${cellMoney(unit)}</span></div>`
+        : '';
+    return `
+      <div class="cp-valores-stack">
+        <div class="cp-valor-linha"><span class="cp-valor-lbl">Prev.</span><span class="cp-valor-num">${cellMoney(prev)}</span></div>
+        <div class="cp-valor-linha"><span class="cp-valor-lbl">Pago</span><span class="cp-valor-num fin-val--pos">${cellMoney(pago)}</span></div>
+        <div class="cp-valor-linha"><span class="cp-valor-lbl">Falta</span><span class="cp-valor-num fin-val--warn">${cellMoney(falta)}</span></div>
+        ${unitLine}
+      </div>`;
+  }
+
+  function renderDescricaoCell(c) {
+    const desc = String(c.descricao || '').trim() || '—';
+    const forn = String(c.fornecedor || '').trim();
+    const title = [desc, forn].filter(Boolean).join(' · ');
+    const fornHtml = forn
+      ? `<span class="cp-fornecedor-inline">${escapeHtml(forn)}</span>`
+      : '';
+    return `<td class="fin-col-descricao" title="${escapeHtml(title)}"><span class="cp-descricao">${escapeHtml(desc)}</span>${fornHtml}</td>`;
+  }
+
+  function renderGroupSubtotalRow(rows) {
+    const { totalPrev, totalPago } = sumMoneyTotals(rows);
+    const falta = Math.max(0, totalPrev - totalPago);
+    return `
+      <tr class="contas-pagar-grupo-subtotal">
+        <td colspan="${tableLabelColspan(viewLayout)}">Subtotal (exc. canceladas)</td>
+        <td class="fin-col-valores">${renderValoresStackHtml({ prev: totalPrev, pago: totalPago, falta, qtd: 1, unit: null })}</td>
+        <td colspan="${tableTrailingColspan(viewLayout)}"></td>
+      </tr>`;
+  }
+
+  function renderContaRows(list) {
+    return list
+      .map((c) => (c.id === inlineEditId ? renderInlineRow(c) : renderNormalRow(c)))
+      .join('');
+  }
+
+  function buildTableBodyHtml() {
+    const filtered = getFilteredContas();
+    if (!filtered.length) {
+      return `<tr><td colspan="${tableColCount(viewLayout)}" class="cell-empty">Nenhuma conta com os filtros selecionados.</td></tr>`;
+    }
+
+    if (viewLayout !== 'fase') {
+      return renderContaRows(sortContasList(filtered));
+    }
+
+    const pre = filtered.filter((c) => c.fase !== 'pos');
+    const pos = filtered.filter((c) => c.fase === 'pos');
+    const preSorted = sortContasList(pre);
+    const posSorted = sortContasList(pos);
+    const parts = [];
+
+    if (preSorted.length) {
+      parts.push(renderGroupHeaderRow('pre', 'Pré-evento'));
+      parts.push(renderContaRows(preSorted));
+      parts.push(renderGroupSubtotalRow(preSorted));
+    }
+    if (posSorted.length) {
+      parts.push(renderGroupHeaderRow('pos', 'Pós-evento'));
+      parts.push(renderContaRows(posSorted));
+      parts.push(renderGroupSubtotalRow(posSorted));
+    }
+    return parts.join('');
   }
 
   function updateSortHeaders() {
@@ -395,13 +676,14 @@ export function initContasPagarModule() {
   }
 
   function selectableContas() {
-    return contas.filter(isSelectable);
+    return getFilteredContas().filter(isSelectable);
   }
 
   function pruneSelection() {
     const validIds = new Set(contas.map((c) => c.id));
+    const visibleIds = new Set(getFilteredContas().map((c) => c.id));
     for (const id of selectedIds) {
-      if (!validIds.has(id)) selectedIds.delete(id);
+      if (!validIds.has(id) || !visibleIds.has(id)) selectedIds.delete(id);
     }
   }
 
@@ -608,16 +890,18 @@ export function initContasPagarModule() {
       <tr class="fin-custo-row fin-custo-row--editing" data-id="${c.id}">
         ${renderRowCheckbox(c)}
         <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
-        <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
-        <td><input type="text" class="fin-inline-input" data-field="fornecedor" value="${escapeHtml(c.fornecedor || '')}" placeholder="Fornecedor" autocomplete="off" /></td>
-        <td>${escapeHtml(c.descricao || '—')}</td>
-        <td>${faseBadge(c.fase)}</td>
+        <td class="fin-col-plano" title="${escapeHtml(plano || '')}">${escapeHtml(plano || '—')}</td>
+        <td class="fin-col-descricao fin-col-descricao--editing">
+          <input type="text" class="fin-inline-input" data-field="fornecedor" value="${escapeHtml(c.fornecedor || '')}" placeholder="Fornecedor" autocomplete="off" />
+          <span class="cp-descricao">${escapeHtml(c.descricao || '—')}</span>
+        </td>
+        <td class="fin-col-fase">${faseBadge(c.fase)}</td>
         <td class="fin-col-qty"><input type="number" class="fin-inline-input fin-inline-qty" data-field="quantidadePrevista" step="0.001" min="0.001" inputmode="decimal" value="${escapeHtml(String(qtd))}" /></td>
-        <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money" data-field="valorPrevisto" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(prev))}" /></td>
-        <td class="fin-col-money">${unit != null ? cellMoney(unit) : '—'}</td>
-        <td class="fin-col-money"><input type="text" class="fin-inline-input fin-inline-money fin-val--pos" data-field="valorPago" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(pago))}" /></td>
-        <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
-        <td>${statusBadge(c.status)}</td>
+        <td class="fin-col-valores fin-col-valores--editing">
+          <input type="text" class="fin-inline-input fin-inline-money" data-field="valorPrevisto" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(prev))}" />
+          <span class="cp-valor-inline-hint">Pago: ${cellMoney(pago)} · Falta: ${cellMoney(falta)}</span>
+        </td>
+        <td class="fin-col-status">${statusBadge(c.status)}</td>
         <td class="fin-col-bonificado">${bonificadoCell(c)}</td>
         <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
         <td class="fin-col-actions">
@@ -640,22 +924,169 @@ export function initContasPagarModule() {
       <tr class="fin-custo-row${selectedIds.has(c.id) ? ' selected-row' : ''}" data-id="${c.id}" tabindex="0" role="button" title="Clique para editar">
         ${renderRowCheckbox(c)}
         <td class="fin-custo-cat">${escapeHtml(c.categoriaNome || '—')}</td>
-        <td class="fin-col-plano">${escapeHtml(plano || '—')}</td>
-        <td>${escapeHtml(c.fornecedor || '—')}</td>
-        <td>${escapeHtml(c.descricao || '—')}</td>
-        <td>${faseBadge(c.fase)}</td>
+        <td class="fin-col-plano" title="${escapeHtml(plano || '')}">${escapeHtml(plano || '—')}</td>
+        ${renderDescricaoCell(c)}
+        <td class="fin-col-fase">${faseBadge(c.fase)}</td>
         <td class="fin-col-qty">${cellQty(qtd)}</td>
-        <td class="fin-col-money">${cellMoney(prev)}</td>
-        <td class="fin-col-money">${unit != null ? cellMoney(unit) : '—'}</td>
-        <td class="fin-col-money fin-val--pos">${cellMoney(pago)}</td>
-        <td class="fin-col-money fin-val--warn">${cellMoney(falta)}</td>
-        <td>${statusBadge(c.status)}</td>
+        <td class="fin-col-valores">${renderValoresStackHtml({ prev, pago, falta, qtd, unit })}</td>
+        <td class="fin-col-status">${statusBadge(c.status)}</td>
         <td class="fin-col-bonificado">${bonificadoCell(c)}</td>
         <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
-        <td class="fin-col-actions">
-          <button type="button" class="tbtn" data-action="duplicate" title="Duplicar conta">Duplicar</button>
+        <td class="fin-col-actions row-actions-icons">
+          ${contaActionIconBtn('baixas', 'Registrar baixas e ver histórico', ICON_BAIXA)}
+          ${contaActionIconBtn('duplicate', 'Duplicar conta', ICON_DUPLICATE)}
         </td>
       </tr>`;
+  }
+
+  function renderBaixaResumo(conta) {
+    if (!els.baixaResumo || !conta) return;
+    const prev = Number(conta.valorPrevisto) || 0;
+    const pago = Number(conta.valorPago) || 0;
+    const falta = Math.max(0, prev - pago);
+    const faltaClass = falta > 0 ? 'pagamento-resumo-valor--falta' : 'pagamento-resumo-valor--quitado';
+    const faltaLabel = falta > 0 ? fmtMoney(falta) : 'Quitado';
+    els.baixaResumo.innerHTML = `
+      <div class="pagamento-resumo-item">
+        <span class="pagamento-resumo-label">Previsto</span>
+        <strong class="pagamento-resumo-valor">${fmtMoney(prev)}</strong>
+      </div>
+      <div class="pagamento-resumo-item">
+        <span class="pagamento-resumo-label">Já pago</span>
+        <strong class="pagamento-resumo-valor pagamento-resumo-valor--pago">${fmtMoney(pago)}</strong>
+      </div>
+      <div class="pagamento-resumo-item">
+        <span class="pagamento-resumo-label">Falta</span>
+        <strong class="pagamento-resumo-valor ${faltaClass}">${faltaLabel}</strong>
+      </div>`;
+  }
+
+  function baixaDataLabel(b) {
+    if (b.dtPagamento) return fmtDateOnly(b.dtPagamento);
+    if (b.registradoEm) return fmtDate(b.registradoEm);
+    return '—';
+  }
+
+  function renderBaixaHistorico(baixas) {
+    if (!els.baixaHistorico) return;
+    if (!baixas.length) {
+      els.baixaHistorico.innerHTML =
+        '<tr><td colspan="4" class="cell-empty">Nenhuma baixa registrada.</td></tr>';
+      return;
+    }
+    els.baixaHistorico.innerHTML = baixas
+      .map((b) => {
+        const obs = b.obs ? escapeHtml(b.obs) : '—';
+        return `
+        <tr data-baixa-id="${b.id}">
+          <td class="col-data">${escapeHtml(baixaDataLabel(b))}</td>
+          <td class="col-valor cell-money">${fmtMoney(b.valor)}</td>
+          <td class="col-obs ${b.obs ? 'cell-muted' : 'cell-empty'}" title="${b.obs ? escapeHtml(b.obs) : ''}">${obs}</td>
+          <td class="col-acao">${contaActionIconBtn('excluir-baixa', 'Remover baixa', ICON_DELETE, { danger: true, id: b.id })}</td>
+        </tr>`;
+      })
+      .join('');
+
+    els.baixaHistorico.querySelectorAll('[data-action="excluir-baixa"]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        if (id) void removeBaixa(id);
+      });
+    });
+  }
+
+  async function loadBaixaHistorico(contaId) {
+    const { baixas } = await fetchBaixasContaPagar(contaId);
+    renderBaixaHistorico(baixas || []);
+  }
+
+  function applyContaUpdate(updated) {
+    if (!updated) return;
+    const idx = contas.findIndex((c) => c.id === updated.id);
+    if (idx >= 0) contas[idx] = updated;
+    totais = summarizeFromContas(contas);
+    renderBaixaResumo(updated);
+    if (editId === updated.id && els.fieldStatus) {
+      els.fieldStatus.value = updated.status || 'pendente';
+    }
+    if (editId === updated.id && els.dtPagamentoLabel) {
+      els.dtPagamentoLabel.textContent = updated.dtPagamento
+        ? fmtDateOnly(updated.dtPagamento)
+        : '—';
+    }
+    renderTable();
+  }
+
+  async function openBaixaModal(conta) {
+    if (!conta || conta.status === 'cancelado') return;
+    baixaContaId = conta.id;
+    if (els.baixaModalSub) {
+      const plano = [conta.planoContaCodigo, conta.planoContaNome].filter(Boolean).join(' — ');
+      els.baixaModalSub.textContent = `${conta.categoriaNome || '—'} · ${plano || '—'} · ${conta.descricao || '—'}`;
+    }
+    if (els.baixaValor) els.baixaValor.value = '';
+    if (els.baixaObs) els.baixaObs.value = '';
+    if (els.baixaDt) els.baixaDt.value = toDateInputValue(new Date().toISOString().slice(0, 10));
+    renderBaixaResumo(conta);
+    els.baixaModalBg?.classList.add('open');
+    try {
+      await loadBaixaHistorico(conta.id);
+    } catch (err) {
+      window.alert(err.message || 'Não foi possível carregar o histórico.');
+    }
+    els.baixaValor?.focus();
+  }
+
+  function closeBaixaModal() {
+    baixaContaId = null;
+    els.baixaModalBg?.classList.remove('open');
+    if (els.baixaValor) els.baixaValor.value = '';
+    if (els.baixaObs) els.baixaObs.value = '';
+  }
+
+  async function confirmBaixa() {
+    if (!baixaContaId) return;
+    const valor = parseValor(els.baixaValor?.value);
+    if (!valor || valor <= 0) {
+      window.alert('Informe o valor da baixa.');
+      return;
+    }
+    const dt = els.baixaDt?.value?.trim() || '';
+    els.btnBaixaSave.disabled = true;
+    els.btnBaixaSave.textContent = 'Registrando…';
+    try {
+      const result = await registerBaixaContaPagar(baixaContaId, {
+        valor,
+        dtPagamento: dt,
+        obs: els.baixaObs?.value?.trim() || '',
+      });
+      if (els.baixaValor) els.baixaValor.value = '';
+      if (els.baixaObs) els.baixaObs.value = '';
+      if (result?.conta) {
+        applyContaUpdate(result.conta);
+        await loadBaixaHistorico(baixaContaId);
+      }
+    } catch (err) {
+      window.alert(err.message || 'Não foi possível registrar a baixa.');
+    } finally {
+      els.btnBaixaSave.disabled = false;
+      els.btnBaixaSave.textContent = 'Registrar baixa';
+    }
+  }
+
+  async function removeBaixa(baixaId) {
+    if (!baixaContaId) return;
+    if (!window.confirm('Remover esta baixa? O valor pago será recalculado.')) return;
+    try {
+      const result = await deleteBaixaContaPagar(baixaContaId, baixaId);
+      if (result?.conta) {
+        applyContaUpdate(result.conta);
+        await loadBaixaHistorico(baixaContaId);
+      }
+    } catch (err) {
+      window.alert(err.message || 'Não foi possível remover a baixa.');
+    }
   }
 
   function bindInlineMoneyMasks() {
@@ -712,6 +1143,7 @@ export function initContasPagarModule() {
   function renderTable() {
     const ativas = contas.filter((c) => c.status !== 'cancelado');
     const empty = !contas.length;
+    const filtered = getFilteredContas();
 
     els.empty?.classList.toggle('hidden', !empty);
     els.tableWrap?.classList.toggle('hidden', empty);
@@ -725,23 +1157,18 @@ export function initContasPagarModule() {
       totais = summarizeFromContas([]);
       clearSelection();
       renderKpis();
+      syncFilterUi();
       return;
     }
 
     pruneSelection();
 
-    let totalPrev = 0;
-    let totalPago = 0;
-    contas.forEach((c) => {
-      if (c.status !== 'cancelado') {
-        totalPrev += Number(c.valorPrevisto) || 0;
-        totalPago += Number(c.valorPago) || 0;
-      }
-    });
+    const { totalPrev, totalPago } = sumMoneyTotals(filtered);
 
-    els.table.innerHTML = getSortedContas()
-      .map((c) => (c.id === inlineEditId ? renderInlineRow(c) : renderNormalRow(c)))
-      .join('');
+    const tableEl = els.table?.closest('table');
+    tableEl?.classList.toggle('table-contas-pagar--fase-view', viewLayout === 'fase');
+
+    els.table.innerHTML = buildTableBodyHtml();
 
     updateSortHeaders();
 
@@ -749,27 +1176,40 @@ export function initContasPagarModule() {
     if (inlineEditId) focusInlineEdit(inlineEditId);
 
     if (els.tableFoot) {
+      const totalLabel =
+        viewLayout === 'fase' ? 'Total geral (exc. canceladas)' : 'Total (exc. canceladas)';
+      const faltaGeral = Math.max(0, totalPrev - totalPago);
       els.tableFoot.innerHTML = `
         <tr class="fin-custo-total">
-          <td colspan="7">Total (exc. canceladas)</td>
-          <td class="fin-col-money">${cellMoney(totalPrev)}</td>
-          <td></td>
-          <td class="fin-col-money fin-val--pos">${cellMoney(totalPago)}</td>
-          <td class="fin-col-money fin-val--warn">${cellMoney(Math.max(0, totalPrev - totalPago))}</td>
-          <td colspan="4"></td>
+          <td colspan="${tableLabelColspan(viewLayout)}">${totalLabel}</td>
+          <td class="fin-col-valores">${renderValoresStackHtml({
+            prev: totalPrev,
+            pago: totalPago,
+            falta: faltaGeral,
+            qtd: 1,
+            unit: null,
+          })}</td>
+          <td colspan="${tableTrailingColspan(viewLayout)}"></td>
         </tr>`;
     }
 
-    const n = ativas.length;
+    const nShown = filtered.length;
+    const nAtivasShown = filtered.filter((c) => c.status !== 'cancelado').length;
     if (els.summary) {
       const selHint = selectedIds.size ? ` — ${selectedIds.size} selecionada(s)` : '';
       const editHint = inlineEditId ? ' — ajuste fornecedor e valores na linha destacada' : '';
-      els.summary.textContent = `${n} conta${n === 1 ? '' : 's'} ativa${n === 1 ? '' : 's'} — clique na linha para editar ou use Duplicar${selHint}${editHint}`;
+      const viewHint = viewLayout === 'fase' ? ' · visualização pré e pós' : '';
+      const countLabel =
+        nShown === contas.length
+          ? `${ativas.length} conta${ativas.length === 1 ? '' : 's'} ativa${ativas.length === 1 ? '' : 's'}`
+          : `${nShown} exibida${nShown === 1 ? '' : 's'} (${nAtivasShown} ativa${nAtivasShown === 1 ? '' : 's'})`;
+      els.summary.textContent = `${countLabel} — clique na linha para editar ou use Duplicar${viewHint}${filterHint()}${selHint}${editHint}`;
     }
 
     totais = summarizeFromContas(contas);
     renderKpis();
     updateSelectionUi();
+    syncFilterUi();
   }
 
   async function openModal(conta = null) {
@@ -817,14 +1257,11 @@ export function initContasPagarModule() {
         conta?.valorUnitario ?? (prev != null && qtd > 0 ? calcValorUnitario(prev, qtd) : null);
       els.fieldValorUnitario.value = unit != null ? formatValorInput(unit) : '';
     }
-    if (els.fieldValorPago) {
-      els.fieldValorPago.value = conta?.valorPago != null ? formatValorInput(conta.valorPago) : '';
-    }
     if (els.fieldDtVencimento) {
       els.fieldDtVencimento.value = toDateInputValue(conta?.dtVencimento);
     }
-    if (els.fieldDtPagamento) {
-      els.fieldDtPagamento.value = toDateInputValue(conta?.dtPagamento);
+    if (els.dtPagamentoLabel) {
+      els.dtPagamentoLabel.textContent = conta?.dtPagamento ? fmtDateOnly(conta.dtPagamento) : '—';
     }
     if (els.fieldStatus) els.fieldStatus.value = conta?.status || 'pendente';
     if (els.fieldObs) els.fieldObs.value = conta?.obs || '';
@@ -862,9 +1299,7 @@ export function initContasPagarModule() {
       descricao: els.fieldDescricao?.value?.trim() || '',
       quantidadePrevista: readQtyInput(els.fieldQuantidadePrevista),
       valorPrevisto: readMoneyInput(els.fieldValorPrevisto),
-      valorPago: readMoneyInput(els.fieldValorPago),
       dtVencimento: els.fieldDtVencimento?.value?.trim() || '',
-      dtPagamento: els.fieldDtPagamento?.value?.trim() || '',
       status: els.fieldStatus?.value || 'pendente',
       obs: els.fieldObs?.value?.trim() || '',
       bonificado: Boolean(els.fieldBonificado?.checked),
@@ -881,9 +1316,7 @@ export function initContasPagarModule() {
       quantidadePrevista: els.fieldQuantidadePrevista?.value ?? '',
       valorUnitario: els.fieldValorUnitario?.value ?? '',
       valorPrevisto: els.fieldValorPrevisto?.value ?? '',
-      valorPago: els.fieldValorPago?.value ?? '',
       dtVencimento: els.fieldDtVencimento?.value ?? '',
-      dtPagamento: els.fieldDtPagamento?.value ?? '',
       status: els.fieldStatus?.value || 'pendente',
       obs: els.fieldObs?.value ?? '',
       bonificado: Boolean(els.fieldBonificado?.checked),
@@ -901,9 +1334,7 @@ export function initContasPagarModule() {
       !String(snapshot.descricao ?? '').trim() &&
       !String(snapshot.valorUnitario ?? '').trim() &&
       !String(snapshot.valorPrevisto ?? '').trim() &&
-      !String(snapshot.valorPago ?? '').trim() &&
       !String(snapshot.dtVencimento ?? '').trim() &&
-      !String(snapshot.dtPagamento ?? '').trim() &&
       !String(snapshot.obs ?? '').trim() &&
       !snapshot.bonificado &&
       !String(snapshot.bonificadoRef ?? '').trim() &&
@@ -928,9 +1359,8 @@ export function initContasPagarModule() {
       }
       if (els.fieldValorUnitario) els.fieldValorUnitario.value = draft.valorUnitario ?? '';
       if (els.fieldValorPrevisto) els.fieldValorPrevisto.value = draft.valorPrevisto ?? '';
-      if (els.fieldValorPago) els.fieldValorPago.value = draft.valorPago ?? '';
       if (els.fieldDtVencimento) els.fieldDtVencimento.value = draft.dtVencimento ?? '';
-      if (els.fieldDtPagamento) els.fieldDtPagamento.value = draft.dtPagamento ?? '';
+      if (els.dtPagamentoLabel) els.dtPagamentoLabel.textContent = '—';
       if (els.fieldStatus) els.fieldStatus.value = draft.status || 'pendente';
       if (els.fieldObs) els.fieldObs.value = draft.obs ?? '';
       if (els.fieldBonificado) els.fieldBonificado.checked = Boolean(draft.bonificado);
@@ -953,9 +1383,8 @@ export function initContasPagarModule() {
       if (els.fieldQuantidadePrevista) els.fieldQuantidadePrevista.value = '1';
       if (els.fieldValorUnitario) els.fieldValorUnitario.value = '';
       if (els.fieldValorPrevisto) els.fieldValorPrevisto.value = '';
-      if (els.fieldValorPago) els.fieldValorPago.value = '';
       if (els.fieldDtVencimento) els.fieldDtVencimento.value = '';
-      if (els.fieldDtPagamento) els.fieldDtPagamento.value = '';
+      if (els.dtPagamentoLabel) els.dtPagamentoLabel.textContent = '—';
       if (els.fieldStatus) els.fieldStatus.value = 'pendente';
       if (els.fieldObs) els.fieldObs.value = '';
       if (els.fieldBonificado) els.fieldBonificado.checked = false;
@@ -1083,9 +1512,8 @@ export function initContasPagarModule() {
         descricao: fields.descricao,
         quantidadePrevista: fields.quantidadePrevista,
         valorPrevisto: fields.valorPrevisto,
-        valorPago: fields.valorPago,
+        valorPago: 0,
         dtVencimento: fields.dtVencimento,
-        dtPagamento: fields.dtPagamento,
         status: fields.status,
         obs: fields.obs,
         bonificado: fields.bonificado,
@@ -1138,7 +1566,6 @@ export function initContasPagarModule() {
       fornecedor: tr.querySelector('[data-field="fornecedor"]')?.value.trim() || '',
       quantidadePrevista: readQtyInput(tr.querySelector('[data-field="quantidadePrevista"]')),
       valorPrevisto: readMoneyInput(tr.querySelector('[data-field="valorPrevisto"]')),
-      valorPago: readMoneyInput(tr.querySelector('[data-field="valorPago"]')),
     };
   }
 
@@ -1164,7 +1591,6 @@ export function initContasPagarModule() {
         fornecedor: fields.fornecedor,
         quantidadePrevista: fields.quantidadePrevista,
         valorPrevisto: fields.valorPrevisto,
-        valorPago: fields.valorPago,
       });
       const { conta: updated } = await updateContaPagar(id, data);
       const idx = contas.findIndex((c) => c.id === id);
@@ -1344,7 +1770,6 @@ export function initContasPagarModule() {
   });
 
   els.fieldDtVencimento?.addEventListener('change', scheduleDraftSave);
-  els.fieldDtPagamento?.addEventListener('change', scheduleDraftSave);
 
   const draftFieldEls = [
     els.fieldCategoria,
@@ -1354,9 +1779,7 @@ export function initContasPagarModule() {
     els.fieldQuantidadePrevista,
     els.fieldValorUnitario,
     els.fieldValorPrevisto,
-    els.fieldValorPago,
     els.fieldDtVencimento,
-    els.fieldDtPagamento,
     els.fieldStatus,
     els.fieldObs,
     els.fieldBonificadoRef,
@@ -1367,6 +1790,23 @@ export function initContasPagarModule() {
   });
 
   els.draftDiscard?.addEventListener('click', discardDraft);
+
+  document.querySelectorAll('[data-cp-view]').forEach((btn) => {
+    btn.addEventListener('click', () => setViewLayout(btn.dataset.cpView));
+  });
+  document.querySelectorAll('[data-cp-status]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleStatusFilter(btn.dataset.cpStatus));
+  });
+  document.querySelectorAll('[data-cp-bonificado]').forEach((btn) => {
+    btn.addEventListener('click', () => setBonificadoFilter(btn.dataset.cpBonificado));
+  });
+  syncFilterUi();
+
+  els.btnBaixaCancel?.addEventListener('click', closeBaixaModal);
+  els.btnBaixaSave?.addEventListener('click', () => void confirmBaixa());
+  els.baixaModalBg?.addEventListener('click', (e) => {
+    if (e.target === els.baixaModalBg) closeBaixaModal();
+  });
 
   els.btnNew?.addEventListener('click', () => void openModal());
   els.chkAll?.addEventListener('change', (e) => toggleSelectAll(e.target.checked));
@@ -1413,6 +1853,11 @@ export function initContasPagarModule() {
       if (!tr) return;
       const id = Number(tr.dataset.id);
       const action = actionBtn.dataset.action;
+      if (action === 'baixas') {
+        const conta = contas.find((c) => c.id === id);
+        if (conta) void openBaixaModal(conta);
+        return;
+      }
       if (action === 'duplicate') {
         const conta = contas.find((c) => c.id === id);
         if (conta) void duplicateConta(conta);
@@ -1431,7 +1876,14 @@ export function initContasPagarModule() {
     if (e.target.closest('.fin-inline-input')) return;
 
     const tr = e.target.closest('tr[data-id]');
-    if (!tr || tr.classList.contains('fin-custo-row--editing')) return;
+    if (
+      !tr ||
+      tr.classList.contains('fin-custo-row--editing') ||
+      tr.classList.contains('contas-pagar-grupo-head') ||
+      tr.classList.contains('contas-pagar-grupo-subtotal')
+    ) {
+      return;
+    }
     const conta = contas.find((c) => c.id === Number(tr.dataset.id));
     if (conta) void openModal(conta);
   });
@@ -1446,7 +1898,14 @@ export function initContasPagarModule() {
 
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const tr = e.target.closest('tr[data-id]');
-    if (!tr || tr.classList.contains('fin-custo-row--editing')) return;
+    if (
+      !tr ||
+      tr.classList.contains('fin-custo-row--editing') ||
+      tr.classList.contains('contas-pagar-grupo-head') ||
+      tr.classList.contains('contas-pagar-grupo-subtotal')
+    ) {
+      return;
+    }
     e.preventDefault();
     const conta = contas.find((c) => c.id === Number(tr.dataset.id));
     if (conta) void openModal(conta);

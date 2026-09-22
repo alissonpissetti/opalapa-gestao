@@ -106,8 +106,8 @@ function itemsForScope(list, scope) {
 function paymentStatusForGroup(group) {
   const pago = Number(group.valorPago) || 0;
   const falta = Number(group.valorFalta) || 0;
-  if (pago <= 0) return 'nada';
   if (falta <= 0) return 'quitado';
+  if (pago <= 0) return 'nada';
   return 'parcial';
 }
 
@@ -237,8 +237,8 @@ function sumFinancialTotals(items) {
   };
 }
 
-function isQuitadoValor({ valorFalta, valorTotal, valorPago }) {
-  return Number(valorFalta || 0) <= 0 && (Number(valorTotal) > 0 || Number(valorPago) > 0);
+function isQuitadoValor({ valorFalta }) {
+  return Number(valorFalta || 0) <= 0;
 }
 
 function resolveGroupProdutoId(items) {
@@ -283,6 +283,23 @@ function groupItemsForTable(list) {
       statuses,
     };
   });
+}
+
+function sumGroupsValorAReceber(groups) {
+  return groups.reduce((acc, g) => acc + (Number(g.valorFalta) || 0), 0);
+}
+
+function renderArrecadacaoListaTotalRow(groups) {
+  const total = sumGroupsValorAReceber(groups);
+  return `
+    <tr class="arr-row-total">
+      <td class="arr-cell-total-label" colspan="4">Total a receber</td>
+      <td class="arr-cell-valores arr-cell-total-value cell-money">
+        <span class="arr-valor-num arr-valor-falta">${fmtMoney(total)}</span>
+      </td>
+      <td class="arr-cell-total-pad" aria-hidden="true"></td>
+      <td class="arr-cell-total-pad arr-cell-acoes" aria-hidden="true"></td>
+    </tr>`;
 }
 
 function renderTipoBadges(tipos) {
@@ -4011,7 +4028,7 @@ export function initArrecadacaoModule(
         </tr>
       `;
       })
-      .join('');
+      .join('') + renderArrecadacaoListaTotalRow(groups);
 
     const mergedCount = groups.filter((g) => g.merged).length;
     const pendingHint =

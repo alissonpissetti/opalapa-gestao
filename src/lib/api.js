@@ -804,6 +804,23 @@ export function bulkUpdateContasPagar(ids, fields = {}) {
   });
 }
 
+export function fetchBaixasContaPagar(contaId) {
+  return apiRequest(`/api/financeiro/contas-pagar/${contaId}/baixas`);
+}
+
+export function registerBaixaContaPagar(contaId, data) {
+  return apiRequest(`/api/financeiro/contas-pagar/${contaId}/baixas`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteBaixaContaPagar(contaId, baixaId) {
+  return apiRequest(`/api/financeiro/contas-pagar/${contaId}/baixas/${baixaId}`, {
+    method: 'DELETE',
+  });
+}
+
 export function fetchWhatsappStatus() {
   return apiRequest('/api/whatsapp/status');
 }

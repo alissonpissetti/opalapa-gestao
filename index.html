@@ -1150,6 +1150,27 @@
 
       <div class="financeiro-kpis financeiro-kpis--contas-pagar hidden" id="contas-pagar-kpis" aria-label="Totais por fase"></div>
 
+      <div class="contas-pagar-toolbar arrecadacao-toolbar">
+        <div class="arrecadacao-toolbar-filters">
+          <div class="report-filters" role="tablist" aria-label="Visualização das contas">
+            <button class="tbtn active" type="button" data-cp-view="unica" role="tab" aria-selected="true">Tabela única</button>
+            <button class="tbtn" type="button" data-cp-view="fase" role="tab" aria-selected="false">Pré e pós</button>
+          </div>
+          <div class="report-filters" role="tablist" aria-label="Filtro de status">
+            <button class="tbtn active" type="button" data-cp-status="todos" role="tab" aria-selected="true">Todos</button>
+            <button class="tbtn" type="button" data-cp-status="pendente" role="tab" aria-selected="false">Pendente</button>
+            <button class="tbtn" type="button" data-cp-status="parcial" role="tab" aria-selected="false">Parcial</button>
+            <button class="tbtn" type="button" data-cp-status="pago" role="tab" aria-selected="false">Pago</button>
+            <button class="tbtn" type="button" data-cp-status="cancelado" role="tab" aria-selected="false">Cancelado</button>
+          </div>
+          <div class="report-filters" role="tablist" aria-label="Filtro de bonificação">
+            <button class="tbtn active" type="button" data-cp-bonificado="todos" role="tab" aria-selected="true">Todos</button>
+            <button class="tbtn" type="button" data-cp-bonificado="sim" role="tab" aria-selected="false">Bonificados</button>
+            <button class="tbtn" type="button" data-cp-bonificado="nao" role="tab" aria-selected="false">Não bonificados</button>
+          </div>
+        </div>
+      </div>
+
       <p class="report-summary" id="contas-pagar-summary"></p>
       <div class="select-bar" id="contas-pagar-select-bar">
         <span>
@@ -1165,24 +1186,33 @@
       </div>
       <div class="table-wrap hidden" id="contas-pagar-table-wrap">
         <table class="table-financeiro-custos table-contas-pagar">
+          <colgroup>
+            <col class="cp-col-chk" />
+            <col class="cp-col-cat" />
+            <col class="cp-col-plano" />
+            <col class="cp-col-desc" />
+            <col class="cp-col-fase" />
+            <col class="cp-col-qty" />
+            <col class="cp-col-valores" />
+            <col class="cp-col-status" />
+            <col class="cp-col-bonif" />
+            <col class="cp-col-venc" />
+            <col class="cp-col-acoes" />
+          </colgroup>
           <thead>
             <tr>
               <th class="chk-cell">
                 <input class="chk" type="checkbox" id="contas-pagar-chk-all" title="Selecionar todas (exc. canceladas)" />
               </th>
               <th data-sort="categoria" class="th-sortable">Categoria</th>
-              <th data-sort="plano" class="th-sortable">Plano de contas</th>
-              <th data-sort="fornecedor" class="th-sortable">Fornecedor</th>
+              <th data-sort="plano" class="th-sortable">Plano</th>
               <th data-sort="descricao" class="th-sortable">Descrição</th>
-              <th data-sort="fase" class="th-sortable">Fase</th>
+              <th data-sort="fase" class="th-sortable fin-col-fase">Fase</th>
               <th data-sort="quantidade" class="th-sortable fin-col-qty">Qtd</th>
-              <th data-sort="previsto" class="th-sortable fin-col-money">Previsto</th>
-              <th data-sort="unitario" class="th-sortable fin-col-money">Valor unit.</th>
-              <th data-sort="pago" class="th-sortable fin-col-money">Pago</th>
-              <th data-sort="falta" class="th-sortable fin-col-money">Falta</th>
-              <th data-sort="status" class="th-sortable">Status</th>
-              <th data-sort="bonificado" class="th-sortable fin-col-bonificado">Bonificado</th>
-              <th data-sort="vencimento" class="th-sortable fin-col-date">Vencimento</th>
+              <th data-sort="previsto" class="th-sortable fin-col-valores">Valores</th>
+              <th data-sort="status" class="th-sortable fin-col-status">Status</th>
+              <th data-sort="bonificado" class="th-sortable fin-col-bonificado">Bonif.</th>
+              <th data-sort="vencimento" class="th-sortable fin-col-date">Venc.</th>
               <th class="fin-col-actions">Ações</th>
             </tr>
           </thead>
@@ -2218,110 +2248,151 @@
         <p class="modal-draft-hint hidden" id="contas-pagar-modal-draft-hint" role="status">Continuando preenchimento anterior</p>
         <button type="button" class="modal-draft-discard hidden" id="contas-pagar-modal-draft-discard">Descartar rascunho</button>
 
-        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-classificacao">
-          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-classificacao">Classificação</h3>
-          <div class="field-row field-row--stack">
-            <div class="field">
-              <label for="contas-pagar-modal-categoria">Categoria <span class="req">*</span></label>
-              <input id="contas-pagar-modal-categoria" type="text" list="contas-pagar-categorias-list" placeholder="Digite ou escolha — ex.: RH, MKT, Produção…" required autocomplete="off" />
-              <datalist id="contas-pagar-categorias-list"></datalist>
+        <div class="modal-contas-pagar-form">
+          <section class="cp-form-panel" aria-labelledby="contas-pagar-block-classificacao">
+            <h3 class="cp-form-panel-title" id="contas-pagar-block-classificacao">Classificação</h3>
+            <div class="cp-form-grid cp-form-grid--2">
+              <div class="field">
+                <label for="contas-pagar-modal-categoria">Categoria <span class="req">*</span></label>
+                <input id="contas-pagar-modal-categoria" type="text" list="contas-pagar-categorias-list" placeholder="Ex.: Produção, MKT…" required autocomplete="off" />
+                <datalist id="contas-pagar-categorias-list"></datalist>
+              </div>
+              <div class="field">
+                <label for="contas-pagar-modal-plano">Plano de contas <span class="req">*</span></label>
+                <input id="contas-pagar-modal-plano" type="text" list="contas-pagar-plano-list" placeholder="Ex.: Som, Troféus…" required autocomplete="off" />
+                <datalist id="contas-pagar-plano-list"></datalist>
+              </div>
             </div>
-            <div class="field">
-              <label for="contas-pagar-modal-plano">Plano de contas <span class="req">*</span></label>
-              <input id="contas-pagar-modal-plano" type="text" list="contas-pagar-plano-list" placeholder="Digite ou escolha — ex.: Som, Palco, Alimentação…" required autocomplete="off" />
-              <datalist id="contas-pagar-plano-list"></datalist>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-identificacao">
-          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-identificacao">Identificação</h3>
-          <div class="field-row field-row--stack">
-            <div class="field">
-              <label for="contas-pagar-modal-fornecedor">Fornecedor <span class="opt">(opcional)</span></label>
-              <input id="contas-pagar-modal-fornecedor" type="text" placeholder="Nome do fornecedor" />
+          <section class="cp-form-panel" aria-labelledby="contas-pagar-block-identificacao">
+            <h3 class="cp-form-panel-title" id="contas-pagar-block-identificacao">Identificação</h3>
+            <div class="cp-form-grid cp-form-grid--ident">
+              <div class="field">
+                <label for="contas-pagar-modal-fornecedor">Fornecedor <span class="opt">(opcional)</span></label>
+                <input id="contas-pagar-modal-fornecedor" type="text" placeholder="Nome do fornecedor" />
+              </div>
+              <div class="field cp-form-field--desc">
+                <label for="contas-pagar-modal-descricao">Descrição <span class="req">*</span></label>
+                <input id="contas-pagar-modal-descricao" type="text" placeholder="Ex.: Base de madeira, pequena…" required />
+              </div>
             </div>
-            <div class="field">
-              <label for="contas-pagar-modal-descricao">Descrição <span class="req">*</span></label>
-              <input id="contas-pagar-modal-descricao" type="text" placeholder="Ex.: Alisson, Som, Palco, aluguel de tenda…" required />
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-valores">
-          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-valores">Valores</h3>
-          <div class="field-row field-row--3">
-            <div class="field">
-              <label for="contas-pagar-modal-quantidade-prevista">Quantidade prevista <span class="req">*</span></label>
-              <input id="contas-pagar-modal-quantidade-prevista" type="number" step="0.001" min="0.001" inputmode="decimal" autocomplete="off" placeholder="1" required />
+          <section class="cp-form-panel" aria-labelledby="contas-pagar-block-valores">
+            <h3 class="cp-form-panel-title" id="contas-pagar-block-valores">Valores e prazos</h3>
+            <div class="cp-form-grid cp-form-grid--valores">
+              <div class="field">
+                <label for="contas-pagar-modal-quantidade-prevista">Quantidade <span class="req">*</span></label>
+                <input id="contas-pagar-modal-quantidade-prevista" type="number" step="0.001" min="0.001" inputmode="decimal" autocomplete="off" placeholder="1" required />
+              </div>
+              <div class="field">
+                <label for="contas-pagar-modal-valor-unitario">Valor unitário (R$)</label>
+                <input id="contas-pagar-modal-valor-unitario" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
+              </div>
+              <div class="field">
+                <label for="contas-pagar-modal-valor-previsto">Total previsto (R$) <span class="req">*</span></label>
+                <input id="contas-pagar-modal-valor-previsto" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" required />
+              </div>
+              <div class="field">
+                <label for="contas-pagar-modal-dt-vencimento">Vencimento</label>
+                <input id="contas-pagar-modal-dt-vencimento" type="date" />
+              </div>
+              <div class="field">
+                <label for="contas-pagar-modal-status">Status</label>
+                <select id="contas-pagar-modal-status">
+                  <option value="pendente">Pendente</option>
+                  <option value="parcial">Parcial</option>
+                  <option value="pago">Pago</option>
+                  <option value="cancelado">Cancelado</option>
+                </select>
+              </div>
             </div>
-            <div class="field">
-              <label for="contas-pagar-modal-valor-unitario">Valor unitário (R$)</label>
-              <input id="contas-pagar-modal-valor-unitario" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-            </div>
-            <div class="field">
-              <label for="contas-pagar-modal-valor-previsto">Valor previsto total (R$) <span class="req">*</span></label>
-              <input id="contas-pagar-modal-valor-previsto" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" required />
-            </div>
-          </div>
-          <p class="field-hint">Altere quantidade, valor unitário ou total — os demais campos são recalculados automaticamente.</p>
-          <div class="field-row field-row--stack">
-            <div class="field">
-              <label for="contas-pagar-modal-valor-pago">Valor pago (R$)</label>
-              <input id="contas-pagar-modal-valor-pago" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
-            </div>
-          </div>
-        </section>
+            <p class="cp-form-footnote" id="contas-pagar-modal-pago-hint">
+              Quantidade, unitário e total se recalculam automaticamente. Pagamentos em <strong>Baixas</strong> na lista.
+              Pré/pós evento conforme o vencimento ao salvar; status de pagamento segue as baixas (exceto cancelado).
+              <span class="cp-form-meta">Último pagamento: <strong id="contas-pagar-modal-dt-pagamento-label">—</strong></span>
+            </p>
+          </section>
 
-        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-datas">
-          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-datas">Datas e status</h3>
-          <div class="field-row field-row--3">
-            <div class="field">
-              <label for="contas-pagar-modal-dt-vencimento">Vencimento</label>
-              <input id="contas-pagar-modal-dt-vencimento" type="date" />
-              <p class="field-hint">Pré/pós evento será definido automaticamente ao salvar, conforme a data de vencimento.</p>
+          <section class="cp-form-panel cp-form-panel--muted" aria-labelledby="contas-pagar-block-extra">
+            <h3 class="cp-form-panel-title" id="contas-pagar-block-extra">Extras</h3>
+            <div class="cp-form-bonif" id="contas-pagar-block-bonificado">
+              <div class="field field--checkbox">
+                <label class="checkbox-label">
+                  <input id="contas-pagar-modal-bonificado" type="checkbox" />
+                  <span>Bonificado (voucher prefeitura)</span>
+                </label>
+              </div>
+              <div class="field hidden" id="contas-pagar-modal-bonificado-ref-wrap">
+                <label for="contas-pagar-modal-bonificado-ref">Referência do voucher <span class="opt">(opcional)</span></label>
+                <input id="contas-pagar-modal-bonificado-ref" type="text" maxlength="120" placeholder="Número ou código do voucher" autocomplete="off" />
+              </div>
             </div>
-            <div class="field">
-              <label for="contas-pagar-modal-dt-pagamento">Data pagamento</label>
-              <input id="contas-pagar-modal-dt-pagamento" type="date" />
+            <div class="field modal-contas-pagar-obs">
+              <label for="contas-pagar-modal-obs">Observações</label>
+              <textarea id="contas-pagar-modal-obs" rows="2" placeholder="Parcelas, condições, notas internas…"></textarea>
             </div>
-            <div class="field">
-              <label for="contas-pagar-modal-status">Status</label>
-              <select id="contas-pagar-modal-status">
-                <option value="pendente">Pendente</option>
-                <option value="parcial">Parcial</option>
-                <option value="pago">Pago</option>
-                <option value="cancelado">Cancelado</option>
-              </select>
-            </div>
-          </div>
-        </section>
-
-        <section class="modal-contas-pagar-block" aria-labelledby="contas-pagar-block-bonificado">
-          <h3 class="modal-contas-pagar-block-title" id="contas-pagar-block-bonificado">Bonificação</h3>
-          <div class="field-row field-row--stack contas-pagar-bonificacao">
-            <div class="field field--checkbox">
-              <label class="checkbox-label">
-                <input id="contas-pagar-modal-bonificado" type="checkbox" />
-                <span>Bonificado (voucher prefeitura)</span>
-              </label>
-            </div>
-            <div class="field hidden" id="contas-pagar-modal-bonificado-ref-wrap">
-              <label for="contas-pagar-modal-bonificado-ref">Referência do voucher <span class="opt">(opcional)</span></label>
-              <input id="contas-pagar-modal-bonificado-ref" type="text" maxlength="120" placeholder="Número ou código do voucher" autocomplete="off" />
-            </div>
-          </div>
-        </section>
-
-        <div class="field modal-contas-pagar-obs">
-          <label for="contas-pagar-modal-obs">Observações</label>
-          <textarea id="contas-pagar-modal-obs" rows="4" placeholder="Detalhes adicionais, parcelas, condições de pagamento…"></textarea>
+          </section>
         </div>
 
         <div class="btns modal-contas-pagar-btns">
           <button class="btn" type="button" id="contas-pagar-modal-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="contas-pagar-modal-delete">Excluir</button>
           <button class="btn primary" type="button" id="contas-pagar-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="conta-pagar-baixa-modal-bg">
+      <div class="modal modal-pagamento" role="dialog" aria-modal="true" aria-labelledby="conta-pagar-baixa-modal-title">
+        <h2 id="conta-pagar-baixa-modal-title">Registrar baixa</h2>
+        <p class="msub" id="conta-pagar-baixa-modal-sub"></p>
+        <div class="pagamento-resumo" id="conta-pagar-baixa-resumo"></div>
+        <div class="pagamento-form">
+          <div class="field-row field-row--3">
+            <div class="field pagamento-field-valor">
+              <label for="conta-pagar-baixa-valor">Valor pago (R$)</label>
+              <input
+                id="conta-pagar-baixa-valor"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="0,00"
+                maxlength="18"
+              />
+            </div>
+            <div class="field">
+              <label for="conta-pagar-baixa-dt">Data do pagamento</label>
+              <input id="conta-pagar-baixa-dt" type="date" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="conta-pagar-baixa-obs">Observações</label>
+            <textarea id="conta-pagar-baixa-obs" rows="2" placeholder="Ex.: PIX, parcela 1 de 5, comprovante…"></textarea>
+          </div>
+        </div>
+        <div class="btns pagamento-btns">
+          <button class="btn" type="button" id="conta-pagar-baixa-btn-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="conta-pagar-baixa-btn-save">Registrar baixa</button>
+        </div>
+        <div class="pagamento-historico">
+          <div class="pagamento-historico-head">
+            <h3>Histórico de baixas</h3>
+          </div>
+          <div class="pagamento-table-wrap">
+            <table class="pagamento-table">
+              <thead>
+                <tr>
+                  <th class="col-data">Data</th>
+                  <th class="col-valor">Valor</th>
+                  <th class="col-obs">Observações</th>
+                  <th class="col-acao" aria-label="Ações"><span class="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody id="conta-pagar-baixa-historico"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

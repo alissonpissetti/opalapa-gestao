@@ -180,6 +180,9 @@ import {
   bulkUpdateContasPagar,
   bulkUpdateContasPagarFase,
   summarizeContasPagar,
+  listBaixasContaPagar,
+  registerBaixaContaPagar,
+  deleteBaixaContaPagar,
 } from './financeiro-contas-pagar.js';
 import {
   migrateWhatsapp,
@@ -2156,6 +2159,43 @@ app.patch('/api/financeiro/contas-pagar/bulk', requireEvento, async (req, res) =
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PATCH /api/financeiro/contas-pagar/bulk', err);
     res.status(500).json({ error: 'Falha na alteração em massa das contas' });
+  }
+});
+
+app.get('/api/financeiro/contas-pagar/:id/baixas', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const baixas = await listBaixasContaPagar(pool, id, req.eventoId);
+    if (baixas == null) return res.status(404).json({ error: 'Conta não encontrada' });
+    res.json({ baixas });
+  } catch (err) {
+    console.error('GET /api/financeiro/contas-pagar/:id/baixas', err);
+    res.status(err.status || 500).json({ error: err.message || 'Erro ao listar baixas' });
+  }
+});
+
+app.post('/api/financeiro/contas-pagar/:id/baixas', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await registerBaixaContaPagar(pool, id, req.eventoId, req.body);
+    if (!result) return res.status(404).json({ error: 'Conta não encontrada' });
+    res.json(result);
+  } catch (err) {
+    console.error('POST /api/financeiro/contas-pagar/:id/baixas', err);
+    res.status(err.status || 500).json({ error: err.message || 'Erro ao registrar baixa' });
+  }
+});
+
+app.delete('/api/financeiro/contas-pagar/:id/baixas/:baixaId', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const baixaId = Number(req.params.baixaId);
+    const result = await deleteBaixaContaPagar(pool, id, baixaId, req.eventoId);
+    if (!result) return res.status(404).json({ error: 'Baixa não encontrada' });
+    res.json(result);
+  } catch (err) {
+    console.error('DELETE /api/financeiro/contas-pagar/:id/baixas/:baixaId', err);
+    res.status(err.status || 500).json({ error: err.message || 'Erro ao remover baixa' });
   }
 });
 
