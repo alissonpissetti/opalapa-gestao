@@ -114,6 +114,7 @@ export function initLoginScreen(onSuccess) {
     if (smsSendBtn) {
       smsSendBtn.textContent = 'Enviar código';
       smsSendBtn.disabled = false;
+      smsSendBtn.classList.add('primary');
     }
   }
 
@@ -127,6 +128,7 @@ export function initLoginScreen(onSuccess) {
     if (forgotSendBtn) {
       forgotSendBtn.textContent = 'Enviar código';
       forgotSendBtn.disabled = false;
+      forgotSendBtn.classList.add('primary');
     }
   }
 
@@ -210,6 +212,7 @@ export function initLoginScreen(onSuccess) {
       showHint(hint);
       smsCode?.focus();
       smsSendBtn.textContent = 'Reenviar código';
+      smsSendBtn.classList.remove('primary');
     } catch (err) {
       showError(err.message);
     } finally {
@@ -253,6 +256,7 @@ export function initLoginScreen(onSuccess) {
       showHint(hint);
       forgotCode?.focus();
       forgotSendBtn.textContent = 'Reenviar código';
+      forgotSendBtn.classList.remove('primary');
     } catch (err) {
       showError(err.message);
     } finally {

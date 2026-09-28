@@ -101,6 +101,8 @@ import {
   gerarPreviewComunicacao,
   updateComunicacaoItem,
   deleteComunicacaoItem,
+  addComunicacaoItem,
+  reaplicarTemplateComunicacao,
   atualizarConteudoComunicacaoItem,
   setComunicacaoItemPausado,
   limparPreviewComunicacao,
@@ -143,6 +145,22 @@ import {
   listProducaoEntregas,
   patchProducaoEntrega,
 } from './producao-entregas.js';
+import {
+  migrateProducaoMateriais,
+  listMateriaisLotes,
+  getMateriaisLote,
+  createMateriaisLote,
+  updateMateriaisLote,
+  deleteMateriaisLote,
+  importarEntregasMateriaisLote,
+  createMateriaisItem,
+  updateMateriaisItem,
+  deleteMateriaisItem,
+  duplicateMateriaisItem,
+  moveMateriaisItem,
+  syncMateriaisItensForEntrega,
+  getPedidoProducaoTexto,
+} from './producao-materiais.js';
 import {
   migrateFinanceiroResultado,
   listFinanceiroResultado,
@@ -616,7 +634,7 @@ app.get('/api/espacos-disponiveis', requireEvento, async (req, res) => {
 app.get('/api/arrecadacao', requireEvento, async (req, res) => {
   try {
     const scope = String(req.query.scope || 'comercial');
-    const allowedScopes = new Set(['comercial', 'artistico']);
+    const allowedScopes = new Set(['comercial', 'artistico', 'alimentacao']);
     if (!allowedScopes.has(scope)) {
       return res.status(400).json({ error: 'Escopo inválido' });
     }
@@ -1517,6 +1535,19 @@ app.delete('/api/marketing/comunicacoes/:id', requireEvento, async (req, res) =>
   }
 });
 
+app.post('/api/marketing/comunicacoes/:id/reaplicar-template', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await reaplicarTemplateComunicacao(pool, id, req.eventoId, req.body);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/reaplicar-template', err);
+    res.status(500).json({ error: 'Falha ao atualizar mensagens da lista' });
+  }
+});
+
 app.post('/api/marketing/comunicacoes/:id/preview', requireEvento, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -1527,6 +1558,20 @@ app.post('/api/marketing/comunicacoes/:id/preview', requireEvento, async (req, r
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/marketing/comunicacoes/:id/preview', err);
     res.status(500).json({ error: 'Falha ao gerar prévia' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes/:id/itens', requireEvento, async (req, res) => {
+  try {
+    const comunicacaoId = Number(req.params.id);
+    const item = await addComunicacaoItem(pool, comunicacaoId, req.eventoId, req.body);
+    if (!item) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    const data = await getComunicacaoById(pool, comunicacaoId, req.eventoId);
+    res.json({ item, ...data });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/itens', err);
+    res.status(500).json({ error: 'Falha ao adicionar destinatário' });
   }
 });
 
@@ -2008,16 +2053,199 @@ app.get('/api/producao/entregas', requireEvento, async (req, res) => {
   }
 });
 
+function entregaPatchSyncsMateriais(body) {
+  if (!body || typeof body !== 'object') return false;
+  return (
+    body.camisetasTamanhos !== undefined ||
+    body.camisetas_tamanhos !== undefined ||
+    body.ingressosSolicitados !== undefined ||
+    body.ingressos_solicitados !== undefined ||
+    body.ingressosCortesia !== undefined ||
+    body.ingressos_cortesia !== undefined ||
+    body.ingressosUsarPadrao === true ||
+    body.ingressos_usar_padrao === true ||
+    body.camisetasSolicitadas !== undefined ||
+    body.camisetas_solicitadas !== undefined ||
+    body.camisetasUsarPadrao === true ||
+    body.camisetas_usar_padrao === true
+  );
+}
+
 app.patch('/api/producao/entregas/:arrecadacaoId', requireEvento, async (req, res) => {
   try {
     const arrecadacaoId = Number(req.params.arrecadacaoId);
     const item = await patchProducaoEntrega(pool, arrecadacaoId, req.eventoId, req.body);
     if (!item) return res.status(404).json({ error: 'Lead não encontrado' });
-    res.json({ item });
+    let materiaisSync = null;
+    if (entregaPatchSyncsMateriais(req.body)) {
+      materiaisSync = await syncMateriaisItensForEntrega(pool, req.eventoId, item.arrecadacaoId);
+    }
+    res.json({ item, materiaisSync });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PATCH /api/producao/entregas/:arrecadacaoId', err);
     res.status(500).json({ error: 'Falha ao salvar checklist' });
+  }
+});
+
+app.get('/api/producao/materiais/pedido-texto', requireEvento, async (req, res) => {
+  try {
+    const loteId = req.query.loteId ?? req.query.lote_id;
+    const detalhe = req.query.detalhe ?? req.query.detalhamento;
+    const data = await getPedidoProducaoTexto(pool, req.eventoId, { loteId, detalhe });
+    if (loteId != null && loteId !== '' && data === null) {
+      return res.status(404).json({ error: 'Lote não encontrado' });
+    }
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/producao/materiais/pedido-texto', err);
+    res.status(500).json({ error: 'Falha ao gerar texto do pedido' });
+  }
+});
+
+app.get('/api/producao/materiais/lotes', requireEvento, async (req, res) => {
+  try {
+    res.json(await listMateriaisLotes(pool, req.eventoId));
+  } catch (err) {
+    console.error('GET /api/producao/materiais/lotes', err);
+    res.status(500).json({ error: 'Falha ao carregar lotes de materiais' });
+  }
+});
+
+app.post('/api/producao/materiais/lotes', requireEvento, async (req, res) => {
+  try {
+    const data = await createMateriaisLote(pool, req.eventoId, req.body);
+    res.status(201).json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/producao/materiais/lotes', err);
+    res.status(500).json({ error: 'Falha ao criar lote' });
+  }
+});
+
+app.get('/api/producao/materiais/lotes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await getMateriaisLote(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Lote não encontrado' });
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/producao/materiais/lotes/:id', err);
+    res.status(500).json({ error: 'Falha ao carregar lote' });
+  }
+});
+
+app.put('/api/producao/materiais/lotes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await updateMateriaisLote(pool, id, req.eventoId, req.body);
+    if (!data) return res.status(404).json({ error: 'Lote não encontrado' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/producao/materiais/lotes/:id', err);
+    res.status(500).json({ error: 'Falha ao salvar lote' });
+  }
+});
+
+app.delete('/api/producao/materiais/lotes/:id', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ok = await deleteMateriaisLote(pool, id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Lote não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/producao/materiais/lotes/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir lote' });
+  }
+});
+
+app.post('/api/producao/materiais/lotes/:id/importar-entregas', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await importarEntregasMateriaisLote(pool, id, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Lote não encontrado' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/producao/materiais/lotes/:id/importar-entregas', err);
+    res.status(500).json({ error: 'Falha ao importar camisetas das entregas' });
+  }
+});
+
+app.post('/api/producao/materiais/lotes/:id/itens', requireEvento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await createMateriaisItem(pool, id, req.eventoId, req.body);
+    if (!data) return res.status(404).json({ error: 'Lote não encontrado' });
+    res.status(201).json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/producao/materiais/lotes/:id/itens', err);
+    res.status(500).json({ error: 'Falha ao adicionar item' });
+  }
+});
+
+app.post(
+  '/api/producao/materiais/lotes/:loteId/itens/:itemId/mover',
+  requireEvento,
+  async (req, res) => {
+    try {
+      const loteId = Number(req.params.loteId);
+      const itemId = Number(req.params.itemId);
+      const data = await moveMateriaisItem(pool, loteId, itemId, req.eventoId, req.body);
+      if (!data) return res.status(404).json({ error: 'Item ou lote não encontrado' });
+      res.json(data);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      console.error('POST /api/producao/materiais/lotes/:loteId/itens/:itemId/mover', err);
+      res.status(500).json({ error: 'Falha ao mover item' });
+    }
+  },
+);
+
+app.post(
+  '/api/producao/materiais/lotes/:loteId/itens/:itemId/duplicar',
+  requireEvento,
+  async (req, res) => {
+    try {
+      const loteId = Number(req.params.loteId);
+      const itemId = Number(req.params.itemId);
+      const data = await duplicateMateriaisItem(pool, loteId, itemId, req.eventoId, req.body);
+      if (!data) return res.status(404).json({ error: 'Item não encontrado' });
+      res.status(201).json(data);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      console.error('POST /api/producao/materiais/lotes/:loteId/itens/:itemId/duplicar', err);
+      res.status(500).json({ error: 'Falha ao duplicar item' });
+    }
+  },
+);
+
+app.put('/api/producao/materiais/lotes/:loteId/itens/:itemId', requireEvento, async (req, res) => {
+  try {
+    const loteId = Number(req.params.loteId);
+    const itemId = Number(req.params.itemId);
+    const data = await updateMateriaisItem(pool, loteId, itemId, req.eventoId, req.body);
+    if (!data) return res.status(404).json({ error: 'Item não encontrado' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/producao/materiais/lotes/:loteId/itens/:itemId', err);
+    res.status(500).json({ error: 'Falha ao salvar item' });
+  }
+});
+
+app.delete('/api/producao/materiais/lotes/:loteId/itens/:itemId', requireEvento, async (req, res) => {
+  try {
+    const loteId = Number(req.params.loteId);
+    const itemId = Number(req.params.itemId);
+    const data = await deleteMateriaisItem(pool, loteId, itemId, req.eventoId);
+    if (!data) return res.status(404).json({ error: 'Item não encontrado' });
+    res.json(data);
+  } catch (err) {
+    console.error('DELETE /api/producao/materiais/lotes/:loteId/itens/:itemId', err);
+    res.status(500).json({ error: 'Falha ao excluir item' });
   }
 });
 
@@ -2678,6 +2906,7 @@ async function start() {
   await migrateProducaoCronologia(pool);
   await migrateProducaoPremiacoes(pool);
   await migrateProducaoEntregas(pool);
+  await migrateProducaoMateriais(pool);
   await migrateFinanceiroResultado(pool);
   await migrateFinanceiroContasPagar(pool);
   await migrateWhatsapp(pool);

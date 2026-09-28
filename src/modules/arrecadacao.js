@@ -83,6 +83,26 @@ const PAGE_CONFIG = {
       kanbanView: null,
     },
   },
+  alimentacao: {
+    viewRootId: 'view-alimentacao',
+    overviewKey: 'alimentacao-overview-visible',
+    createTipo: 'alimentacao',
+    navView: 'alimentacao',
+    listOnly: true,
+    ids: {
+      summary: 'alimentacao-summary',
+      donut: null,
+      stats: 'alimentacao-stats',
+      table: 'alimentacao-table',
+      disponiveisSection: null,
+      disponiveisSummary: null,
+      disponiveisTable: null,
+      btnNew: 'btn-alimentacao-new',
+      btnFunilConfig: 'btn-funil-config-alimentacao',
+      listaView: 'alimentacao-lista-view',
+      kanbanView: null,
+    },
+  },
 };
 
 const TIPO_LABELS = {
@@ -95,11 +115,27 @@ const TIPO_LABELS = {
 function tipoBadgeClass(tipo) {
   if (tipo === 'espaco') return 'neg';
   if (tipo === 'artistico') return 'artistico';
+  if (tipo === 'alimentacao') return 'alimentacao';
   return 'res';
+}
+
+const CANDIDATURA_CLASSIFICACAO_LABELS = {
+  pendente: 'Pendente',
+  em_analise: 'Em análise',
+  aprovado: 'Aprovado',
+  reprovado: 'Reprovado',
+};
+
+function candidaturaBadgeClass(classificacao) {
+  if (classificacao === 'aprovado') return 'candidatura-aprovado';
+  if (classificacao === 'reprovado') return 'candidatura-reprovado';
+  if (classificacao === 'em_analise') return 'candidatura-analise';
+  return 'candidatura-pendente';
 }
 
 function itemsForScope(list, scope) {
   if (scope === 'artistico') return list.filter((i) => i.tipo === 'artistico');
+  if (scope === 'alimentacao') return list.filter((i) => i.tipo === 'alimentacao');
   return list.filter((i) => i.tipo === 'espaco' || i.tipo === 'patrocinio');
 }
 
@@ -156,6 +192,14 @@ function isArtisticoScope(scope) {
   return scope === 'artistico';
 }
 
+function isAlimentacaoScope(scope) {
+  return scope === 'alimentacao';
+}
+
+function isStandaloneLeadScope(scope) {
+  return scope === 'artistico' || scope === 'alimentacao';
+}
+
 const INTERACAO_TIPO_LABELS = {
   nota: 'Nota',
   ligacao: 'Ligação',
@@ -168,14 +212,19 @@ const INTERACAO_TIPO_LABELS = {
 const FUNIL_ESCOPO_LABELS = {
   comercial: 'Arrecadação',
   artistico: 'Artístico',
+  alimentacao: 'Alimentação',
 };
 
 function funilEscopoForLeadScope(scope) {
-  return scope === 'artistico' ? 'artistico' : 'comercial';
+  if (scope === 'artistico') return 'artistico';
+  if (scope === 'alimentacao') return 'alimentacao';
+  return 'comercial';
 }
 
 function funilEscopoForItem(item) {
-  return item?.tipo === 'artistico' ? 'artistico' : 'comercial';
+  if (item?.tipo === 'artistico') return 'artistico';
+  if (item?.tipo === 'alimentacao') return 'alimentacao';
+  return 'comercial';
 }
 
 const TAREFA_TIPO_LABELS = {
@@ -461,6 +510,7 @@ export function initArrecadacaoModule(
   const overviewVisible = {
     comercial: true,
     artistico: true,
+    alimentacao: true,
   };
   let loadSeq = 0;
   let tableContatoEdit = null;
@@ -468,7 +518,7 @@ export function initArrecadacaoModule(
   let tableProdutoSaving = false;
 
   function visibleItems() {
-    if (isArtisticoScope(leadScope)) return items;
+    if (isStandaloneLeadScope(leadScope)) return items;
     let list = applySituacaoFilter(items, situacaoFilter, funilEtapas);
     list = applyPagamentoFilter(list, pagamentoFilter);
     return list;
@@ -586,6 +636,7 @@ export function initArrecadacaoModule(
   loadOverviewPreferences();
   applyOverviewLayout('comercial');
   applyOverviewLayout('artistico');
+  applyOverviewLayout('alimentacao');
   syncAppHeaderHeight();
   window.addEventListener('resize', syncAppHeaderHeight);
   let draggingItemId = null;
@@ -796,7 +847,11 @@ export function initArrecadacaoModule(
   }
 
   function syncLeadCreateUi() {
-    if (editTipo === 'artistico' || isArtisticoScope(leadScope)) {
+    if (
+      editTipo === 'artistico' ||
+      editTipo === 'alimentacao' ||
+      isStandaloneLeadScope(leadScope)
+    ) {
       syncArtisticoLeadUi(items.find((x) => x.id === editId) || null);
       return;
     }
@@ -915,6 +970,8 @@ export function initArrecadacaoModule(
     editId = isCreateMode ? null : (item?.id ?? null);
     if (isCreateMode && isArtisticoScope(leadScope)) {
       editTipo = 'artistico';
+    } else if (isCreateMode && isAlimentacaoScope(leadScope)) {
+      editTipo = 'alimentacao';
     } else {
       editTipo = item?.tipo ?? (isCreateMode ? createLeadTipo() : null);
     }
@@ -1051,8 +1108,8 @@ export function initArrecadacaoModule(
       const item = data?.item;
       if (!item) return null;
 
-      const scope = item.tipo === 'artistico' ? 'artistico' : 'comercial';
-      if (scope === leadScope && !items.some((x) => x.id === numId)) {
+      const scope = funilEscopoForItem(item);
+      if (scope === funilEscopoForLeadScope(leadScope) && !items.some((x) => x.id === numId)) {
         items = [...items, item];
       }
       return item;
@@ -1073,12 +1130,13 @@ export function initArrecadacaoModule(
     const id = typeof itemOrId === 'object' ? itemOrId.id : itemOrId;
     const item =
       (typeof itemOrId === 'object' ? itemOrId : null) || items.find((x) => x.id === id);
-    if (!id || !item || item.tipo !== 'artistico') return;
+    if (!id || !item || (item.tipo !== 'artistico' && item.tipo !== 'alimentacao')) return;
 
     const label = item.participanteNome || item.descricao || 'este lead';
+    const tipoLabel = item.tipo === 'alimentacao' ? 'de alimentação' : 'artístico';
     if (
       !confirm(
-        `Excluir o lead artístico "${label}"? Tarefas e histórico vinculados serão removidos. Esta ação não pode ser desfeita.`,
+        `Excluir o lead ${tipoLabel} "${label}"? Tarefas e histórico vinculados serão removidos. Esta ação não pode ser desfeita.`,
       )
     ) {
       return;
@@ -1225,11 +1283,15 @@ export function initArrecadacaoModule(
     const participante = readParticipanteInput();
     const etapaAcionamento = acionamentoEtapa();
     const isArtistico = editTipo === 'artistico' || isArtisticoScope(leadScope);
+    const isAlimentacao = editTipo === 'alimentacao' || isAlimentacaoScope(leadScope);
+    const isStandaloneContact = isArtistico || isAlimentacao;
     const form = {
       ...participante,
       descricao: isArtistico
         ? els.descricao.value.trim() || 'Artístico'
-        : isCreateMode
+        : isAlimentacao
+          ? els.descricao.value.trim() || 'Alimentação'
+          : isCreateMode
           ? etapaAcionamento.titulo
           : els.descricao.value.trim() || 'Patrocínio',
       status: isCreateMode ? etapaAcionamento.status : els.status.value,
@@ -1239,17 +1301,17 @@ export function initArrecadacaoModule(
     if (isCreateMode && els.dataAcionamento?.value) {
       form.dataAcionamento = els.dataAcionamento.value;
     }
-    if (editTipo === 'patrocinio' || (!editTipo && !isArtisticoScope(leadScope))) {
+    if (editTipo === 'patrocinio' || (!editTipo && !isStandaloneLeadScope(leadScope))) {
       const produtoVal = els.produto?.value;
       form.produtoId = produtoVal ? Number(produtoVal) : null;
     }
-    if (isArtistico) {
+    if (isStandaloneContact) {
       form.participanteInstagram = els.instagram?.value.trim() || '';
       form.participanteWhatsapp = els.whatsapp?.value.replace(/\D/g, '') || '';
     }
     if (isCreateMode) {
       form.valorPago = 0;
-      if (isArtistico && isCadastroNovoParticipante()) {
+      if (isStandaloneContact && isCadastroNovoParticipante()) {
         form.novoParticipante = true;
         form.proximoContato = els.proximoContato?.value || '';
         form.obsProximoContato = els.obsContato?.value.trim() || '';
@@ -1507,9 +1569,34 @@ export function initArrecadacaoModule(
     `;
   }
 
+  function renderAlimentacaoStats(list) {
+    if (!els.stats) return;
+    const ativos = list.filter((i) => !isPerdaItem(i));
+    const aprovados = list.filter((i) => i.candidatura?.classificacao === 'aprovado').length;
+    const confirmados = list.filter((i) => i.status === 'vend').length;
+    els.stats.innerHTML = `
+      <div class="stat">
+        <div class="lbl">Leads</div>
+        <div class="val">${ativos.length}</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Candidaturas aprovadas</div>
+        <div class="val">${aprovados}</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Confirmados na praça</div>
+        <div class="val">${confirmados}</div>
+      </div>
+    `;
+  }
+
   function renderStats(resumo) {
     if (isArtisticoScope(leadScope)) {
       renderArtisticoStats(items);
+      return;
+    }
+    if (isAlimentacaoScope(leadScope)) {
+      renderAlimentacaoStats(items);
       return;
     }
     if (situacaoFilter === 'cancelados') {
@@ -1561,6 +1648,7 @@ export function initArrecadacaoModule(
   function loadOverviewPreferences() {
     overviewVisible.comercial = localStorage.getItem(PAGE_CONFIG.comercial.overviewKey) !== '0';
     overviewVisible.artistico = localStorage.getItem(PAGE_CONFIG.artistico.overviewKey) !== '0';
+    overviewVisible.alimentacao = localStorage.getItem(PAGE_CONFIG.alimentacao.overviewKey) !== '0';
   }
 
   function applyOverviewLayout(scope = leadScope) {
@@ -1573,7 +1661,11 @@ export function initArrecadacaoModule(
       const visible = overviewVisible[scope] ?? true;
       root.classList.toggle('page--overview-hidden', !visible);
       const toggleId =
-        scope === 'artistico' ? 'btn-artistico-toggle-overview' : 'btn-arrecadacao-toggle-overview';
+        scope === 'artistico'
+          ? 'btn-artistico-toggle-overview'
+          : scope === 'alimentacao'
+            ? 'btn-alimentacao-toggle-overview'
+            : 'btn-arrecadacao-toggle-overview';
       const toggleBtn = document.getElementById(toggleId);
       if (toggleBtn) {
         toggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
@@ -1603,7 +1695,7 @@ export function initArrecadacaoModule(
   }
 
   function setViewMode(mode) {
-    if (isArtisticoScope(leadScope)) {
+    if (isStandaloneLeadScope(leadScope)) {
       viewMode = 'lista';
     } else {
       viewMode = mode === 'kanban' ? 'kanban' : 'lista';
@@ -2714,15 +2806,17 @@ export function initArrecadacaoModule(
     if (!els.leadDetailActions) return;
 
     const artistico = item.tipo === 'artistico';
+    const alimentacao = item.tipo === 'alimentacao';
+    const manualLead = artistico || alimentacao;
     els.leadDetailActions.innerHTML = `
-      ${artistico ? '' : leadActionIconBtn({ action: 'pagamento', title: 'Registrar pagamento', icon: ICON_PAYMENT })}
+      ${manualLead ? '' : leadActionIconBtn({ action: 'pagamento', title: 'Registrar pagamento', icon: ICON_PAYMENT })}
       ${
         canMigrateToArtistico(item)
           ? leadActionIconBtn({ action: 'migrar-artistico', title: 'Mover para Artístico', icon: ICON_ARTISTIC })
           : ''
       }
       ${canRegisterPerdaLead(item) ? leadActionIconBtn({ action: 'perda', title: 'Perda do lead', icon: ICON_PERDA, danger: true }) : ''}
-      ${artistico ? leadActionIconBtn({ action: 'excluir', title: 'Excluir lead', icon: ICON_DELETE, danger: true }) : ''}
+      ${manualLead ? leadActionIconBtn({ action: 'excluir', title: 'Excluir lead', icon: ICON_DELETE, danger: true }) : ''}
     `;
     els.leadDetailActions.querySelectorAll('[data-lead-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -3069,6 +3163,8 @@ export function initArrecadacaoModule(
 
     if (resolvedTipo === 'artistico') {
       await switchLeadScope('artistico', { navigate });
+    } else if (resolvedTipo === 'alimentacao') {
+      await switchLeadScope('alimentacao', { navigate });
     } else if (
       resolvedTipo === 'patrocinio' ||
       resolvedTipo === 'espaco' ||
@@ -3076,7 +3172,7 @@ export function initArrecadacaoModule(
     ) {
       await switchLeadScope('comercial', { navigate });
     } else if (!items.find((x) => x.id === numId)) {
-      for (const scope of ['comercial', 'artistico']) {
+      for (const scope of ['comercial', 'artistico', 'alimentacao']) {
         const data = await fetchArrecadacao({ scope });
         const found = itemsForScope(data.items || [], scope).find((x) => x.id === numId);
         if (found) {
@@ -3879,6 +3975,52 @@ export function initArrecadacaoModule(
     bindWhatsappChatButtons(els.table, handleOpenWhatsappChat);
   }
 
+  function renderAlimentacaoTable() {
+    if (!items.length) {
+      els.table.innerHTML =
+        '<tr><td colspan="7" class="cell-empty">Nenhum lead de alimentação cadastrado.</td></tr>';
+      els.summary.textContent =
+        'Leads entram por formulários de candidatura ou pelo botão Novo lead.';
+      return;
+    }
+
+    els.table.innerHTML = items
+      .map((item) => {
+        const estabelecimento = item.descricao ? truncateText(item.descricao, 40) : '—';
+        const estabCell = item.descricao
+          ? `<button type="button" class="arr-ref-chip" data-action="abrir-lead" data-id="${item.id}" title="${escapeHtml(item.descricao)}">${escapeHtml(estabelecimento)}</button>`
+          : '<span class="cell-muted">—</span>';
+        const obs = item.obs ? truncateText(item.obs, 32) : '';
+        const cand = item.candidatura;
+        const candLabel =
+          cand?.classificacaoLabel ||
+          CANDIDATURA_CLASSIFICACAO_LABELS[cand?.classificacao] ||
+          'Sem formulário';
+        const candClass = candidaturaBadgeClass(cand?.classificacao || 'pendente');
+        const condicoes = cand?.condicoesResumo
+          ? truncateText(cand.condicoesResumo, 72)
+          : cand?.formularioNome
+            ? `Formulário: ${truncateText(cand.formularioNome, 32)}`
+            : '';
+        const condTitle = cand?.condicoesResumo ? escapeHtml(cand.condicoesResumo) : '';
+
+        return `
+        <tr data-id="${item.id}">
+          <td class="arr-cell-contato">${renderArtisticoContatoCell(item)}</td>
+          <td>${estabCell}</td>
+          <td><span class="badge ${item.status}">${escapeHtml(etapaLabel(item.status))}</span></td>
+          <td><span class="badge ${candClass}">${escapeHtml(candLabel)}</span></td>
+          <td class="${condicoes ? 'cell-muted' : 'cell-empty'}" title="${condTitle}">${condicoes || '—'}</td>
+          <td class="${obs ? 'cell-muted' : 'cell-empty'}" title="${obs ? escapeHtml(item.obs) : ''}">${obs || '—'}</td>
+          <td class="row-actions row-actions-icons arr-cell-acoes">${renderItemActions(item)}</td>
+        </tr>`;
+      })
+      .join('');
+
+    els.summary.textContent = `${items.length} lead(s) de alimentação`;
+    bindArtisticoTableActions();
+  }
+
   function renderArtisticoTable() {
     if (!items.length) {
       els.table.innerHTML =
@@ -3917,6 +4059,10 @@ export function initArrecadacaoModule(
   }
 
   function renderTable() {
+    if (isAlimentacaoScope(leadScope)) {
+      renderAlimentacaoTable();
+      return;
+    }
     if (isArtisticoScope(leadScope)) {
       renderArtisticoTable();
       return;
@@ -4142,6 +4288,9 @@ export function initArrecadacaoModule(
         if (item?.tipo === 'artistico') {
           await switchLeadScope('artistico', { navigate: true });
           await openLeadDetail(item.id, { tipo: 'artistico' });
+        } else if (item?.tipo === 'alimentacao') {
+          await switchLeadScope('alimentacao', { navigate: true });
+          await openLeadDetail(item.id, { tipo: 'alimentacao' });
         } else {
           await loadArrecadacao();
         }
@@ -4199,9 +4348,13 @@ export function initArrecadacaoModule(
   document.getElementById('btn-artistico-toggle-overview')?.addEventListener('click', () => {
     toggleOverviewVisible('artistico');
   });
+  document.getElementById('btn-alimentacao-toggle-overview')?.addEventListener('click', () => {
+    toggleOverviewVisible('alimentacao');
+  });
   els.btnFunilConfig?.addEventListener('click', openFunilModal);
   document.getElementById('btn-funil-config')?.addEventListener('click', openFunilModal);
   document.getElementById('btn-funil-config-artistico')?.addEventListener('click', openFunilModal);
+  document.getElementById('btn-funil-config-alimentacao')?.addEventListener('click', openFunilModal);
   els.funilBtnCancel?.addEventListener('click', closeFunilModal);
   els.funilBtnSave?.addEventListener('click', saveFunilConfig);
   els.funilBtnAdd?.addEventListener('click', addFunilEtapa);
@@ -4238,6 +4391,13 @@ export function initArrecadacaoModule(
       .getElementById(PAGE_CONFIG.artistico.ids.btnNew)
       ?.addEventListener('click', () => {
         applyLeadScope('artistico');
+        openModal(null, 'create');
+      });
+  PAGE_CONFIG.alimentacao.ids.btnNew &&
+    document
+      .getElementById(PAGE_CONFIG.alimentacao.ids.btnNew)
+      ?.addEventListener('click', () => {
+        applyLeadScope('alimentacao');
         openModal(null, 'create');
       });
   PAGE_CONFIG.comercial.ids.btnNew &&

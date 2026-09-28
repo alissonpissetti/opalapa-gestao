@@ -10,11 +10,13 @@ const VIEWS = {
     parentId: 'nav-comercial',
   },
   artistico: { viewId: 'view-artistico', navId: 'nav-artistico', parentId: 'nav-comercial' },
+  alimentacao: { viewId: 'view-alimentacao', navId: 'nav-alimentacao', parentId: 'nav-comercial' },
   tarefas: { viewId: 'view-tarefas', navId: 'nav-tarefas', parentId: 'nav-comercial' },
   marketing: { viewId: 'view-marketing', navId: 'nav-marketing', parentId: 'nav-comercial' },
   cronologia: { viewId: 'view-cronologia', navId: 'nav-cronologia', parentId: 'nav-producao' },
   premiacoes: { viewId: 'view-premiacoes', navId: 'nav-premiacoes', parentId: 'nav-producao' },
   entregas: { viewId: 'view-entregas', navId: 'nav-entregas', parentId: 'nav-producao' },
+  materiais: { viewId: 'view-materiais', navId: 'nav-materiais', parentId: 'nav-producao' },
   'financeiro-gestao': {
     viewId: 'view-financeiro-gestao',
     navId: 'nav-financeiro-gestao',

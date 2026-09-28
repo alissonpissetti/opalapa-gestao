@@ -38,6 +38,8 @@ export const BENEFICIOS_DEF = [
   },
 ];
 
+export const CAMISETA_TAMANHOS = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG', '3G'];
+
 export const ESPACOS_TIPOS_PADRAO = [
   '3x3',
   '4x3',
@@ -67,11 +69,30 @@ function applyBeneficiosUniversais(beneficios) {
   return out;
 }
 
+export function inferIngressosPadraoFromNome(nome) {
+  const n = String(nome || '').toLowerCase();
+  if (n.includes('ouro')) return 4;
+  if (n.includes('prata')) return 2;
+  return 1;
+}
+
+function parseIngressosPadrao(value, nomeFallback = '') {
+  if (value == null || value === '') {
+    return inferIngressosPadraoFromNome(nomeFallback);
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    throw Object.assign(new Error('Quantidade padrão de ingressos inválida'), { status: 400 });
+  }
+  return Math.min(255, Math.floor(n));
+}
+
 const DEFAULT_PRODUTOS = [
   {
     nome: 'Bronze',
     ordem: 0,
     descricao: 'Cota básica de patrocínio',
+    ingressosPadrao: 1,
     espacosTipos: ['3x3'],
     beneficios: {
       mencao_materiais_online: true,
@@ -83,6 +104,7 @@ const DEFAULT_PRODUTOS = [
     nome: 'Prata',
     ordem: 1,
     descricao: 'Cota intermediária de patrocínio',
+    ingressosPadrao: 2,
     espacosTipos: ['3x3', '4x3', '5x5'],
     beneficios: {
       mencao_materiais_online: true,
@@ -96,6 +118,7 @@ const DEFAULT_PRODUTOS = [
     nome: 'Ouro',
     ordem: 2,
     descricao: 'Cota premium de patrocínio',
+    ingressosPadrao: 4,
     espacosTipos: ['3x3', '4x3', '5x5', '9x3'],
     beneficios: {
       mencao_materiais_online: true,
@@ -182,6 +205,7 @@ function rowToProduto(row) {
     ativo: Boolean(row.ativo),
     beneficios: normalizeBeneficios(row.beneficios),
     espacosTipos: normalizeEspacosTipos(row.espacos_tipos),
+    ingressosPadrao: parseIngressosPadrao(row.ingressos_padrao, row.nome),
     usoLeads: Number(row.uso_leads) || 0,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
@@ -217,6 +241,25 @@ export async function migrateArrecadacaoProdutos(pool) {
       ALTER TABLE arrecadacao_produtos
         ADD COLUMN valor DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER descricao
     `);
+  }
+
+  const [ingressosCol] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'arrecadacao_produtos' AND COLUMN_NAME = 'ingressos_padrao'`,
+  );
+  if (ingressosCol.length === 0) {
+    await pool.query(`
+      ALTER TABLE arrecadacao_produtos
+        ADD COLUMN ingressos_padrao SMALLINT UNSIGNED NOT NULL DEFAULT 1 AFTER espacos_tipos
+    `);
+    const [planRows] = await pool.query('SELECT id, nome FROM arrecadacao_produtos');
+    for (const row of planRows) {
+      const ingressos = inferIngressosPadraoFromNome(row.nome);
+      await pool.query('UPDATE arrecadacao_produtos SET ingressos_padrao = ? WHERE id = ?', [
+        ingressos,
+        row.id,
+      ]);
+    }
   }
 
   const [prodCol] = await pool.query(
@@ -262,8 +305,8 @@ async function ensureDefaultProdutos(pool, eventoId) {
   for (const seed of DEFAULT_PRODUTOS) {
     await pool.query(
       `INSERT INTO arrecadacao_produtos
-         (evento_id, nome, descricao, valor, ordem, ativo, beneficios, espacos_tipos, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP(3))`,
+         (evento_id, nome, descricao, valor, ordem, ativo, beneficios, espacos_tipos, ingressos_padrao, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
       [
         eventoId,
         seed.nome,
@@ -272,6 +315,7 @@ async function ensureDefaultProdutos(pool, eventoId) {
         seed.ordem,
         JSON.stringify(normalizeBeneficios(seed.beneficios)),
         JSON.stringify(normalizeEspacosTipos(seed.espacosTipos)),
+        parseIngressosPadrao(seed.ingressosPadrao, seed.nome),
       ],
     );
   }
@@ -300,7 +344,7 @@ export async function listEspacosTiposDisponiveis(pool, eventoId) {
 
 const PRODUTO_SELECT = `
   SELECT p.id, p.evento_id, p.nome, p.descricao, p.valor, p.ordem, p.ativo,
-         p.beneficios, p.espacos_tipos, p.created_at, p.updated_at,
+         p.beneficios, p.espacos_tipos, p.ingressos_padrao, p.created_at, p.updated_at,
          (SELECT COUNT(*) FROM arrecadacao a WHERE a.produto_id = p.id) AS uso_leads
   FROM arrecadacao_produtos p`;
 
@@ -319,6 +363,7 @@ export async function listArrecadacaoProdutos(pool, eventoId, { gestao = false }
     beneficiosDef: BENEFICIOS_DEF,
     beneficiosUniversais: BENEFICIOS_UNIVERSAIS,
     espacosTipos,
+    camisetaTamanhos: CAMISETA_TAMANHOS,
   };
 }
 
@@ -377,6 +422,10 @@ export async function createArrecadacaoProduto(pool, eventoId, raw) {
   const espacosTipos = normalizeEspacosTipos(raw.espacosTipos ?? raw.espacos_tipos);
   const ativo = raw.ativo === false || raw.ativo === 0 ? 0 : 1;
   const valor = parseValorMoney(raw.valor ?? 0);
+  const ingressosPadrao = parseIngressosPadrao(
+    raw.ingressosPadrao ?? raw.ingressos_padrao,
+    nome,
+  );
 
   let ordem = raw.ordem != null ? Number(raw.ordem) : null;
   if (ordem == null || Number.isNaN(ordem)) {
@@ -389,8 +438,8 @@ export async function createArrecadacaoProduto(pool, eventoId, raw) {
 
   const [result] = await pool.query(
     `INSERT INTO arrecadacao_produtos
-       (evento_id, nome, descricao, valor, ordem, ativo, beneficios, espacos_tipos, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+       (evento_id, nome, descricao, valor, ordem, ativo, beneficios, espacos_tipos, ingressos_padrao, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
     [
       eventoId,
       nome,
@@ -400,6 +449,7 @@ export async function createArrecadacaoProduto(pool, eventoId, raw) {
       ativo,
       JSON.stringify(beneficios),
       JSON.stringify(espacosTipos),
+      ingressosPadrao,
     ],
   );
   return findArrecadacaoProdutoById(pool, result.insertId, eventoId);
@@ -435,11 +485,15 @@ export async function updateArrecadacaoProduto(pool, id, eventoId, raw) {
   const ativo =
     raw.ativo !== undefined ? (raw.ativo === false || raw.ativo === 0 ? 0 : 1) : existing.ativo ? 1 : 0;
   const ordem = raw.ordem !== undefined ? Number(raw.ordem) || 0 : existing.ordem;
+  const ingressosPadrao =
+    raw.ingressosPadrao !== undefined || raw.ingressos_padrao !== undefined
+      ? parseIngressosPadrao(raw.ingressosPadrao ?? raw.ingressos_padrao, nome)
+      : existing.ingressosPadrao;
 
   await pool.query(
     `UPDATE arrecadacao_produtos SET
        nome = ?, descricao = ?, valor = ?, ordem = ?, ativo = ?,
-       beneficios = ?, espacos_tipos = ?, updated_at = CURRENT_TIMESTAMP(3)
+       beneficios = ?, espacos_tipos = ?, ingressos_padrao = ?, updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = ? AND evento_id = ?`,
     [
       nome,
@@ -449,6 +503,7 @@ export async function updateArrecadacaoProduto(pool, id, eventoId, raw) {
       ativo,
       JSON.stringify(beneficios),
       JSON.stringify(espacosTipos),
+      ingressosPadrao,
       id,
       eventoId,
     ],
@@ -492,6 +547,7 @@ export async function duplicateArrecadacaoProduto(pool, id, eventoId) {
     ativo: true,
     beneficios: source.beneficios,
     espacosTipos: source.espacosTipos,
+    ingressosPadrao: source.ingressosPadrao,
   });
 }
 

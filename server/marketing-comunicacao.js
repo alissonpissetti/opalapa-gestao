@@ -1,4 +1,7 @@
+import { ingressosTemplateValues } from './lib/ingressos-lead.js';
+import { listFunilEtapas } from './funil.js';
 import { toWhatsAppNumber } from './whatsapp-phone.js';
+import { sendTextMessage } from './evolution.js';
 import { sendWhatsappToLead, getWhatsappStatusQuick } from './whatsapp.js';
 
 const TIPO_LABELS = {
@@ -6,6 +9,7 @@ const TIPO_LABELS = {
   patrocinio: 'Patrocínio',
   artistico: 'Artístico',
   contato: 'Contato',
+  manual: 'Contato avulso',
 };
 
 const TIPO_PRIORITY = { espaco: 0, patrocinio: 1, artistico: 2, contato: 3 };
@@ -29,6 +33,10 @@ export const COMUNICACAO_TEMPLATE_VARS = [
   { key: 'valor_total', label: 'Valor total (R$)' },
   { key: 'valor_pago', label: 'Valor já pago (R$)' },
   { key: 'valor_em_aberto', label: 'Valor em aberto (R$)' },
+  { key: 'ingressos', label: 'Quantidade de ingressos da cota (padrão do plano ou ajuste em Entregas)' },
+  { key: 'ingresso', label: 'Igual a {{ingressos}} (singular)' },
+  { key: 'qtd_ingressos', label: 'Igual a {{ingressos}}' },
+  { key: 'ingressos_padrao', label: 'Ingressos padrão do plano (sem ajuste individual)' },
   { key: 'evento', label: 'Nome do evento' },
 ];
 
@@ -97,6 +105,7 @@ function rowToTemplateContext(row) {
     valor_total: formatBRL(row.valor_total),
     valor_pago: formatBRL(row.valor_pago),
     valor_em_aberto: formatBRL(emAberto),
+    ...ingressosTemplateValues(row),
     evento: row.evento_nome || '',
     _valor_em_aberto_num: emAberto,
   };
@@ -121,16 +130,42 @@ function parseTiposFilter(raw) {
 
 function parseFiltros(raw) {
   const data = raw?.filtros && typeof raw.filtros === 'object' ? raw.filtros : raw;
+  const somenteVendidos = Boolean(data?.somenteVendidos ?? data?.somente_vendidos);
   const somenteComSaldo =
     data?.somenteComSaldo !== undefined
       ? Boolean(data.somenteComSaldo)
       : data?.somente_com_saldo !== undefined
         ? Boolean(data.somente_com_saldo)
-        : true;
+        : !somenteVendidos;
   const status = Array.isArray(data?.status)
     ? data.status.map((s) => String(s).trim()).filter(Boolean)
     : [];
-  return { somenteComSaldo, status };
+  return { somenteComSaldo, somenteVendidos, status };
+}
+
+function vendaStatuses(etapas) {
+  const set = new Set(['vend']);
+  for (const e of etapas) {
+    if (e.tipo === 'venda' && e.ativo !== false) set.add(e.status);
+  }
+  return [...set];
+}
+
+async function resolveStatusFilter(pool, eventoId, filtros) {
+  if (filtros.status?.length) return filtros.status;
+  if (!filtros.somenteVendidos) return [];
+  const etapas = await listFunilEtapas(pool, eventoId, { escopo: 'comercial' });
+  return vendaStatuses(etapas);
+}
+
+function shouldPreferLead(candidate, current) {
+  if (candidate.tipo === 'patrocinio' && current.tipo !== 'patrocinio') return true;
+  if (current.tipo === 'patrocinio' && candidate.tipo !== 'patrocinio') return false;
+  const prevPri = TIPO_PRIORITY[current.tipo] ?? 99;
+  const nextPri = TIPO_PRIORITY[candidate.tipo] ?? 99;
+  if (nextPri < prevPri) return true;
+  if (nextPri > prevPri) return false;
+  return candidate.id < current.id;
 }
 
 function pickLeadPerPhone(rows) {
@@ -143,9 +178,7 @@ function pickLeadPerPhone(rows) {
       byPhone.set(phoneKey, row);
       continue;
     }
-    const prevPri = TIPO_PRIORITY[prev.tipo] ?? 99;
-    const nextPri = TIPO_PRIORITY[row.tipo] ?? 99;
-    if (nextPri < prevPri || (nextPri === prevPri && row.id < prev.id)) {
+    if (shouldPreferLead(row, prev)) {
       byPhone.set(phoneKey, row);
     }
   }
@@ -162,22 +195,67 @@ const LEAD_COMUNICACAO_SQL = `
          p.nome AS participante_nome, p.instagram, p.contato_nome, p.contato_telefone,
          e.numero AS espaco_numero, e.label AS espaco_label,
          ge.nome AS grupo_nome, ge.slug AS grupo_slug,
-         ap.nome AS produto_nome,
+         ap.nome AS produto_nome, ap.ingressos_padrao AS produto_ingressos_padrao,
+         pe.ingressos_solicitados, pe.ingressos_cortesia,
          ev.nome AS evento_nome
   FROM arrecadacao a
   JOIN participantes p ON p.id = a.participante_id
   JOIN eventos ev ON ev.id = a.evento_id
   LEFT JOIN espacos e ON e.id = a.espaco_id
   LEFT JOIN grupos_espacos ge ON ge.id = e.grupo_id
-  LEFT JOIN arrecadacao_produtos ap ON ap.id = a.produto_id`;
+  LEFT JOIN arrecadacao_produtos ap ON ap.id = a.produto_id
+  LEFT JOIN producao_entregas pe ON pe.arrecadacao_id = a.id`;
+
+async function enrichLeadsIngressosPatrocinio(pool, eventoId, rows) {
+  if (!rows.length) return rows;
+  const partIds = [...new Set(rows.map((r) => r.participante_id).filter((id) => id != null))];
+  if (!partIds.length) return rows;
+
+  const placeholders = partIds.map(() => '?').join(', ');
+  const [patRows] = await pool.query(
+    `SELECT a.participante_id,
+            ap.nome AS produto_nome, ap.ingressos_padrao AS produto_ingressos_padrao,
+            pe.ingressos_solicitados, pe.ingressos_cortesia
+     FROM arrecadacao a
+     LEFT JOIN arrecadacao_produtos ap ON ap.id = a.produto_id
+     LEFT JOIN producao_entregas pe ON pe.arrecadacao_id = a.id
+     WHERE a.evento_id = ? AND a.participante_id IN (${placeholders}) AND a.tipo = 'patrocinio'
+     ORDER BY ap.ordem DESC, a.id DESC`,
+    [eventoId, ...partIds],
+  );
+
+  const byPart = new Map();
+  for (const pat of patRows) {
+    if (!byPart.has(pat.participante_id)) byPart.set(pat.participante_id, pat);
+  }
+
+  return rows.map((row) => {
+    const hasPlano =
+      row.produto_nome ||
+      row.produto_ingressos_padrao != null ||
+      row.ingressos_solicitados != null ||
+      (row.ingressos_cortesia != null && Number(row.ingressos_cortesia) > 0);
+    if (hasPlano) return row;
+    const pat = byPart.get(row.participante_id);
+    if (!pat) return row;
+    return {
+      ...row,
+      produto_nome: pat.produto_nome || row.produto_nome,
+      produto_ingressos_padrao: pat.produto_ingressos_padrao ?? row.produto_ingressos_padrao,
+      ingressos_solicitados: pat.ingressos_solicitados ?? row.ingressos_solicitados,
+      ingressos_cortesia: pat.ingressos_cortesia ?? row.ingressos_cortesia,
+    };
+  });
+}
 
 async function queryLeadsForComunicacao(pool, eventoId, tipos, filtros) {
   const placeholders = tipos.map(() => '?').join(', ');
   const params = [eventoId, ...tipos];
   let statusSql = '';
-  if (filtros.status?.length) {
-    statusSql = ` AND a.status IN (${filtros.status.map(() => '?').join(', ')})`;
-    params.push(...filtros.status);
+  const statusList = await resolveStatusFilter(pool, eventoId, filtros);
+  if (statusList.length) {
+    statusSql = ` AND a.status IN (${statusList.map(() => '?').join(', ')})`;
+    params.push(...statusList);
   }
 
   const [rows] = await pool.query(
@@ -190,9 +268,10 @@ async function queryLeadsForComunicacao(pool, eventoId, tipos, filtros) {
     params,
   );
 
-  return rows
+  const filtered = rows
     .filter((row) => hasValidPhone(row.contato_telefone))
     .filter((row) => !filtros.somenteComSaldo || valorEmAberto(row) > 0);
+  return enrichLeadsIngressosPatrocinio(pool, eventoId, filtered);
 }
 
 async function queryLeadByArrecadacaoId(pool, eventoId, arrecadacaoId) {
@@ -202,7 +281,10 @@ async function queryLeadByArrecadacaoId(pool, eventoId, arrecadacaoId) {
      LIMIT 1`,
     [eventoId, arrecadacaoId],
   );
-  return rows[0] || null;
+  const row = rows[0] || null;
+  if (!row) return null;
+  const [enriched] = await enrichLeadsIngressosPatrocinio(pool, eventoId, [row]);
+  return enriched || row;
 }
 
 function rowToPreviewItem(row, template) {
@@ -246,7 +328,8 @@ function rowToComunicacaoItem(row) {
   return {
     id: Number(row.id),
     comunicacaoId: Number(row.comunicacao_id),
-    arrecadacaoId: Number(row.arrecadacao_id),
+    arrecadacaoId: row.arrecadacao_id != null ? Number(row.arrecadacao_id) : null,
+    manual: Boolean(row.manual),
     nome: row.nome || '',
     contatoNome: row.contato_nome || '',
     telefone: row.telefone || '',
@@ -311,6 +394,7 @@ export async function migrateComunicacoes(pool) {
     `ALTER TABLE marketing_comunicacao_itens ADD COLUMN mensagem_id INT UNSIGNED NULL AFTER enviado_em`,
     `ALTER TABLE marketing_comunicacao_itens ADD COLUMN contato_nome VARCHAR(160) NULL AFTER nome`,
     `ALTER TABLE marketing_comunicacao_itens ADD COLUMN pausado TINYINT(1) NOT NULL DEFAULT 0 AFTER incluido`,
+    `ALTER TABLE marketing_comunicacao_itens ADD COLUMN manual TINYINT(1) NOT NULL DEFAULT 0 AFTER pausado`,
   ]) {
     try {
       await pool.query(stmt);
@@ -323,6 +407,38 @@ export async function migrateComunicacoes(pool) {
     `UPDATE marketing_comunicacoes SET status = 'preview'
      WHERE status IN ('enviando', 'pausado')`,
   );
+
+  const [fkRows] = await pool.query(
+    `SELECT CONSTRAINT_NAME AS name
+     FROM information_schema.TABLE_CONSTRAINTS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'marketing_comunicacao_itens'
+       AND CONSTRAINT_NAME = 'fk_mci_arrecadacao'
+     LIMIT 1`,
+  );
+  if (fkRows[0]?.name) {
+    await pool.query(
+      'ALTER TABLE marketing_comunicacao_itens DROP FOREIGN KEY fk_mci_arrecadacao',
+    );
+  }
+  await pool.query(
+    'ALTER TABLE marketing_comunicacao_itens MODIFY arrecadacao_id INT UNSIGNED NULL',
+  );
+  const [fkAfter] = await pool.query(
+    `SELECT CONSTRAINT_NAME AS name
+     FROM information_schema.TABLE_CONSTRAINTS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'marketing_comunicacao_itens'
+       AND CONSTRAINT_NAME = 'fk_mci_arrecadacao'
+     LIMIT 1`,
+  );
+  if (!fkAfter[0]?.name) {
+    await pool.query(
+      `ALTER TABLE marketing_comunicacao_itens
+       ADD CONSTRAINT fk_mci_arrecadacao
+       FOREIGN KEY (arrecadacao_id) REFERENCES arrecadacao(id) ON DELETE CASCADE`,
+    );
+  }
 }
 
 async function findComunicacaoRow(pool, id, eventoId) {
@@ -458,18 +574,34 @@ export async function gerarPreviewComunicacao(pool, id, eventoId) {
   const sentArrecadacaoIds = new Set(sentRows.map((r) => Number(r.arrecadacao_id)));
 
   await pool.query(
-    `DELETE FROM marketing_comunicacao_itens WHERE comunicacao_id = ? AND status NOT IN ('enviado', 'reenvio_pendente')`,
+    `DELETE FROM marketing_comunicacao_itens
+     WHERE comunicacao_id = ? AND manual = 0 AND status NOT IN ('enviado', 'reenvio_pendente')`,
     [id],
+  );
+
+  const [manualRows] = await pool.query(
+    `SELECT arrecadacao_id, telefone FROM marketing_comunicacao_itens
+     WHERE comunicacao_id = ? AND manual = 1`,
+    [id],
+  );
+  const manualArrecIds = new Set(
+    manualRows.filter((r) => r.arrecadacao_id != null).map((r) => Number(r.arrecadacao_id)),
+  );
+  const manualPhones = new Set(
+    manualRows.map((r) => toWhatsAppNumber(r.telefone)).filter(Boolean),
   );
 
   for (const item of items) {
     if (sentArrecadacaoIds.has(item.arrecadacaoId)) continue;
+    if (manualArrecIds.has(item.arrecadacaoId)) continue;
+    const phoneKey = toWhatsAppNumber(item.telefone);
+    if (phoneKey && manualPhones.has(phoneKey)) continue;
     const incluido = item.incluido ? 1 : 0;
     const status = item.incluido ? 'pendente' : 'ignorado';
     await pool.query(
       `INSERT INTO marketing_comunicacao_itens
-         (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, tipo, mensagem, valor_em_aberto, incluido, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, tipo, mensagem, valor_em_aberto, incluido, manual, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
         id,
         item.arrecadacaoId,
@@ -542,6 +674,109 @@ export async function updateComunicacaoItem(pool, comunicacaoId, itemId, eventoI
   return rowToComunicacaoItem(updated[0]);
 }
 
+function nextItemStatusAfterTemplateRefresh(currentStatus) {
+  if (currentStatus === 'enviado' || currentStatus === 'reenvio_pendente') {
+    return 'reenvio_pendente';
+  }
+  return currentStatus;
+}
+
+async function previewFromComunicacaoItem(pool, eventoId, itemRow, template) {
+  if (itemRow.arrecadacao_id != null) {
+    const lead = await queryLeadByArrecadacaoId(pool, eventoId, itemRow.arrecadacao_id);
+    if (!lead) return null;
+    return rowToPreviewItem(lead, template);
+  }
+  const mensagem = renderComunicacaoTemplate(
+    template,
+    manualTemplateContext({
+      nome: itemRow.nome,
+      contatoNome: itemRow.contato_nome,
+      telefone: itemRow.telefone,
+    }),
+  );
+  return {
+    nome: itemRow.nome,
+    contatoNome: itemRow.contato_nome || '',
+    telefone: itemRow.telefone,
+    tipo: itemRow.tipo || 'manual',
+    mensagem,
+    valorEmAberto: itemRow.valor_em_aberto != null ? Number(itemRow.valor_em_aberto) : null,
+  };
+}
+
+export async function reaplicarTemplateComunicacao(pool, id, eventoId, body = {}) {
+  const com = await findComunicacaoRow(pool, id, eventoId);
+  if (!com) return null;
+
+  const templateFromBody =
+    body?.template !== undefined || body?.mensagem !== undefined
+      ? String(body.template ?? body.mensagem ?? '').trim()
+      : null;
+  const template = templateFromBody || String(com.template || '').trim();
+  if (!template) {
+    throw Object.assign(new Error('Informe o template da mensagem'), { status: 400 });
+  }
+
+  if (templateFromBody != null && templateFromBody !== String(com.template || '').trim()) {
+    await pool.query(
+      `UPDATE marketing_comunicacoes SET template = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND evento_id = ?`,
+      [template, id, eventoId],
+    );
+  }
+
+  const [itemRows] = await pool.query(
+    'SELECT * FROM marketing_comunicacao_itens WHERE comunicacao_id = ? ORDER BY id ASC',
+    [id],
+  );
+  if (!itemRows.length) {
+    throw Object.assign(new Error('Não há destinatários na lista. Gere a prévia ou adicione contatos.'), {
+      status: 400,
+    });
+  }
+
+  let atualizados = 0;
+  for (const row of itemRows) {
+    const preview = await previewFromComunicacaoItem(pool, eventoId, row, template);
+    if (!preview) continue;
+    const nextStatus = nextItemStatusAfterTemplateRefresh(row.status);
+
+    if (row.arrecadacao_id != null) {
+      await pool.query(
+        `UPDATE marketing_comunicacao_itens SET
+           nome = ?, contato_nome = ?, telefone = ?, tipo = ?, mensagem = ?, valor_em_aberto = ?, status = ?
+         WHERE id = ? AND comunicacao_id = ?`,
+        [
+          preview.nome,
+          preview.contatoNome || null,
+          preview.telefone,
+          preview.tipo,
+          preview.mensagem,
+          preview.valorEmAberto,
+          nextStatus,
+          row.id,
+          id,
+        ],
+      );
+    } else {
+      await pool.query(
+        `UPDATE marketing_comunicacao_itens SET mensagem = ?, status = ? WHERE id = ? AND comunicacao_id = ?`,
+        [preview.mensagem, nextStatus, row.id, id],
+      );
+    }
+    atualizados += 1;
+  }
+
+  await pool.query(
+    `UPDATE marketing_comunicacoes SET status = 'preview', updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+    [id],
+  );
+  await refreshComunicacaoCounts(pool, id);
+
+  const data = await getComunicacaoById(pool, id, eventoId);
+  return { ...data, atualizados };
+}
+
 export async function atualizarConteudoComunicacaoItem(pool, comunicacaoId, itemId, eventoId) {
   const com = await findComunicacaoRow(pool, comunicacaoId, eventoId);
   if (!com) return null;
@@ -557,32 +792,34 @@ export async function atualizarConteudoComunicacaoItem(pool, comunicacaoId, item
   );
   if (!itemRows[0]) return null;
 
-  const lead = await queryLeadByArrecadacaoId(pool, eventoId, itemRows[0].arrecadacao_id);
-  if (!lead) {
+  const preview = await previewFromComunicacaoItem(pool, eventoId, itemRows[0], template);
+  if (!preview) {
     throw Object.assign(new Error('Lead não encontrado neste evento'), { status: 404 });
   }
-
-  const preview = rowToPreviewItem(lead, template);
-  const nextStatus =
-    itemRows[0].status === 'enviado' || itemRows[0].status === 'reenvio_pendente'
-      ? 'reenvio_pendente'
-      : itemRows[0].status;
-  await pool.query(
-    `UPDATE marketing_comunicacao_itens SET
-       nome = ?, contato_nome = ?, telefone = ?, tipo = ?, mensagem = ?, valor_em_aberto = ?, status = ?
-     WHERE id = ? AND comunicacao_id = ?`,
-    [
-      preview.nome,
-      preview.contatoNome || null,
-      preview.telefone,
-      preview.tipo,
-      preview.mensagem,
-      preview.valorEmAberto,
-      nextStatus,
-      itemId,
-      comunicacaoId,
-    ],
-  );
+  const nextStatus = nextItemStatusAfterTemplateRefresh(itemRows[0].status);
+  if (itemRows[0].arrecadacao_id != null) {
+    await pool.query(
+      `UPDATE marketing_comunicacao_itens SET
+         nome = ?, contato_nome = ?, telefone = ?, tipo = ?, mensagem = ?, valor_em_aberto = ?, status = ?
+       WHERE id = ? AND comunicacao_id = ?`,
+      [
+        preview.nome,
+        preview.contatoNome || null,
+        preview.telefone,
+        preview.tipo,
+        preview.mensagem,
+        preview.valorEmAberto,
+        nextStatus,
+        itemId,
+        comunicacaoId,
+      ],
+    );
+  } else {
+    await pool.query(
+      `UPDATE marketing_comunicacao_itens SET mensagem = ?, status = ? WHERE id = ? AND comunicacao_id = ?`,
+      [preview.mensagem, nextStatus, itemId, comunicacaoId],
+    );
+  }
 
   await refreshComunicacaoCounts(pool, comunicacaoId);
 
@@ -660,6 +897,123 @@ async function refreshComunicacaoCounts(pool, comunicacaoId) {
   );
 }
 
+function manualTemplateContext({ nome, contatoNome, telefone }) {
+  const empresa = String(nome || '').trim();
+  const contato = String(contatoNome || '').trim();
+  return {
+    nome: contato,
+    empresa,
+    contato,
+    telefone: telefone || '',
+    tipo: 'Contato',
+    espaco: '',
+    grupo: '',
+    instagram: '',
+    descricao: '',
+    cota: '',
+    produto: '',
+    status: '',
+    valor_total: formatBRL(0),
+    valor_pago: formatBRL(0),
+    valor_em_aberto: formatBRL(0),
+    ingressos: '0',
+    ingressos_padrao: '0',
+    ingresso: '0',
+    qtd_ingressos: '0',
+    numero_ingressos: '0',
+    evento: '',
+  };
+}
+
+export async function addComunicacaoItem(pool, comunicacaoId, eventoId, body) {
+  const com = await findComunicacaoRow(pool, comunicacaoId, eventoId);
+  if (!com) return null;
+
+  const template = String(com.template || '').trim();
+  const arrecadacaoId = Number(body?.arrecadacaoId ?? body?.arrecadacao_id);
+
+  if (Number.isInteger(arrecadacaoId) && arrecadacaoId > 0) {
+    const lead = await queryLeadByArrecadacaoId(pool, eventoId, arrecadacaoId);
+    if (!lead) {
+      throw Object.assign(new Error('Lead não encontrado neste evento'), { status: 404 });
+    }
+    if (!hasValidPhone(lead.contato_telefone)) {
+      throw Object.assign(new Error('Lead sem WhatsApp válido cadastrado'), { status: 400 });
+    }
+
+    const [dup] = await pool.query(
+      `SELECT id FROM marketing_comunicacao_itens
+       WHERE comunicacao_id = ? AND arrecadacao_id = ? LIMIT 1`,
+      [comunicacaoId, arrecadacaoId],
+    );
+    if (dup[0]) {
+      throw Object.assign(new Error('Este lead já está na lista desta comunicação'), { status: 409 });
+    }
+
+    const preview = rowToPreviewItem(lead, template || '{{nome}}');
+    const [result] = await pool.query(
+      `INSERT INTO marketing_comunicacao_itens
+         (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, tipo, mensagem, valor_em_aberto, incluido, manual, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 'pendente')`,
+      [
+        comunicacaoId,
+        arrecadacaoId,
+        preview.nome,
+        preview.contatoNome || null,
+        preview.telefone,
+        preview.tipo,
+        preview.mensagem,
+        preview.valorEmAberto,
+      ],
+    );
+    await refreshComunicacaoCounts(pool, comunicacaoId);
+    const [rows] = await pool.query(
+      'SELECT * FROM marketing_comunicacao_itens WHERE id = ? LIMIT 1',
+      [result.insertId],
+    );
+    return rowToComunicacaoItem(rows[0]);
+  }
+
+  const nome = String(body?.nome ?? body?.empresa ?? '').trim();
+  const contatoNome = String(body?.contatoNome ?? body?.contato_nome ?? body?.nomeContato ?? '').trim();
+  const telefone = String(body?.telefone ?? body?.phone ?? '').trim();
+  if (!nome) {
+    throw Object.assign(new Error('Informe o nome do destinatário'), { status: 400 });
+  }
+  if (!hasValidPhone(telefone)) {
+    throw Object.assign(new Error('Informe um WhatsApp válido'), { status: 400 });
+  }
+
+  const phoneKey = toWhatsAppNumber(telefone);
+  const [dupPhone] = await pool.query(
+    `SELECT id FROM marketing_comunicacao_itens
+     WHERE comunicacao_id = ? AND telefone = ? LIMIT 1`,
+    [comunicacaoId, telefone],
+  );
+  if (dupPhone[0]) {
+    throw Object.assign(new Error('Já existe um destinatário com este telefone na lista'), { status: 409 });
+  }
+
+  const mensagemRaw = String(body?.mensagem ?? body?.texto ?? '').trim();
+  const mensagem = mensagemRaw
+    ? mensagemRaw
+    : template
+      ? renderComunicacaoTemplate(template, manualTemplateContext({ nome, contatoNome, telefone }))
+      : `Olá${contatoNome ? ` ${contatoNome}` : ''}!`;
+
+  const [result] = await pool.query(
+    `INSERT INTO marketing_comunicacao_itens
+       (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, tipo, mensagem, valor_em_aberto, incluido, manual, status)
+     VALUES (?, NULL, ?, ?, ?, 'manual', ?, NULL, 1, 1, 'pendente')`,
+    [comunicacaoId, nome, contatoNome || null, telefone, mensagem],
+  );
+  await refreshComunicacaoCounts(pool, comunicacaoId);
+  const [rows] = await pool.query('SELECT * FROM marketing_comunicacao_itens WHERE id = ? LIMIT 1', [
+    result.insertId,
+  ]);
+  return rowToComunicacaoItem(rows[0]);
+}
+
 export async function deleteComunicacaoItem(pool, comunicacaoId, itemId, eventoId) {
   const com = await findComunicacaoRow(pool, comunicacaoId, eventoId);
   if (!com) return null;
@@ -718,31 +1072,28 @@ export async function previewComunicacao(pool, eventoId, body) {
 }
 
 export async function enviarComunicacaoItem(pool, eventoId, body) {
-  const arrecadacaoId = Number(body?.arrecadacaoId ?? body?.arrecadacao_id);
+  let arrecadacaoId = Number(body?.arrecadacaoId ?? body?.arrecadacao_id) || null;
   const itemId = Number(body?.itemId ?? body?.item_id ?? body?.comunicacaoItemId);
   const comunicacaoId = Number(body?.comunicacaoId ?? body?.comunicacao_id);
   const text = String((body?.texto ?? body?.text ?? body?.mensagem) || '').trim();
+  let phoneOverride = String(body?.telefone ?? body?.phone ?? '').trim();
 
-  if (!arrecadacaoId) {
-    throw Object.assign(new Error('Informe o destinatário'), { status: 400 });
+  if (itemId && comunicacaoId) {
+    const [itemRows] = await pool.query(
+      `SELECT arrecadacao_id, telefone FROM marketing_comunicacao_itens
+       WHERE id = ? AND comunicacao_id = ? LIMIT 1`,
+      [itemId, comunicacaoId],
+    );
+    if (itemRows[0]) {
+      if (!arrecadacaoId && itemRows[0].arrecadacao_id != null) {
+        arrecadacaoId = Number(itemRows[0].arrecadacao_id);
+      }
+      if (!phoneOverride) phoneOverride = String(itemRows[0].telefone || '').trim();
+    }
   }
+
   if (!text) {
     throw Object.assign(new Error('Informe a mensagem'), { status: 400 });
-  }
-
-  const [rows] = await pool.query(
-    `SELECT a.id, p.contato_telefone
-     FROM arrecadacao a
-     JOIN participantes p ON p.id = a.participante_id
-     WHERE a.id = ? AND a.evento_id = ?
-     LIMIT 1`,
-    [arrecadacaoId, eventoId],
-  );
-  if (!rows[0]) {
-    throw Object.assign(new Error('Lead não encontrado neste evento'), { status: 404 });
-  }
-  if (!hasValidPhone(rows[0].contato_telefone)) {
-    throw Object.assign(new Error('Lead sem WhatsApp válido'), { status: 400 });
   }
 
   const status = await getWhatsappStatusQuick();
@@ -761,11 +1112,36 @@ export async function enviarComunicacaoItem(pool, eventoId, body) {
       );
     }
 
-    const result = await sendWhatsappToLead(pool, arrecadacaoId, text);
-    const enviadoEm =
-      result.mensagem?.enviadoEm != null
-        ? new Date(result.mensagem.enviadoEm)
-        : new Date();
+    let result;
+    let enviadoEm;
+    if (arrecadacaoId) {
+      const [rows] = await pool.query(
+        `SELECT a.id, p.contato_telefone
+         FROM arrecadacao a
+         JOIN participantes p ON p.id = a.participante_id
+         WHERE a.id = ? AND a.evento_id = ?
+         LIMIT 1`,
+        [arrecadacaoId, eventoId],
+      );
+      if (!rows[0]) {
+        throw Object.assign(new Error('Lead não encontrado neste evento'), { status: 404 });
+      }
+      if (!hasValidPhone(rows[0].contato_telefone)) {
+        throw Object.assign(new Error('Lead sem WhatsApp válido'), { status: 400 });
+      }
+      result = await sendWhatsappToLead(pool, arrecadacaoId, text);
+      enviadoEm =
+        result.mensagem?.enviadoEm != null
+          ? new Date(result.mensagem.enviadoEm)
+          : new Date();
+    } else if (hasValidPhone(phoneOverride)) {
+      const phone = toWhatsAppNumber(phoneOverride);
+      await sendTextMessage(phone, text);
+      enviadoEm = new Date();
+      result = { mensagem: { id: null, enviadoEm: enviadoEm.toISOString() } };
+    } else {
+      throw Object.assign(new Error('Informe o destinatário'), { status: 400 });
+    }
 
     if (itemId && comunicacaoId) {
       await pool.query(

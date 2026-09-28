@@ -3,6 +3,7 @@ const ETAPA_TIPOS = new Set(['normal', 'perda', 'venda']);
 export const FUNIL_ESCOPOS = [
   { id: 'comercial', label: 'Arrecadação', descricao: 'Patrocínios e negociações comerciais' },
   { id: 'artistico', label: 'Artístico', descricao: 'Artistas, atrações e orçamentos' },
+  { id: 'alimentacao', label: 'Alimentação', descricao: 'Candidaturas e operação da praça de alimentação' },
 ];
 
 const ESCOPO_IDS = new Set(FUNIL_ESCOPOS.map((e) => e.id));
@@ -31,6 +32,14 @@ const DEFAULT_FUNIL = [
   { status: 'res', titulo: 'Reservado', cor: DEFAULT_COLORS.res, tipo: 'normal', ordem: 2, ativo: true },
   { status: 'vend', titulo: 'Vendido / Fechado', cor: DEFAULT_COLORS.vend, tipo: 'venda', ordem: 3, ativo: true },
   { status: 'perda', titulo: 'Perda', cor: DEFAULT_COLORS.perda, tipo: 'perda', ordem: 4, ativo: true },
+];
+
+const DEFAULT_FUNIL_ALIMENTACAO = [
+  { status: 'lead', titulo: 'Candidatura', cor: DEFAULT_COLORS.lead, tipo: 'normal', ordem: 0, ativo: true },
+  { status: 'neg', titulo: 'Em análise', cor: DEFAULT_COLORS.neg, tipo: 'normal', ordem: 1, ativo: true },
+  { status: 'res', titulo: 'Aprovado', cor: DEFAULT_COLORS.res, tipo: 'normal', ordem: 2, ativo: true },
+  { status: 'vend', titulo: 'Confirmado na praça', cor: DEFAULT_COLORS.vend, tipo: 'venda', ordem: 3, ativo: true },
+  { status: 'perda', titulo: 'Não aprovado', cor: DEFAULT_COLORS.perda, tipo: 'perda', ordem: 4, ativo: true },
 ];
 
 const DEFAULT_FUNIL_ARTISTICO = [
@@ -75,7 +84,12 @@ function rowToEtapa(row) {
 }
 
 function defaultEtapasForEscopo(escopo) {
-  const base = escopo === 'artistico' ? DEFAULT_FUNIL_ARTISTICO : DEFAULT_FUNIL;
+  const base =
+    escopo === 'artistico'
+      ? DEFAULT_FUNIL_ARTISTICO
+      : escopo === 'alimentacao'
+        ? DEFAULT_FUNIL_ALIMENTACAO
+        : DEFAULT_FUNIL;
   return base.map((e) => ({
     id: null,
     eventoId: null,

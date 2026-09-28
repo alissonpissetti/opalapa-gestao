@@ -425,6 +425,20 @@ export function gerarPreviewMarketingComunicacao(id) {
   return apiRequest(`/api/marketing/comunicacoes/${id}/preview`, { method: 'POST' });
 }
 
+export function reaplicarTemplateMarketingComunicacao(id, data) {
+  return apiRequest(`/api/marketing/comunicacoes/${id}/reaplicar-template`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function addMarketingComunicacaoItem(comunicacaoId, data) {
+  return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/itens`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export function updateMarketingComunicacaoItem(comunicacaoId, itemId, data) {
   return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/itens/${itemId}`, {
     method: 'PUT',
@@ -624,6 +638,75 @@ export function fetchProducaoEntregas({ produtoId } = {}) {
 export function patchProducaoEntrega(arrecadacaoId, data) {
   return apiRequest(`/api/producao/entregas/${arrecadacaoId}`, {
     method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchProducaoMateriaisLotes() {
+  return apiRequest('/api/producao/materiais/lotes');
+}
+
+export function fetchProducaoMateriaisPedidoTexto({ loteId, detalhe = true } = {}) {
+  const params = new URLSearchParams();
+  if (loteId != null && loteId !== '') params.set('loteId', String(loteId));
+  if (!detalhe) params.set('detalhe', '0');
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return apiRequest(`/api/producao/materiais/pedido-texto${qs}`);
+}
+
+export function fetchProducaoMateriaisLote(id) {
+  return apiRequest(`/api/producao/materiais/lotes/${id}`);
+}
+
+export function createProducaoMateriaisLote(data) {
+  return apiRequest('/api/producao/materiais/lotes', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateProducaoMateriaisLote(id, data) {
+  return apiRequest(`/api/producao/materiais/lotes/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProducaoMateriaisLote(id) {
+  return apiRequest(`/api/producao/materiais/lotes/${id}`, { method: 'DELETE' });
+}
+
+export function importarEntregasProducaoMateriaisLote(id) {
+  return apiRequest(`/api/producao/materiais/lotes/${id}/importar-entregas`, { method: 'POST' });
+}
+
+export function createProducaoMateriaisItem(loteId, data) {
+  return apiRequest(`/api/producao/materiais/lotes/${loteId}/itens`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateProducaoMateriaisItem(loteId, itemId, data) {
+  return apiRequest(`/api/producao/materiais/lotes/${loteId}/itens/${itemId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProducaoMateriaisItem(loteId, itemId) {
+  return apiRequest(`/api/producao/materiais/lotes/${loteId}/itens/${itemId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function duplicateProducaoMateriaisItem(loteId, itemId, data = {}) {
+  return apiRequest(`/api/producao/materiais/lotes/${loteId}/itens/${itemId}/duplicar`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function moveProducaoMateriaisItem(loteId, itemId, data) {
+  return apiRequest(`/api/producao/materiais/lotes/${loteId}/itens/${itemId}/mover`, {
+    method: 'POST',
     body: JSON.stringify(data),
   });
 }

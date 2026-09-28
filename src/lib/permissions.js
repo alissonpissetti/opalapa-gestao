@@ -4,11 +4,13 @@ const VIEW_ORDER = [
   'arrecadacao',
   'arrecadacao-planos',
   'artistico',
+  'alimentacao',
   'tarefas',
   'marketing',
   'cronologia',
   'premiacoes',
   'entregas',
+  'materiais',
   'financeiro-gestao',
   'financeiro-contas-pagar',
   'financeiro-plano-contas',
@@ -21,6 +23,7 @@ export const WHATSAPP_VIEWS = [
   'espacos',
   'arrecadacao',
   'artistico',
+  'alimentacao',
   'tarefas',
   'marketing',
   'cronologia',
@@ -43,6 +46,7 @@ export function getUserPermissions() {
 /** Views que herdam permissão de outra tela (sem entrada própria no catálogo). */
 const VIEW_PERMISSION_ALIASES = {
   'arrecadacao-planos': 'arrecadacao',
+  alimentacao: 'arrecadacao',
 };
 
 export function canAccessView(view) {

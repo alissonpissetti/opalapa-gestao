@@ -33,6 +33,7 @@ export function initArrecadacaoProdutosModule({ onChanged } = {}) {
     fieldOrdem: document.getElementById('arr-produto-edit-ordem'),
     fieldDescricao: document.getElementById('arr-produto-edit-descricao'),
     fieldValor: document.getElementById('arr-produto-edit-valor'),
+    fieldIngressos: document.getElementById('arr-produto-edit-ingressos'),
     fieldEspacos: document.getElementById('arr-produto-edit-espacos'),
     fieldBeneficios: document.getElementById('arr-produto-edit-beneficios'),
     fieldAtivo: document.getElementById('arr-produto-edit-ativo'),
@@ -105,7 +106,7 @@ export function initArrecadacaoProdutosModule({ onChanged } = {}) {
     if (!els.table) return;
     if (!produtos.length) {
       els.table.innerHTML =
-        '<tr><td colspan="7" class="cell-empty">Nenhum plano cadastrado.</td></tr>';
+        '<tr><td colspan="8" class="cell-empty">Nenhum plano cadastrado.</td></tr>';
       return;
     }
 
@@ -126,6 +127,7 @@ export function initArrecadacaoProdutosModule({ onChanged } = {}) {
         <td>${valorCell}</td>
         <td>${escapeHtml(espacos)}</td>
         <td>${benefCount} benefício(s)</td>
+        <td>${p.ingressosPadrao ?? 1}</td>
         <td>${p.usoLeads || 0}</td>
         <td>${statusBadge(p.ativo)}</td>
         <td class="row-actions arr-produtos-actions">
@@ -179,6 +181,11 @@ export function initArrecadacaoProdutosModule({ onChanged } = {}) {
     if (els.fieldValor) {
       els.fieldValor.value =
         item?.valor != null && item.valor > 0 ? formatValorInput(item.valor) : '';
+    }
+    if (els.fieldIngressos) {
+      const ingressos = item?.ingressosPadrao;
+      els.fieldIngressos.value =
+        ingressos != null && ingressos !== '' ? String(ingressos) : item ? '1' : '1';
     }
     if (els.fieldAtivo) els.fieldAtivo.checked = item ? Boolean(item.ativo) : true;
 
@@ -236,11 +243,19 @@ export function initArrecadacaoProdutosModule({ onChanged } = {}) {
 
     const valorRaw = els.fieldValor?.value?.trim() || '';
     const valorParsed = valorRaw ? parseValor(valorRaw) : null;
+    const ingressosRaw = els.fieldIngressos?.value?.trim() ?? '';
+    const ingressosParsed = ingressosRaw === '' ? 1 : Number(ingressosRaw);
+    if (!Number.isFinite(ingressosParsed) || ingressosParsed < 0) {
+      showFormErrors('Informe uma quantidade válida de ingressos padrão.');
+      els.fieldIngressos?.focus();
+      return;
+    }
 
     const payload = {
       nome,
       descricao: els.fieldDescricao?.value?.trim() || '',
       valor: valorParsed ?? 0,
+      ingressosPadrao: Math.floor(ingressosParsed),
       ordem: els.fieldOrdem?.value !== '' ? Number(els.fieldOrdem.value) : undefined,
       ativo: Boolean(els.fieldAtivo?.checked),
       beneficios: readCheckgrid(els.fieldBeneficios),

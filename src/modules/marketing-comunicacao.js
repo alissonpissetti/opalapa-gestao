@@ -6,6 +6,11 @@ import {
   updateMarketingComunicacao,
   deleteMarketingComunicacao,
   gerarPreviewMarketingComunicacao,
+  reaplicarTemplateMarketingComunicacao,
+  addMarketingComunicacaoItem,
+  fetchArrecadacao,
+  fetchFunilEtapas,
+  fetchParticipantes,
   updateMarketingComunicacaoItem,
   deleteMarketingComunicacaoItem,
   atualizarConteudoMarketingComunicacaoItem,
@@ -64,12 +69,23 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     fieldNome: document.getElementById('marketing-com-nome'),
     comFilters: document.getElementById('marketing-com-filters'),
     somenteSaldo: document.getElementById('marketing-com-somente-saldo'),
+    somenteVendidos: document.getElementById('marketing-com-somente-vendidos'),
+    addRecipient: document.getElementById('marketing-com-add-recipient'),
+    addLeadPanel: document.getElementById('marketing-com-add-lead-panel'),
+    addManualPanel: document.getElementById('marketing-com-add-manual-panel'),
+    addLeadSelect: document.getElementById('marketing-com-add-lead'),
+    addNome: document.getElementById('marketing-com-add-nome'),
+    addContato: document.getElementById('marketing-com-add-contato'),
+    addTelefone: document.getElementById('marketing-com-add-telefone'),
+    btnRefreshLeads: document.getElementById('btn-marketing-com-refresh-leads'),
+    btnAddItem: document.getElementById('btn-marketing-com-add-item'),
     comTemplate: document.getElementById('marketing-com-template'),
     comVarsHint: document.getElementById('marketing-com-vars-hint'),
     comIntervalMin: document.getElementById('marketing-com-interval-min'),
     comIntervalMax: document.getElementById('marketing-com-interval-max'),
     btnSave: document.getElementById('btn-marketing-com-save'),
     btnPreview: document.getElementById('btn-marketing-com-preview'),
+    btnApplyTemplate: document.getElementById('btn-marketing-com-apply-template'),
     btnClear: document.getElementById('btn-marketing-com-clear'),
     comPreview: document.getElementById('marketing-com-preview'),
     comMeta: document.getElementById('marketing-com-meta'),
@@ -90,6 +106,8 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
   let comAbort = false;
   let sendingItemId = null;
   let updatingItemId = null;
+  let addMode = 'lead';
+  let leadPickerOptions = [];
 
   function showPanel(visible) {
     els.panel?.classList.toggle('hidden', !visible);
@@ -127,7 +145,12 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
       nome: els.fieldNome?.value.trim() || 'Nova comunicação',
       template: els.comTemplate?.value || '',
       tipos: getSelectedComTipos(),
-      filtros: { somenteComSaldo: els.somenteSaldo?.checked !== false },
+      filtros: {
+        somenteVendidos: els.somenteVendidos?.checked === true,
+        somenteComSaldo: els.somenteVendidos?.checked
+          ? false
+          : els.somenteSaldo?.checked !== false,
+      },
       intervaloMin: getComIntervalBounds().min,
       intervaloMax: getComIntervalBounds().max,
     };
@@ -193,8 +216,12 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     if (els.comTemplate) els.comTemplate.value = com?.template || DEFAULT_TEMPLATE;
     if (els.comIntervalMin) els.comIntervalMin.value = String(com?.intervaloMin ?? 15);
     if (els.comIntervalMax) els.comIntervalMax.value = String(com?.intervaloMax ?? 45);
+    if (els.somenteVendidos) {
+      els.somenteVendidos.checked = Boolean(com?.filtros?.somenteVendidos);
+    }
     if (els.somenteSaldo) {
       els.somenteSaldo.checked = com?.filtros?.somenteComSaldo !== false;
+      if (els.somenteVendidos?.checked) els.somenteSaldo.checked = false;
     }
     const tipos = new Set(com?.tipos || ['espaco', 'patrocinio']);
     els.comFilters?.querySelectorAll('input[type="checkbox"]').forEach((input) => {
@@ -336,6 +363,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
               !comDispatching &&
               !sendingItemId &&
               !updatingItemId &&
+              item.arrecadacaoId &&
               (item.status === 'enviado' || item.status === 'reenvio_pendente');
             const canPauseComunicacao =
               !comDispatching &&
@@ -431,6 +459,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     try {
       const data = await enviarMarketingComunicacaoItem({
         arrecadacaoId: item.arrecadacaoId,
+        telefone: item.telefone,
         texto: mensagem,
         itemId: item.id,
         comunicacaoId: editId,
@@ -573,6 +602,10 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
         ? `${ativos.length} destinatário(s) · use Pausar comunicação para ignorar linhas no disparo automático`
         : '';
     }
+    els.addRecipient?.classList.toggle('hidden', !editId);
+    if (els.btnApplyTemplate) {
+      els.btnApplyTemplate.disabled = !editId || !itens.length || comDispatching || Boolean(sendingItemId);
+    }
     renderPreviewTable();
   }
 
@@ -583,6 +616,9 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     itens = data.itens || [];
     fillEditor(current);
     renderPreviewState();
+    if (!els.comPreview?.classList.contains('hidden')) {
+      void refreshLeadPicker();
+    }
     setEditorView();
     resetDispatchState();
   }
@@ -629,12 +665,55 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
       }
       fillEditor(current);
       renderPreviewState();
+      els.addRecipient?.classList.remove('hidden');
       await loadList();
       alert('Rascunho salvo.');
     } catch (err) {
       alert(err.message || 'Não foi possível salvar.');
     } finally {
       els.btnSave.disabled = false;
+    }
+  }
+
+  async function applyTemplateToList() {
+    if (!editId) {
+      alert('Salve o rascunho antes de aplicar o texto.');
+      return;
+    }
+    if (!itens.length) {
+      alert('Gere a prévia ou adicione destinatários antes de aplicar o template.');
+      return;
+    }
+    const payload = readEditorPayload();
+    if (!payload.template.trim()) {
+      alert('Informe o template da mensagem.');
+      return;
+    }
+    const n = itens.length;
+    if (
+      !confirm(
+        `Aplicar o texto atual do template às ${n} mensagem(ns) da lista?\n\nAs variáveis (nome, ingressos, etc.) serão recalculadas para cada destinatário.`,
+      )
+    ) {
+      return;
+    }
+
+    els.btnApplyTemplate.disabled = true;
+    const prevLabel = els.btnApplyTemplate.textContent;
+    els.btnApplyTemplate.textContent = 'Atualizando…';
+    try {
+      await updateMarketingComunicacao(editId, payload);
+      const data = await reaplicarTemplateMarketingComunicacao(editId, { template: payload.template });
+      current = data.comunicacao;
+      itens = data.itens || [];
+      fillEditor(current);
+      renderPreviewState();
+      alert(`${data.atualizados ?? n} mensagem(ns) atualizada(s).`);
+    } catch (err) {
+      alert(err.message || 'Não foi possível aplicar o template.');
+    } finally {
+      els.btnApplyTemplate.textContent = prevLabel;
+      renderPreviewState();
     }
   }
 
@@ -667,6 +746,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
       fillEditor(current);
       els.comPreview?.classList.remove('hidden');
       renderPreviewState();
+      await refreshLeadPicker();
       await loadList();
     } catch (err) {
       alert(err.message || 'Não foi possível gerar a prévia.');
@@ -734,6 +814,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
       try {
         const data = await enviarMarketingComunicacaoItem({
           arrecadacaoId: item.arrecadacaoId,
+          telefone: item.telefone,
           texto: mensagem,
           itemId: item.id,
           comunicacaoId: editId,
@@ -794,6 +875,90 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     }
   }
 
+  function setAddMode(mode) {
+    addMode = mode === 'manual' ? 'manual' : 'lead';
+    els.addLeadPanel?.classList.toggle('hidden', addMode !== 'lead');
+    els.addManualPanel?.classList.toggle('hidden', addMode !== 'manual');
+    document.querySelectorAll('.marketing-com-add-tab').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.addMode === addMode);
+    });
+  }
+
+  async function refreshLeadPicker() {
+    if (!els.addLeadSelect) return;
+    try {
+      const [{ arrecadacao = [] }, { etapas = [] }, { participantes = [] }] = await Promise.all([
+        fetchArrecadacao(),
+        fetchFunilEtapas(),
+        fetchParticipantes(),
+      ]);
+      const vendidos = new Set(['vend']);
+      for (const e of etapas) {
+        if (e.tipo === 'venda' && e.ativo !== false) vendidos.add(e.status);
+      }
+      const tipos = new Set(getSelectedComTipos());
+      const somenteVendidos = els.somenteVendidos?.checked;
+      const partPhone = new Map(participantes.map((p) => [p.id, p.contatoTelefone]));
+      const existing = new Set(
+        itens.filter((i) => i.arrecadacaoId).map((i) => Number(i.arrecadacaoId)),
+      );
+
+      leadPickerOptions = (arrecadacao || []).filter((a) => {
+        if (!tipos.has(a.tipo)) return false;
+        if (somenteVendidos && !vendidos.has(a.status)) return false;
+        if (!String(partPhone.get(a.participanteId) || '').trim()) return false;
+        return true;
+      });
+
+      const options = [
+        '<option value="">Selecione um lead…</option>',
+        ...leadPickerOptions.map((a) => {
+          const suffix = existing.has(a.id) ? ' (já na lista)' : '';
+          const label = `${a.participanteNome || 'Sem nome'} · ${a.tipo}${a.produtoNome ? ` · ${a.produtoNome}` : ''}${suffix}`;
+          return `<option value="${a.id}">${escapeHtml(label)}</option>`;
+        }),
+      ];
+      els.addLeadSelect.innerHTML = options.join('');
+    } catch (err) {
+      els.addLeadSelect.innerHTML = `<option value="">Falha ao carregar leads</option>`;
+    }
+  }
+
+  async function addRecipientToList() {
+    if (!editId) {
+      alert('Salve o rascunho antes de adicionar destinatários.');
+      return;
+    }
+    try {
+      let payload;
+      if (addMode === 'lead') {
+        const arrecadacaoId = Number(els.addLeadSelect?.value);
+        if (!arrecadacaoId) {
+          alert('Selecione um lead.');
+          return;
+        }
+        payload = { arrecadacaoId };
+      } else {
+        payload = {
+          nome: els.addNome?.value?.trim(),
+          contatoNome: els.addContato?.value?.trim(),
+          telefone: els.addTelefone?.value?.trim(),
+        };
+      }
+      const data = await addMarketingComunicacaoItem(editId, payload);
+      current = data.comunicacao;
+      itens = data.itens || [];
+      if (els.addNome) els.addNome.value = '';
+      if (els.addContato) els.addContato.value = '';
+      if (els.addTelefone) els.addTelefone.value = '';
+      fillEditor(current);
+      renderPreviewState();
+      await refreshLeadPicker();
+    } catch (err) {
+      alert(err.message || 'Não foi possível adicionar.');
+    }
+  }
+
   async function onTabActivated() {
     setListView();
     await loadList();
@@ -807,9 +972,18 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
   });
   els.btnSave?.addEventListener('click', () => void saveComunicacao());
   els.btnPreview?.addEventListener('click', () => void generatePreview());
+  els.btnApplyTemplate?.addEventListener('click', () => void applyTemplateToList());
   els.btnClear?.addEventListener('click', () => void clearPreviewList());
   els.btnStart?.addEventListener('click', () => void runDispatch());
   els.btnPause?.addEventListener('click', () => void pauseDispatch());
+  els.somenteVendidos?.addEventListener('change', () => {
+    if (els.somenteVendidos.checked && els.somenteSaldo) els.somenteSaldo.checked = false;
+  });
+  document.querySelectorAll('.marketing-com-add-tab').forEach((btn) => {
+    btn.addEventListener('click', () => setAddMode(btn.dataset.addMode));
+  });
+  els.btnRefreshLeads?.addEventListener('click', () => void refreshLeadPicker());
+  els.btnAddItem?.addEventListener('click', () => void addRecipientToList());
 
   void loadVars();
   if (els.comTemplate && !els.comTemplate.value.trim()) {

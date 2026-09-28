@@ -3,11 +3,13 @@ export const PERMISSION_CATALOG = [
   { key: 'espacos', label: 'Espaços', area: 'Comercial' },
   { key: 'arrecadacao', label: 'Arrecadação', area: 'Comercial' },
   { key: 'artistico', label: 'Artístico', area: 'Artístico' },
+  { key: 'alimentacao', label: 'Alimentação', area: 'Comercial' },
   { key: 'tarefas', label: 'Tarefas', area: 'Operacional' },
   { key: 'marketing', label: 'Marketing', area: 'Operacional' },
   { key: 'cronologia', label: 'Cronologia', area: 'Produção' },
   { key: 'premiacoes', label: 'Premiações', area: 'Produção' },
   { key: 'entregas', label: 'Entrega', area: 'Produção' },
+  { key: 'materiais', label: 'Materiais', area: 'Produção' },
   { key: 'financeiro-gestao', label: 'Gestão financeira', area: 'Financeiro' },
   { key: 'financeiro-contas-pagar', label: 'Contas a pagar', area: 'Financeiro' },
   { key: 'financeiro-plano-contas', label: 'Plano de contas', area: 'Financeiro' },
@@ -25,6 +27,7 @@ export const WHATSAPP_VIEWS = [
   'espacos',
   'arrecadacao',
   'artistico',
+  'alimentacao',
   'tarefas',
   'marketing',
   'cronologia',
@@ -337,17 +340,20 @@ function resolveApiPermission(path, method) {
     return { type: 'view', view: 'espacos' };
   }
   if (p.startsWith('/api/tipos-comercio')) return { type: 'shared' };
-  if (p.startsWith('/api/funil-etapas')) return { type: 'anyOf', views: ['espacos', 'arrecadacao'] };
+  if (p.startsWith('/api/funil-etapas')) {
+    return { type: 'anyOf', views: ['espacos', 'arrecadacao', 'artistico', 'alimentacao'] };
+  }
   if (p.startsWith('/api/funil-escopos')) return { type: 'shared' };
 
   if (p.startsWith('/api/arrecadacao')) {
-    return { type: 'anyOf', views: ['arrecadacao', 'artistico', 'espacos', 'tarefas'] };
+    return { type: 'anyOf', views: ['arrecadacao', 'artistico', 'alimentacao', 'espacos', 'tarefas'] };
   }
   if (p.startsWith('/api/tarefas-contato')) return { type: 'view', view: 'tarefas' };
   if (p.startsWith('/api/marketing')) return { type: 'view', view: 'marketing' };
   if (p.startsWith('/api/producao/cronologia')) return { type: 'view', view: 'cronologia' };
   if (p.startsWith('/api/producao/premiacoes')) return { type: 'view', view: 'premiacoes' };
   if (p.startsWith('/api/producao/entregas')) return { type: 'view', view: 'entregas' };
+  if (p.startsWith('/api/producao/materiais')) return { type: 'view', view: 'materiais' };
   if (p === '/api/financeiro/painel') {
     return {
       type: 'anyOf',

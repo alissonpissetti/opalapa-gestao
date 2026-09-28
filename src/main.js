@@ -16,6 +16,7 @@ import { initMarketingModule } from './modules/marketing.js';
 import { initProducaoCronologiaModule } from './modules/producao-cronologia.js';
 import { initProducaoPremiacoesModule } from './modules/producao-premiacoes.js';
 import { initProducaoEntregasModule } from './modules/producao-entregas.js';
+import { initProducaoMateriaisModule } from './modules/producao-materiais.js';
 import { initFinanceiroGestaoModule } from './modules/financeiro-gestao.js';
 import { initContasPagarModule } from './modules/contas-pagar.js';
 import { initFinanceiroPlanoContasModule } from './modules/financeiro-plano-contas.js';
@@ -37,6 +38,7 @@ let marketingModule = null;
 let cronologiaModule = null;
 let premiacoesModule = null;
 let entregasModule = null;
+let materiaisModule = null;
 let financeiroGestaoModule = null;
 let contasPagarModule = null;
 let financeiroPlanoContasModule = null;
@@ -49,7 +51,8 @@ let store = null;
 
 async function openLeadFromApp(arrecadacaoId, { tipo } = {}) {
   if (!arrecadacaoId || !arrecadacaoModule) return false;
-  const view = tipo === 'artistico' ? 'artistico' : 'arrecadacao';
+  const view =
+    tipo === 'artistico' ? 'artistico' : tipo === 'alimentacao' ? 'alimentacao' : 'arrecadacao';
   if (canAccessView(view)) {
     navigation?.navigate(view);
   }
@@ -78,6 +81,7 @@ function showLoginOnly() {
   cronologiaModule = null;
   premiacoesModule = null;
   entregasModule = null;
+  materiaisModule = null;
   financeiroGestaoModule = null;
   contasPagarModule = null;
   financeiroPlanoContasModule = null;
@@ -128,6 +132,8 @@ async function reloadEventoData() {
   const arrView = navigation?.getCurrentView();
   if (arrView === 'artistico') {
     await arrecadacaoModule?.setLeadScope('artistico');
+  } else if (arrView === 'alimentacao') {
+    await arrecadacaoModule?.setLeadScope('alimentacao');
   } else if (arrView === 'arrecadacao') {
     await arrecadacaoModule?.setLeadScope('comercial');
   }
@@ -145,6 +151,9 @@ async function reloadEventoData() {
   }
   if (navigation?.getCurrentView() === 'entregas') {
     entregasModule?.loadEntregas();
+  }
+  if (navigation?.getCurrentView() === 'materiais') {
+    materiaisModule?.loadMateriais();
   }
   if (navigation?.getCurrentView() === 'financeiro-gestao') {
     financeiroGestaoModule?.loadFinanceiroGestao();
@@ -238,8 +247,14 @@ async function initApp(user) {
     onOpenWhatsappChat: (participanteId) => whatsappInboxModule?.openThread(participanteId),
     onSaved: () => syncParticipantesList(),
   });
+  materiaisModule = initProducaoMateriaisModule();
   entregasModule = initProducaoEntregasModule({
     onOpenLead: (arrecadacaoId, opts) => openLeadFromApp(arrecadacaoId, opts),
+    onEntregaCamisetasUpdated: () => {
+      if (navigation?.getCurrentView() === 'materiais') {
+        void materiaisModule?.loadMateriais();
+      }
+    },
   });
   financeiroGestaoModule = initFinanceiroGestaoModule();
   contasPagarModule = initContasPagarModule();
@@ -268,11 +283,13 @@ async function initApp(user) {
       }
       if (view === 'arrecadacao') arrecadacaoModule.setLeadScope('comercial');
       if (view === 'artistico') arrecadacaoModule.setLeadScope('artistico');
+      if (view === 'alimentacao') arrecadacaoModule.setLeadScope('alimentacao');
       if (view === 'tarefas') tarefasModule.loadTarefas();
       if (view === 'marketing') marketingModule.loadMarketing();
       if (view === 'cronologia') cronologiaModule.loadCronologia();
       if (view === 'premiacoes') premiacoesModule.loadPremiacoes();
       if (view === 'entregas') entregasModule.loadEntregas();
+      if (view === 'materiais') materiaisModule.loadMateriais();
       if (view === 'financeiro-gestao') financeiroGestaoModule.loadFinanceiroGestao();
       if (view === 'financeiro-contas-pagar') contasPagarModule.loadContasPagar();
       if (view === 'financeiro-plano-contas') financeiroPlanoContasModule.loadFinanceiroPlanoContas();

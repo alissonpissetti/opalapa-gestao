@@ -26,7 +26,21 @@ function normalizeTipoLead(raw) {
 }
 
 async function findExistingLeadForParticipante(pool, eventoId, participanteId, tipoPreferido) {
-  const tiposBusca = [tipoPreferido, ...LEAD_TIPOS_FORM.filter((t) => t !== tipoPreferido)];
+  const tipoNorm = normalizeTipoLead(tipoPreferido);
+  if (tipoNorm === 'alimentacao' || tipoNorm === 'artistico') {
+    const [rows] = await pool.query(
+      `SELECT id, obs FROM arrecadacao
+       WHERE evento_id = ? AND participante_id = ? AND tipo = ?
+       ORDER BY updated_at DESC LIMIT 1`,
+      [eventoId, participanteId, tipoNorm],
+    );
+    if (rows[0]) {
+      return { id: Number(rows[0].id), obs: rows[0].obs || '' };
+    }
+    return null;
+  }
+
+  const tiposBusca = [tipoNorm, ...LEAD_TIPOS_FORM.filter((t) => t !== tipoNorm)];
 
   for (const tipo of tiposBusca) {
     const [rows] = await pool.query(
@@ -48,12 +62,17 @@ async function vincularRespostaAoLead(pool, form, leadId, participante, existing
   const obs =
     obsBase && !obsBase.includes(note) ? `${obsBase}\n\n${note}` : obsBase || note;
 
-  await updateArrecadacao(pool, leadId, {
+  const tipoLead = normalizeTipoLead(form.tipoLead);
+  const leadPatch = {
     marketingCanalId: form.marketingCanalId,
     marketingCampanhaId: form.marketingCampanhaId,
     marketingCriativoId: form.marketingCriativoId,
     obs,
-  });
+  };
+  if (tipoLead === 'alimentacao' || tipoLead === 'artistico') {
+    leadPatch.tipo = tipoLead;
+  }
+  await updateArrecadacao(pool, leadId, leadPatch);
 
   const resumo = formatRespostasTexto(form.campos, participante.respostas);
   if (resumo) {
@@ -579,6 +598,28 @@ export async function migrateMarketingFormularios(pool) {
         SELECT 1 FROM marketing_formulario_resposta_interacoes i WHERE i.resposta_id = r.id
       )
   `);
+
+  await migrateAlimentacaoLeadsFromFormularios(pool);
+}
+
+/** Leads criados pelo formulário de alimentação passam a tipo `alimentacao` (lista Leads alimentação). */
+export async function migrateAlimentacaoLeadsFromFormularios(pool) {
+  const [result] = await pool.query(
+    `UPDATE arrecadacao a
+     INNER JOIN marketing_formulario_respostas r ON r.arrecadacao_id = a.id
+     INNER JOIN marketing_formularios f ON f.id = r.formulario_id
+     SET a.tipo = 'alimentacao', a.updated_at = CURRENT_TIMESTAMP(3)
+     WHERE f.tipo_lead = 'alimentacao'
+       AND a.tipo <> 'alimentacao'
+       AND a.tipo <> 'espaco'`,
+  );
+  const moved = Number(result.affectedRows) || 0;
+  if (moved > 0) {
+    console.info(
+      `[formularios] Migrados ${moved} lead(s) de formulário de alimentação para Leads alimentação.`,
+    );
+  }
+  return moved;
 }
 
 function normalizeCorFundo(raw) {

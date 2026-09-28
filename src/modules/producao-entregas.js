@@ -54,7 +54,9 @@ function sortItems(list, sortKey) {
 }
 
 function countPending(item) {
-  let pending = item.envioMarca ? 0 : 1;
+  let pending = 0;
+  if (!item.envioIngressos) pending += 1;
+  if (!item.envioMarca) pending += 1;
   const ativos = item.beneficiosAtivos || {};
   const concluidos = item.beneficiosConcluidos || {};
   for (const [key, active] of Object.entries(ativos)) {
@@ -63,8 +65,18 @@ function countPending(item) {
   return pending;
 }
 
+function effectiveCamisetasCount(item) {
+  if (!item) return 0;
+  const camisetas = item.camisetasSolicitadas;
+  if (camisetas != null && Number.isFinite(Number(camisetas))) {
+    return Math.max(0, Math.floor(Number(camisetas)));
+  }
+  const ingressos = item.ingressosSolicitados ?? item.ingressosCortesia ?? 0;
+  return Math.max(0, Math.floor(Number(ingressos) || 0));
+}
+
 function countTotalChecklist(item) {
-  let total = 1;
+  let total = 2;
   const ativos = item.beneficiosAtivos || {};
   for (const active of Object.values(ativos)) {
     if (active) total += 1;
@@ -72,7 +84,7 @@ function countTotalChecklist(item) {
   return total;
 }
 
-export function initProducaoEntregasModule({ onOpenLead } = {}) {
+export function initProducaoEntregasModule({ onOpenLead, onEntregaCamisetasUpdated } = {}) {
   const els = {
     summary: document.getElementById('entregas-summary'),
     sort: document.getElementById('entregas-sort'),
@@ -92,6 +104,7 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
   let items = [];
   let beneficiosDef = [];
   let beneficiosColunas = [];
+  let camisetaTamanhos = [];
   let saving = new Set();
   let bulkUpdating = false;
 
@@ -121,32 +134,52 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
 
   function getEligibleItems(kind, beneficioKey) {
     const visible = getVisibleItems();
-    if (kind === 'marca') return visible;
+    if (kind === 'marca' || kind === 'envioIngressos') return visible;
     return visible.filter((item) => item.beneficiosAtivos?.[beneficioKey]);
   }
 
   function getPendingEligibleItems(kind, beneficioKey) {
     const eligible = getEligibleItems(kind, beneficioKey);
     if (kind === 'marca') return eligible.filter((item) => !item.envioMarca);
+    if (kind === 'envioIngressos') return eligible.filter((item) => !item.envioIngressos);
     return eligible.filter((item) => !item.beneficiosConcluidos?.[beneficioKey]);
   }
 
-  function updateItemFromResponse(updated) {
-    if (!updated?.item) return;
-    const idx = items.findIndex((i) => i.arrecadacaoId === updated.item.arrecadacaoId);
-    if (idx >= 0) {
-      items[idx] = updated.item;
-      return;
+  function findEntregaItemIndex(arrecadacaoId, participanteId) {
+    const aid = Number(arrecadacaoId);
+    if (Number.isFinite(aid)) {
+      const byLead = items.findIndex((i) => Number(i.arrecadacaoId) === aid);
+      if (byLead >= 0) return byLead;
     }
-    const byPart = items.findIndex((i) => i.participanteId === updated.item.participanteId);
-    if (byPart >= 0) items[byPart] = updated.item;
+    const pid = Number(participanteId);
+    if (Number.isFinite(pid)) {
+      return items.findIndex((i) => Number(i.participanteId) === pid);
+    }
+    return -1;
+  }
+
+  function updateItemFromResponse(updated, localPatch = null) {
+    const next = updated?.item;
+    const idx = next
+      ? findEntregaItemIndex(next.arrecadacaoId, next.participanteId)
+      : localPatch
+        ? findEntregaItemIndex(localPatch.arrecadacaoId, localPatch.participanteId)
+        : -1;
+    if (idx < 0) return;
+    if (next) {
+      items[idx] = { ...items[idx], ...next };
+    } else if (localPatch) {
+      items[idx] = { ...items[idx], ...localPatch };
+    }
   }
 
   function renderSelectAllHeader(label, kind, beneficioKey = '') {
     const dataAttrs =
       kind === 'marca'
         ? 'data-kind="marca"'
-        : `data-kind="beneficio" data-beneficio="${escapeHtml(beneficioKey)}"`;
+        : kind === 'envioIngressos'
+          ? 'data-kind="envioIngressos"'
+          : `data-kind="beneficio" data-beneficio="${escapeHtml(beneficioKey)}"`;
     return `
       <div class="entregas-th-check-inner">
         <span class="entregas-th-check-label">${escapeHtml(label)}</span>
@@ -192,7 +225,10 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
         <th class="entregas-th-sticky-left entregas-th-plano">Plano</th>
         <th class="entregas-th-sticky-left entregas-th-espacos">Espaços</th>
         <th class="entregas-th-progress">Progresso</th>
-        <th class="entregas-th-ingressos">Ingressos cortesia</th>
+        <th class="entregas-th-ingressos">Qtd. ingressos</th>
+        <th class="entregas-th-envio-ingressos entregas-th-check">${renderSelectAllHeader('Envio de ingressos', 'envioIngressos')}</th>
+        <th class="entregas-th-camisetas-qty">Qtd. camisetas</th>
+        <th class="entregas-th-camisetas-tamanhos">Tamanhos</th>
         <th class="entregas-th-marca entregas-th-check">${renderSelectAllHeader('Envio da marca', 'marca')}</th>
         ${beneficioHeaders}
       </tr>`;
@@ -205,14 +241,82 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     });
   }
 
-  function renderIngressosCortesiaCell(item) {
+  function renderIngressosCell(item) {
     const disabled = bulkUpdating || saving.has(`${item.arrecadacaoId}:ingressos`);
-    const value = item.ingressosCortesia ?? 0;
+    const value = item.ingressosSolicitados ?? item.ingressosCortesia ?? 0;
+    const padrao = item.ingressosPadrao ?? 1;
+    const meta = item.ingressosPersonalizado
+      ? `<button type="button" class="entregas-ingressos-reset" data-id="${item.arrecadacaoId}"
+          title="Usar padrão do plano (${padrao})" aria-label="Restaurar padrão do plano">↺</button>`
+      : `<span class="entregas-ingressos-hint" title="Padrão do plano">padrão ${padrao}</span>`;
     return `
       <td class="entregas-cell-ingressos">
-        <input type="number" class="entregas-ingressos-input" data-kind="ingressos" data-id="${item.arrecadacaoId}"
-          min="0" step="1" inputmode="numeric" placeholder="0" value="${value}"
-          aria-label="Ingressos cortesia" ${disabled ? 'disabled' : ''} />
+        <div class="entregas-ingressos-wrap">
+          <input type="number" class="entregas-ingressos-input" data-kind="ingressos" data-id="${item.arrecadacaoId}"
+            min="0" step="1" inputmode="numeric" placeholder="${padrao}" value="${value}"
+            aria-label="Ingressos solicitados" ${disabled ? 'disabled' : ''} />
+          ${meta}
+        </div>
+      </td>`;
+  }
+
+  function renderCamisetasQtyCell(item) {
+    const count = effectiveCamisetasCount(item);
+    const qtyDisabled =
+      bulkUpdating || saving.has(`${item.arrecadacaoId}:camisetas-qty`) || saving.has(`${item.arrecadacaoId}:camisetas`);
+    const meta = item.camisetasPersonalizado
+      ? `<button type="button" class="entregas-camisetas-reset" data-id="${item.arrecadacaoId}"
+          title="Voltar a acompanhar a quantidade de ingressos" aria-label="Vincular quantidade à de ingressos">↺</button>`
+      : `<span class="entregas-camisetas-hint" title="Quantidade igual à de ingressos">= ingressos</span>`;
+    return `
+      <td class="entregas-cell-camisetas-qty">
+        <div class="entregas-camisetas-qty-wrap">
+          <input type="number" class="entregas-camisetas-qty-input" data-kind="camisetas-qty" data-id="${item.arrecadacaoId}"
+            min="0" step="1" inputmode="numeric" value="${count}"
+            aria-label="Quantidade de camisetas" ${qtyDisabled ? 'disabled' : ''} />
+          ${meta}
+        </div>
+      </td>`;
+  }
+
+  function renderCamisetasTamanhosCell(item) {
+    const count = effectiveCamisetasCount(item);
+    if (!count) {
+      return `<td class="entregas-cell-camisetas-tamanhos"><span class="cell-empty">—</span></td>`;
+    }
+    const sizesDisabled = bulkUpdating || saving.has(`${item.arrecadacaoId}:camisetas`);
+    const sizes = item.camisetasTamanhos || [];
+    const optionHtml = (selected) => {
+      const opts = ['<option value="">—</option>'];
+      for (const t of camisetaTamanhos) {
+        const sel = selected === t ? ' selected' : '';
+        opts.push(`<option value="${escapeHtml(t)}"${sel}>${escapeHtml(t)}</option>`);
+      }
+      return opts.join('');
+    };
+    const rows = Array.from({ length: count }, (_, idx) => {
+      const selected = sizes[idx] || '';
+      return `<label class="entregas-camiseta-row">
+        <span class="entregas-camiseta-idx">${idx + 1}</span>
+        <select class="entregas-camiseta-select" data-id="${item.arrecadacaoId}" data-index="${idx}"
+          aria-label="Tamanho da camiseta ${idx + 1}" ${sizesDisabled ? 'disabled' : ''}>
+          ${optionHtml(selected)}
+        </select>
+      </label>`;
+    }).join('');
+    return `
+      <td class="entregas-cell-camisetas-tamanhos">
+        <div class="entregas-camisetas-list">${rows}</div>
+      </td>`;
+  }
+
+  function renderEnvioIngressosCell(item) {
+    const disabled = bulkUpdating || saving.has(`${item.arrecadacaoId}:envioIngressos`);
+    return `
+      <td class="entregas-cell-envio-ingressos entrega-cell-check">
+        <input type="checkbox" data-kind="envioIngressos" data-id="${item.arrecadacaoId}"
+          aria-label="Envio de ingressos"
+          ${item.envioIngressos ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
       </td>`;
   }
 
@@ -242,7 +346,7 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
 
   function renderTable() {
     const visible = getVisibleItems();
-    const colCount = 6 + beneficiosColunas.length;
+    const colCount = 9 + beneficiosColunas.length;
 
     if (!visible.length) {
       els.table.innerHTML = `<tr class="entregas-empty-row"><td colspan="${colCount}" class="cell-empty">Nenhum lead fechado encontrado.</td></tr>`;
@@ -286,7 +390,10 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
             <td class="entregas-cell-sticky-left entregas-cell-plano">${plano}</td>
             <td class="entregas-cell-sticky-left entregas-cell-espaco">${espacos}</td>
             <td class="entregas-cell-progress">${progress}</td>
-            ${renderIngressosCortesiaCell(item)}
+            ${renderIngressosCell(item)}
+            ${renderEnvioIngressosCell(item)}
+            ${renderCamisetasQtyCell(item)}
+            ${renderCamisetasTamanhosCell(item)}
             ${renderMarcaCell(item)}
             ${beneficioCells}
           </tr>`;
@@ -312,11 +419,28 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     });
 
     els.table.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.addEventListener('click', (e) => e.stopPropagation());
       input.addEventListener('change', () => handleToggle(input));
     });
 
     els.table.querySelectorAll('.entregas-ingressos-input').forEach((input) => {
-      input.addEventListener('change', () => void handleIngressosCortesia(input));
+      input.addEventListener('change', () => void handleIngressosSolicitados(input));
+    });
+
+    els.table.querySelectorAll('.entregas-ingressos-reset').forEach((btn) => {
+      btn.addEventListener('click', () => void handleIngressosPadrao(btn));
+    });
+
+    els.table.querySelectorAll('.entregas-camisetas-qty-input').forEach((input) => {
+      input.addEventListener('change', () => void handleCamisetasSolicitadas(input));
+    });
+
+    els.table.querySelectorAll('.entregas-camisetas-reset').forEach((btn) => {
+      btn.addEventListener('click', () => void handleCamisetasPadrao(btn));
+    });
+
+    els.table.querySelectorAll('.entregas-camiseta-select').forEach((select) => {
+      select.addEventListener('change', () => void handleCamisetasChange(select));
     });
 
     els.thead?.querySelectorAll('.entregas-select-all').forEach((btn) => {
@@ -329,7 +453,12 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
 
     const kind = btn.dataset.kind;
     const beneficio = btn.dataset.beneficio;
-    const label = kind === 'marca' ? 'Envio da marca' : beneficioLabel(beneficio);
+    const label =
+      kind === 'marca'
+        ? 'Envio da marca'
+        : kind === 'envioIngressos'
+          ? 'Envio de ingressos'
+          : beneficioLabel(beneficio);
     const eligible = getEligibleItems(kind, beneficio);
     const pending = getPendingEligibleItems(kind, beneficio);
 
@@ -349,11 +478,19 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     const errors = [];
     for (const item of pending) {
       const saveKey =
-        kind === 'marca' ? `${item.arrecadacaoId}:marca` : `${item.arrecadacaoId}:${beneficio}`;
+        kind === 'marca'
+          ? `${item.arrecadacaoId}:marca`
+          : kind === 'envioIngressos'
+            ? `${item.arrecadacaoId}:envioIngressos`
+            : `${item.arrecadacaoId}:${beneficio}`;
       saving.add(saveKey);
       try {
         const payload =
-          kind === 'marca' ? { envioMarca: true } : { beneficio, concluido: true };
+          kind === 'marca'
+            ? { envioMarca: true }
+            : kind === 'envioIngressos'
+              ? { envioIngressos: true }
+              : { beneficio, concluido: true };
         const updated = await patchProducaoEntrega(item.arrecadacaoId, payload);
         updateItemFromResponse(updated);
       } catch (err) {
@@ -373,7 +510,7 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     }
   }
 
-  async function handleIngressosCortesia(input) {
+  async function handleIngressosSolicitados(input) {
     if (bulkUpdating) return;
 
     const arrecadacaoId = Number(input.dataset.id);
@@ -384,13 +521,13 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     if (!item) return;
 
     const raw = input.value.trim();
-    const parsed = raw === '' ? 0 : Number(raw);
+    const parsed = raw === '' ? item.ingressosPadrao ?? 0 : Number(raw);
     if (!Number.isFinite(parsed) || parsed < 0) {
-      input.value = String(item.ingressosCortesia ?? 0);
+      input.value = String(item.ingressosSolicitados ?? 0);
       return;
     }
     const next = Math.floor(parsed);
-    const current = item.ingressosCortesia ?? 0;
+    const current = item.ingressosSolicitados ?? 0;
     if (next === current) {
       input.value = String(current);
       return;
@@ -401,8 +538,9 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     const previous = current;
 
     try {
-      const updated = await patchProducaoEntrega(arrecadacaoId, { ingressosCortesia: next });
+      const updated = await patchProducaoEntrega(arrecadacaoId, { ingressosSolicitados: next });
       updateItemFromResponse(updated);
+      onEntregaCamisetasUpdated?.();
       saving.delete(saveKey);
       renderTable();
     } catch (err) {
@@ -410,6 +548,126 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
       alert(err.message || 'Não foi possível salvar.');
       input.disabled = false;
       saving.delete(saveKey);
+    }
+  }
+
+  async function handleCamisetasSolicitadas(input) {
+    if (bulkUpdating) return;
+
+    const arrecadacaoId = Number(input.dataset.id);
+    const saveKey = `${arrecadacaoId}:camisetas-qty`;
+    if (saving.has(saveKey)) return;
+
+    const item = items.find((i) => i.arrecadacaoId === arrecadacaoId);
+    if (!item) return;
+
+    const raw = input.value.trim();
+    const parsed = raw === '' ? 0 : Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      input.value = String(effectiveCamisetasCount(item));
+      return;
+    }
+    const next = Math.floor(parsed);
+    const current = effectiveCamisetasCount(item);
+    if (next === current) {
+      input.value = String(current);
+      return;
+    }
+
+    saving.add(saveKey);
+    input.disabled = true;
+    const previous = current;
+
+    try {
+      const updated = await patchProducaoEntrega(arrecadacaoId, { camisetasSolicitadas: next });
+      updateItemFromResponse(updated);
+      onEntregaCamisetasUpdated?.();
+      saving.delete(saveKey);
+      renderTable();
+    } catch (err) {
+      input.value = String(previous);
+      alert(err.message || 'Não foi possível salvar.');
+      input.disabled = false;
+      saving.delete(saveKey);
+    }
+  }
+
+  async function handleCamisetasPadrao(btn) {
+    if (bulkUpdating) return;
+    const arrecadacaoId = Number(btn.dataset.id);
+    const saveKey = `${arrecadacaoId}:camisetas-qty`;
+    if (saving.has(saveKey)) return;
+    const item = items.find((i) => i.arrecadacaoId === arrecadacaoId);
+    if (!item?.camisetasPersonalizado) return;
+
+    saving.add(saveKey);
+    btn.disabled = true;
+    try {
+      const updated = await patchProducaoEntrega(arrecadacaoId, { camisetasUsarPadrao: true });
+      updateItemFromResponse(updated);
+      onEntregaCamisetasUpdated?.();
+      renderTable();
+    } catch (err) {
+      alert(err.message || 'Não foi possível salvar.');
+    } finally {
+      saving.delete(saveKey);
+    }
+  }
+
+  async function handleIngressosPadrao(btn) {
+    if (bulkUpdating) return;
+    const arrecadacaoId = Number(btn.dataset.id);
+    const saveKey = `${arrecadacaoId}:ingressos`;
+    if (saving.has(saveKey)) return;
+    const item = items.find((i) => i.arrecadacaoId === arrecadacaoId);
+    if (!item?.ingressosPersonalizado) return;
+
+    saving.add(saveKey);
+    btn.disabled = true;
+    try {
+      const updated = await patchProducaoEntrega(arrecadacaoId, { ingressosUsarPadrao: true });
+      updateItemFromResponse(updated);
+      onEntregaCamisetasUpdated?.();
+      renderTable();
+    } catch (err) {
+      alert(err.message || 'Não foi possível salvar.');
+    } finally {
+      saving.delete(saveKey);
+    }
+  }
+
+  function readCamisetasFromRow(arrecadacaoId) {
+    const selects = els.table?.querySelectorAll(
+      `.entregas-camiseta-select[data-id="${arrecadacaoId}"]`,
+    );
+    if (!selects?.length) return [];
+    return [...selects].map((el) => el.value.trim());
+  }
+
+  async function handleCamisetasChange(select) {
+    if (bulkUpdating) return;
+    const arrecadacaoId = Number(select.dataset.id);
+    const saveKey = `${arrecadacaoId}:camisetas`;
+    if (saving.has(saveKey)) return;
+
+    const item = items.find((i) => i.arrecadacaoId === arrecadacaoId);
+    if (!item) return;
+
+    const next = readCamisetasFromRow(arrecadacaoId);
+    const prev = item.camisetasTamanhos || [];
+    if (next.join('|') === prev.join('|')) return;
+
+    saving.add(saveKey);
+    renderTable();
+    try {
+      const updated = await patchProducaoEntrega(arrecadacaoId, { camisetasTamanhos: next });
+      updateItemFromResponse(updated);
+      onEntregaCamisetasUpdated?.();
+    } catch (err) {
+      alert(err.message || 'Não foi possível salvar.');
+    } finally {
+      saving.delete(saveKey);
+      renderTable();
     }
   }
 
@@ -421,7 +679,12 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     const arrecadacaoId = Number(input.dataset.id);
     const kind = input.dataset.kind;
     const beneficio = input.dataset.beneficio;
-    const saveKey = kind === 'marca' ? `${arrecadacaoId}:marca` : `${arrecadacaoId}:${beneficio}`;
+    const saveKey =
+      kind === 'marca'
+        ? `${arrecadacaoId}:marca`
+        : kind === 'envioIngressos'
+          ? `${arrecadacaoId}:envioIngressos`
+          : `${arrecadacaoId}:${beneficio}`;
 
     if (saving.has(saveKey)) {
       input.checked = !input.checked;
@@ -436,9 +699,22 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
       const payload =
         kind === 'marca'
           ? { envioMarca: input.checked }
-          : { beneficio, concluido: input.checked };
+          : kind === 'envioIngressos'
+            ? { envioIngressos: input.checked }
+            : { beneficio, concluido: input.checked };
+      const item = items.find((i) => Number(i.arrecadacaoId) === arrecadacaoId);
+      const localPatch =
+        kind === 'marca'
+          ? { arrecadacaoId, participanteId: item?.participanteId, envioMarca: input.checked }
+          : kind === 'envioIngressos'
+            ? {
+                arrecadacaoId,
+                participanteId: item?.participanteId,
+                envioIngressos: input.checked,
+              }
+            : null;
       const updated = await patchProducaoEntrega(arrecadacaoId, payload);
-      updateItemFromResponse(updated);
+      updateItemFromResponse(updated, localPatch);
       saving.delete(saveKey);
       renderTable();
     } catch (err) {
@@ -454,6 +730,7 @@ export function initProducaoEntregasModule({ onOpenLead } = {}) {
     items = data.items || [];
     beneficiosDef = data.beneficiosDef || [];
     beneficiosColunas = data.beneficiosColunas || [];
+    camisetaTamanhos = data.camisetaTamanhos || ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG', '3G'];
     renderHeader();
     renderFilterPlanos();
     renderTable();

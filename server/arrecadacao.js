@@ -451,7 +451,86 @@ export async function syncAllArrecadacaoFromEspacos(pool) {
 
 function scopeTipoClause(scope) {
   if (scope === 'artistico') return " AND a.tipo = 'artistico'";
+  if (scope === 'alimentacao') return " AND a.tipo = 'alimentacao'";
   return " AND a.tipo IN ('espaco', 'patrocinio')";
+}
+
+const CANDIDATURA_CLASSIFICACAO_LABELS = {
+  pendente: 'Pendente',
+  em_analise: 'Em análise',
+  aprovado: 'Aprovado',
+  reprovado: 'Reprovado',
+};
+
+function parseJsonField(value, fallback) {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+function summarizeFormRespostas(campos, respostas) {
+  const fields = Array.isArray(campos) ? campos : [];
+  const data = respostas && typeof respostas === 'object' ? respostas : {};
+  const parts = [];
+  for (const campo of fields) {
+    if (!campo?.id) continue;
+    const raw = data[campo.id];
+    if (raw == null || raw === '') continue;
+    const label = String(campo.label || campo.id).trim();
+    let text = Array.isArray(raw) ? raw.join(', ') : String(raw);
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    if (text.length > 56) text = `${text.slice(0, 55)}…`;
+    parts.push(`${label}: ${text}`);
+    if (parts.length >= 8) break;
+  }
+  return parts.join(' · ');
+}
+
+async function attachAlimentacaoCandidaturas(pool, eventoId, items) {
+  if (!items.length) return items;
+  const ids = items.map((i) => i.id).filter((id) => Number.isInteger(id) && id > 0);
+  if (!ids.length) return items;
+
+  const placeholders = ids.map(() => '?').join(', ');
+  const [rows] = await pool.query(
+    `SELECT r.arrecadacao_id, r.classificacao, r.respostas, r.data_ativacao, r.nota_interna,
+            f.nome AS formulario_nome, f.campos
+     FROM marketing_formulario_respostas r
+     JOIN marketing_formularios f ON f.id = r.formulario_id
+     WHERE f.evento_id = ? AND r.arrecadacao_id IN (${placeholders})
+     ORDER BY r.created_at DESC, r.id DESC`,
+    [eventoId, ...ids],
+  );
+
+  const byLead = new Map();
+  for (const row of rows) {
+    const leadId = Number(row.arrecadacao_id);
+    if (!leadId || byLead.has(leadId)) continue;
+    const campos = parseJsonField(row.campos, []);
+    const respostas = parseJsonField(row.respostas, {});
+    const classificacao = row.classificacao || 'pendente';
+    byLead.set(leadId, {
+      classificacao,
+      classificacaoLabel: CANDIDATURA_CLASSIFICACAO_LABELS[classificacao] || classificacao,
+      formularioNome: row.formulario_nome || '',
+      condicoesResumo: summarizeFormRespostas(campos, respostas),
+      dataAtivacao: row.data_ativacao ? new Date(row.data_ativacao).toISOString() : null,
+      notaInterna: row.nota_interna || '',
+    });
+  }
+
+  return items.map((item) => ({
+    ...item,
+    candidatura: byLead.get(item.id) || null,
+  }));
 }
 
 function parseLeadTipo(raw) {
@@ -497,7 +576,11 @@ export async function listArrecadacao(pool, eventoId, { scope } = {}) {
      ORDER BY p.nome, a.tipo, a.descricao`,
     [eventoId],
   );
-  return rows.map(rowToArrecadacao);
+  let items = rows.map(rowToArrecadacao);
+  if (scope === 'alimentacao') {
+    items = await attachAlimentacaoCandidaturas(pool, eventoId, items);
+  }
+  return items;
 }
 
 function rowToEspacoDisponivel(row) {

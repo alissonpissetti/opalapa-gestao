@@ -16,7 +16,16 @@
 
     <section id="login-screen" class="login-screen hidden" aria-label="Login">
       <div class="login-card">
-        <div class="login-brand">Opalapa <span>· Gestão</span></div>
+        <div class="login-brand">
+          <img
+            class="login-logo"
+            src="/logo-opalapa.png"
+            width="140"
+            height="140"
+            alt="Opalapa"
+          />
+          <p class="login-brand-caption">Gestão do evento</p>
+        </div>
         <h1>Entrar</h1>
         <p class="login-subtitle" id="login-subtitle">Entre com e-mail ou celular e senha.</p>
 
@@ -81,7 +90,7 @@
                 pattern="[0-9]{6}"
               />
             </div>
-            <button class="btn" type="button" id="login-sms-send">Enviar código</button>
+            <button class="btn primary login-submit" type="button" id="login-sms-send">Enviar código</button>
             <button class="btn primary login-submit hidden" type="submit" id="login-sms-submit">Entrar com código</button>
           </form>
         </div>
@@ -121,7 +130,7 @@
                 minlength="6"
               />
             </div>
-            <button class="btn" type="button" id="login-forgot-send">Enviar código</button>
+            <button class="btn primary login-submit" type="button" id="login-forgot-send">Enviar código</button>
             <button class="btn primary login-submit hidden" type="submit" id="login-forgot-submit">Redefinir senha</button>
             <p class="login-forgot-wrap">
               <a href="#" id="login-forgot-back">Voltar ao login</a>
@@ -160,6 +169,7 @@
               <div class="nav-dropdown-menu" role="menu">
                 <a href="#arrecadacao" class="nav-link" data-view="arrecadacao" id="nav-arrecadacao-lista" role="menuitem">Leads comerciais</a>
                 <a href="#artistico" class="nav-link" data-view="artistico" id="nav-artistico" role="menuitem">Leads artísticos</a>
+                <a href="#alimentacao" class="nav-link" data-view="alimentacao" id="nav-alimentacao" role="menuitem">Leads alimentação</a>
                 <a href="#marketing" class="nav-link" data-view="marketing" id="nav-marketing" role="menuitem">Marketing</a>
                 <a href="#tarefas" class="nav-link" data-view="tarefas" id="nav-tarefas" role="menuitem">Tarefas</a>
                 <a href="#arrecadacao-planos" class="nav-link" data-view="arrecadacao-planos" id="nav-arrecadacao-planos" role="menuitem">Planos e produtos</a>
@@ -178,6 +188,7 @@
                 <a href="#cronologia" class="nav-link" data-view="cronologia" id="nav-cronologia" role="menuitem">Cronologia</a>
                 <a href="#premiacoes" class="nav-link" data-view="premiacoes" id="nav-premiacoes" role="menuitem">Premiações</a>
                 <a href="#entregas" class="nav-link" data-view="entregas" id="nav-entregas" role="menuitem">Entregas</a>
+                <a href="#materiais" class="nav-link" data-view="materiais" id="nav-materiais" role="menuitem">Materiais</a>
               </div>
             </div>
           </div>
@@ -539,6 +550,7 @@
               <th>Valor</th>
               <th>Espaços</th>
               <th>Benefícios</th>
+              <th>Ingressos</th>
               <th>Leads</th>
               <th>Status</th>
               <th>Ações</th>
@@ -582,6 +594,44 @@
               </tr>
             </thead>
             <tbody id="artistico-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <main id="view-alimentacao" class="page view hidden">
+      <div class="report-head">
+        <div>
+          <h1>Alimentação</h1>
+          <p class="subtitle">Candidatos da praça de alimentação — status no funil, classificação da candidatura e condições informadas no formulário.</p>
+        </div>
+        <div class="report-head-actions report-head-actions--split">
+          <button class="tbtn primary" type="button" id="btn-alimentacao-new">Novo lead</button>
+          <button class="tbtn" type="button" id="btn-alimentacao-toggle-overview" aria-pressed="true">Ocultar resumo</button>
+          <button class="tbtn" type="button" id="btn-funil-config-alimentacao">Configurar funil</button>
+        </div>
+      </div>
+
+      <div class="alimentacao-overview" id="alimentacao-overview">
+        <div class="stats alimentacao-stats" id="alimentacao-stats"></div>
+      </div>
+      <p class="report-summary" id="alimentacao-summary"></p>
+
+      <div id="alimentacao-lista-view">
+        <div class="table-wrap">
+          <table class="table-alimentacao">
+            <thead>
+              <tr>
+                <th>Contato</th>
+                <th>Estabelecimento</th>
+                <th>Status</th>
+                <th>Candidatura</th>
+                <th>Condições</th>
+                <th>Obs</th>
+                <th class="arr-th-acoes"></th>
+              </tr>
+            </thead>
+            <tbody id="alimentacao-table"></tbody>
           </table>
         </div>
       </div>
@@ -719,6 +769,11 @@
             </div>
 
             <label class="marketing-origem-check marketing-com-saldo-check">
+              <input type="checkbox" id="marketing-com-somente-vendidos" />
+              Somente leads vendidos / fechados (etapa de venda do funil)
+            </label>
+
+            <label class="marketing-origem-check marketing-com-saldo-check">
               <input type="checkbox" id="marketing-com-somente-saldo" checked />
               Somente leads com valor em aberto &gt; 0
             </label>
@@ -727,6 +782,7 @@
               <label for="marketing-com-template">Template da mensagem</label>
               <textarea id="marketing-com-template" class="marketing-tool-textarea" rows="12"></textarea>
               <p class="field-hint" id="marketing-com-vars-hint"></p>
+              <p class="field-hint">Depois de editar o texto, use <strong>Aplicar à lista</strong> para regerar a mensagem de cada destinatário (variáveis substituídas por lead).</p>
             </div>
 
             <div class="marketing-com-interval">
@@ -742,8 +798,39 @@
 
             <div class="marketing-tool-actions marketing-com-actions-top">
               <button class="tbtn" type="button" id="btn-marketing-com-save">Salvar rascunho</button>
+              <button class="tbtn" type="button" id="btn-marketing-com-apply-template" disabled>Aplicar à lista</button>
               <button class="tbtn primary" type="button" id="btn-marketing-com-preview">Gerar prévia</button>
             </div>
+          </div>
+
+          <div class="marketing-com-add-recipient hidden" id="marketing-com-add-recipient">
+            <p class="marketing-com-add-title">Adicionar destinatário</p>
+            <div class="marketing-com-add-tabs" role="tablist">
+              <button type="button" class="tbtn marketing-com-add-tab active" data-add-mode="lead" role="tab">Lead cadastrado</button>
+              <button type="button" class="tbtn marketing-com-add-tab" data-add-mode="manual" role="tab">Contato avulso</button>
+            </div>
+            <div class="marketing-com-add-panel" id="marketing-com-add-lead-panel">
+              <label class="marketing-com-add-label" for="marketing-com-add-lead">Lead</label>
+              <select id="marketing-com-add-lead">
+                <option value="">Clique em atualizar lista de leads</option>
+              </select>
+              <button class="tbtn" type="button" id="btn-marketing-com-refresh-leads">Atualizar lista de leads</button>
+            </div>
+            <div class="marketing-com-add-panel hidden" id="marketing-com-add-manual-panel">
+              <div class="field">
+                <label for="marketing-com-add-nome">Nome / empresa</label>
+                <input id="marketing-com-add-nome" type="text" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="marketing-com-add-contato">Nome do contato (opcional)</label>
+                <input id="marketing-com-add-contato" type="text" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="marketing-com-add-telefone">WhatsApp</label>
+                <input id="marketing-com-add-telefone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(11) 99999-9999" />
+              </div>
+            </div>
+            <button class="tbtn primary" type="button" id="btn-marketing-com-add-item">Incluir na lista</button>
           </div>
 
           <div class="marketing-com-preview hidden" id="marketing-com-preview">
@@ -754,6 +841,7 @@
                 <button class="tbtn" type="button" id="btn-marketing-com-clear">Limpar lista</button>
               </div>
             </div>
+
             <div class="table-wrap marketing-com-table-wrap">
               <table class="marketing-com-preview-table">
                 <thead>
@@ -1081,6 +1169,81 @@
             </tr>
           </thead>
           <tbody id="premiacoes-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <main id="view-materiais" class="page view hidden producao-materiais-page">
+      <div class="report-head">
+        <div>
+          <h1>Materiais</h1>
+          <p class="subtitle">Lotes por fornecedor. Itens podem ser editados, duplicados ou movidos entre lotes (botão Mover ou campo Lote ao editar).</p>
+        </div>
+        <button class="tbtn primary" type="button" id="btn-materiais-new-lote">Novo lote</button>
+      </div>
+      <div class="report-filters materiais-filters">
+        <div class="field-inline">
+          <label for="materiais-lote-select">Lote ativo</label>
+          <select id="materiais-lote-select" disabled>
+            <option value="">Nenhum lote</option>
+          </select>
+        </div>
+        <button class="tbtn" type="button" id="btn-materiais-edit-lote" disabled>Editar lote</button>
+      </div>
+      <div class="materiais-lote-card hidden" id="materiais-lote-card">
+        <div class="materiais-lote-card__head">
+          <div class="materiais-lote-card__info">
+            <strong id="materiais-lote-card-title"></strong>
+            <span class="materiais-lote-status-badge hidden" id="materiais-lote-card-status-badge" aria-hidden="true"></span>
+            <p class="materiais-lote-card__fornecedor" id="materiais-lote-card-fornecedor"></p>
+          </div>
+          <div class="field-inline materiais-lote-status-field">
+            <label for="materiais-lote-status">Status</label>
+            <select id="materiais-lote-status" class="materiais-lote-status-select" disabled>
+              <option value="em_criacao">Em criação</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="materiais-actions">
+        <button class="tbtn" type="button" id="btn-materiais-import-entregas" disabled>Importar camisetas (entregas)</button>
+        <button class="tbtn" type="button" id="btn-materiais-site-item" disabled>Adicionar item</button>
+        <button class="tbtn" type="button" id="btn-materiais-pedido-texto" disabled>Texto para gráfica</button>
+      </div>
+      <p class="report-summary" id="materiais-summary"></p>
+      <p class="field-hint" id="materiais-meta"></p>
+      <h2 class="materiais-section-title">Resumo para o fornecedor</h2>
+      <div class="table-wrap">
+        <table class="table-materiais">
+          <thead>
+            <tr>
+              <th>Categoria</th>
+              <th>Produto</th>
+              <th>Especificação</th>
+              <th>Un.</th>
+              <th class="col-num">Qtd</th>
+            </tr>
+          </thead>
+          <tbody id="materiais-resumo-table"></tbody>
+        </table>
+      </div>
+      <h2 class="materiais-section-title">Detalhamento</h2>
+      <div class="table-wrap">
+        <table class="table-materiais">
+          <thead>
+            <tr>
+              <th>Categoria</th>
+              <th>Origem</th>
+              <th>Referência</th>
+              <th>Produto</th>
+              <th>Esp.</th>
+              <th>Un.</th>
+              <th class="col-num">Qtd</th>
+              <th>Detalhes</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="materiais-itens-table"></tbody>
         </table>
       </div>
     </main>
@@ -1831,6 +1994,11 @@
           <input id="arr-produto-edit-valor" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00" />
           <p class="field-hint">Preço fixo da cota de patrocínio.</p>
         </div>
+        <div class="field">
+          <label for="arr-produto-edit-ingressos">Ingressos cortesia (padrão)</label>
+          <input id="arr-produto-edit-ingressos" type="number" min="0" step="1" inputmode="numeric" autocomplete="off" placeholder="1" />
+          <p class="field-hint">Quantidade sugerida na tela de entregas (ex.: Bronze 1, Prata 2, Ouro 4). Pode ser ajustada por patrocinador.</p>
+        </div>
         <fieldset class="arr-produto-fieldset">
           <legend>Tipos de espaço permitidos</legend>
           <div class="arr-produto-checkgrid" id="arr-produto-edit-espacos"></div>
@@ -2136,6 +2304,167 @@
           <button class="btn" type="button" id="cronologia-modal-cancel">Cancelar</button>
           <button class="btn danger hidden" type="button" id="cronologia-modal-delete">Excluir</button>
           <button class="btn primary" type="button" id="cronologia-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="materiais-lote-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="materiais-lote-modal-title">
+        <h2 id="materiais-lote-modal-title">Lote</h2>
+        <p class="form-errors hidden" id="materiais-lote-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="materiais-lote-modal-fornecedor">Fornecedor</label>
+          <input id="materiais-lote-modal-fornecedor" type="text" placeholder="Ex.: Gráfica XYZ, Confecção ABC" required />
+        </div>
+        <div class="field">
+          <label for="materiais-lote-modal-nome">Nome do lote</label>
+          <input id="materiais-lote-modal-nome" type="text" placeholder="Ex.: Lonas fachada, Camisetas 1ª tiragem" required />
+        </div>
+        <div class="field">
+          <label for="materiais-lote-modal-status">Status</label>
+          <select id="materiais-lote-modal-status">
+            <option value="em_criacao">Em criação</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="materiais-lote-modal-notas">Observações <span class="field-optional">(opcional)</span></label>
+          <textarea id="materiais-lote-modal-notas" rows="2" placeholder="Prazo, fornecedor, observações…"></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="materiais-lote-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="materiais-lote-modal-delete">Excluir lote</button>
+          <button class="btn primary" type="button" id="materiais-lote-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="materiais-pedido-modal-bg">
+      <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="materiais-pedido-modal-title">
+        <h2 id="materiais-pedido-modal-title">Texto para orçamento / produção</h2>
+        <p class="msub" id="materiais-pedido-modal-sub">Copie e cole no e-mail para a gráfica ou fornecedor.</p>
+        <p class="form-errors hidden" id="materiais-pedido-modal-errors" role="alert"></p>
+        <div class="field-row materiais-pedido-options">
+          <div class="field">
+            <label for="materiais-pedido-modal-escopo">Escopo</label>
+            <select id="materiais-pedido-modal-escopo">
+              <option value="lote">Lote ativo</option>
+              <option value="todos">Todos os lotes do evento</option>
+            </select>
+          </div>
+          <div class="field field--checkbox materiais-pedido-check">
+            <label class="checkbox-label">
+              <input type="checkbox" id="materiais-pedido-modal-detalhe" checked />
+              Incluir detalhamento (por destinatário / referência)
+            </label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="materiais-pedido-modal-texto">Texto compilado</label>
+          <textarea id="materiais-pedido-modal-texto" class="materiais-pedido-textarea" rows="18" readonly></textarea>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="materiais-pedido-modal-close">Fechar</button>
+          <button class="btn" type="button" id="materiais-pedido-modal-refresh">Atualizar texto</button>
+          <button class="btn primary" type="button" id="materiais-pedido-modal-copy">Copiar texto</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="materiais-move-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="materiais-move-modal-title">
+        <h2 id="materiais-move-modal-title">Mover item</h2>
+        <p class="msub" id="materiais-move-modal-sub"></p>
+        <p class="form-errors hidden" id="materiais-move-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="materiais-move-modal-lote">Lote de destino</label>
+          <select id="materiais-move-modal-lote" required></select>
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="materiais-move-modal-cancel">Cancelar</button>
+          <button class="btn primary" type="button" id="materiais-move-modal-confirm">Mover</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="materiais-item-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="materiais-item-modal-title">
+        <h2 id="materiais-item-modal-title">Item do lote</h2>
+        <p class="form-errors hidden" id="materiais-item-modal-errors" role="alert"></p>
+        <p class="field-hint hidden" id="materiais-item-modal-detach-hint">
+          Este item veio das entregas. Ao salvar, ele passa a ser manual e não será mais atualizado automaticamente pela tela Entregas.
+        </p>
+        <div class="field">
+          <label for="materiais-item-modal-lote">Lote de produção</label>
+          <select id="materiais-item-modal-lote" required></select>
+          <p class="field-hint">Troque o lote para mover o item para outro fornecedor.</p>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="materiais-item-modal-categoria">Categoria</label>
+            <select id="materiais-item-modal-categoria" required>
+              <option value="camiseta">Camiseta</option>
+              <option value="lona">Lona / banner</option>
+              <option value="adesivo">Adesivo</option>
+              <option value="impressao_3d">Impressão 3D</option>
+              <option value="textil">Têxtil / costura</option>
+              <option value="sinalizacao">Sinalização</option>
+              <option value="brinde">Brinde / kit</option>
+              <option value="outro">Outro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="materiais-item-modal-unidade">Unidade</label>
+            <select id="materiais-item-modal-unidade" required>
+              <option value="un">un</option>
+              <option value="m²">m²</option>
+              <option value="m">m</option>
+              <option value="par">par</option>
+              <option value="kit">kit</option>
+              <option value="rolo">rolo</option>
+              <option value="folha">folha</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="materiais-item-modal-referencia">Pedido / cliente / local <span class="field-optional">(opcional)</span></label>
+          <input id="materiais-item-modal-referencia" type="text" placeholder="Ex.: Site #1234, Stand 12, Fachada principal" />
+        </div>
+        <div class="field">
+          <label for="materiais-item-modal-modelo">Produto / modelo</label>
+          <input id="materiais-item-modal-modelo" type="text" placeholder="Ex.: Lona 440g, Adesivo recorte, Camiseta dry-fit" required />
+        </div>
+        <div class="field-row">
+          <div class="field" id="materiais-item-tamanho-wrap">
+            <label for="materiais-item-modal-tamanho">Tamanho (camiseta)</label>
+            <select id="materiais-item-modal-tamanho"></select>
+          </div>
+          <div class="field" id="materiais-item-dimensoes-wrap">
+            <label for="materiais-item-modal-dimensoes">Dimensões</label>
+            <input id="materiais-item-modal-dimensoes" type="text" placeholder="Ex.: 3×1 m, A3, 20×30 cm" />
+          </div>
+          <div class="field">
+            <label for="materiais-item-modal-quantidade">Quantidade</label>
+            <input id="materiais-item-modal-quantidade" type="number" min="1" step="1" value="1" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="materiais-item-modal-material">Material <span class="field-optional">(opcional)</span></label>
+            <input id="materiais-item-modal-material" type="text" placeholder="Ex.: PVC, PLA, algodão" />
+          </div>
+          <div class="field">
+            <label for="materiais-item-modal-cor">Cor / acabamento <span class="field-optional">(opcional)</span></label>
+            <input id="materiais-item-modal-cor" type="text" placeholder="Ex.: Branco fosco" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="materiais-item-modal-obs">Observação <span class="field-optional">(opcional)</span></label>
+          <input id="materiais-item-modal-obs" type="text" placeholder="Arte, arquivo, prazo, etc." />
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="materiais-item-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="materiais-item-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="materiais-item-modal-save">Salvar</button>
         </div>
       </div>
     </div>
