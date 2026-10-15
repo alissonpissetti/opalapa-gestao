@@ -165,6 +165,17 @@ function applySituacaoFilter(list, filter, etapas = []) {
   return list.filter((item) => !isPerdaStatusForEtapas(item.status, etapas));
 }
 
+function candidaturaClassificacaoKey(item) {
+  if (!item?.candidatura) return 'sem';
+  return item.candidatura.classificacao || 'pendente';
+}
+
+function applyAlimentacaoCandidaturaFilter(list, filter) {
+  if (!filter || filter === 'todos') return list;
+  if (filter === 'sem') return list.filter((item) => !item.candidatura);
+  return list.filter((item) => candidaturaClassificacaoKey(item) === filter);
+}
+
   async function notifyEspacosDataChanged(item) {
     if (item?.tipo === 'espaco') {
       await onEspacosDataChanged?.();
@@ -506,6 +517,8 @@ export function initArrecadacaoModule(
   let viewMode = 'lista';
   let pagamentoFilter = 'todos';
   let situacaoFilter = 'ativos';
+  let alimentacaoSituacaoFilter = 'ativos';
+  let alimentacaoCandidaturaFilter = 'todos';
   let financialFilter = localStorage.getItem('arrecadacao-financial-filter') === 'pendentes' ? 'pendentes' : 'all';
   const overviewVisible = {
     comercial: true,
@@ -518,7 +531,12 @@ export function initArrecadacaoModule(
   let tableProdutoSaving = false;
 
   function visibleItems() {
-    if (isStandaloneLeadScope(leadScope)) return items;
+    if (isAlimentacaoScope(leadScope)) {
+      let list = applySituacaoFilter(items, alimentacaoSituacaoFilter, funilEtapas);
+      list = applyAlimentacaoCandidaturaFilter(list, alimentacaoCandidaturaFilter);
+      return list;
+    }
+    if (isArtisticoScope(leadScope)) return items;
     let list = applySituacaoFilter(items, situacaoFilter, funilEtapas);
     list = applyPagamentoFilter(list, pagamentoFilter);
     return list;
@@ -554,6 +572,60 @@ export function initArrecadacaoModule(
     refreshFilteredView();
   }
 
+  function syncAlimentacaoFilterUi() {
+    document.querySelectorAll('[data-alim-situacao]').forEach((btn) => {
+      const active = btn.dataset.alimSituacao === alimentacaoSituacaoFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-alim-candidatura]').forEach((btn) => {
+      const active = btn.dataset.alimCandidatura === alimentacaoCandidaturaFilter;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function setAlimentacaoSituacaoFilter(value) {
+    const allowed = new Set(['ativos', 'cancelados', 'todos']);
+    alimentacaoSituacaoFilter = allowed.has(value) ? value : 'ativos';
+    localStorage.setItem('alimentacao-situacao-filter', alimentacaoSituacaoFilter);
+    syncAlimentacaoFilterUi();
+    refreshFilteredView();
+  }
+
+  function setAlimentacaoCandidaturaFilter(value) {
+    const allowed = new Set([
+      'todos',
+      'pendente',
+      'em_analise',
+      'aprovado',
+      'reprovado',
+      'sem',
+    ]);
+    alimentacaoCandidaturaFilter = allowed.has(value) ? value : 'todos';
+    localStorage.setItem('alimentacao-candidatura-filter', alimentacaoCandidaturaFilter);
+    syncAlimentacaoFilterUi();
+    refreshFilteredView();
+  }
+
+  function alimentacaoFilterHint(displayCount) {
+    const hints = [];
+    if (alimentacaoSituacaoFilter === 'ativos') hints.push('cancelados ocultos');
+    else if (alimentacaoSituacaoFilter === 'cancelados') hints.push('só cancelados');
+    if (alimentacaoCandidaturaFilter !== 'todos') {
+      const labels = {
+        pendente: 'candidatura pendente',
+        em_analise: 'em análise',
+        aprovado: 'aprovados',
+        reprovado: 'reprovados',
+        sem: 'sem formulário',
+      };
+      hints.push(labels[alimentacaoCandidaturaFilter] || 'filtro de candidatura');
+    }
+    if (!hints.length || displayCount === items.length) return '';
+    return ` · ${hints.join(' · ')}`;
+  }
+
   function listFilterHint(displayCount) {
     const hints = [];
     if (situacaoFilter === 'ativos') hints.push('cancelados ocultos');
@@ -576,6 +648,7 @@ export function initArrecadacaoModule(
     }
     applyOverviewLayout(leadScope);
     syncFinancialFilterUi();
+    if (isAlimentacaoScope(leadScope)) syncAlimentacaoFilterUi();
   }
 
   function isGroupFinanciallyPending(group) {
@@ -1596,7 +1669,7 @@ export function initArrecadacaoModule(
       return;
     }
     if (isAlimentacaoScope(leadScope)) {
-      renderAlimentacaoStats(items);
+      renderAlimentacaoStats(visibleItems());
       return;
     }
     if (situacaoFilter === 'cancelados') {
@@ -2808,8 +2881,9 @@ export function initArrecadacaoModule(
     const artistico = item.tipo === 'artistico';
     const alimentacao = item.tipo === 'alimentacao';
     const manualLead = artistico || alimentacao;
+    const showPagamentoLead = !manualLead || alimentacao;
     els.leadDetailActions.innerHTML = `
-      ${manualLead ? '' : leadActionIconBtn({ action: 'pagamento', title: 'Registrar pagamento', icon: ICON_PAYMENT })}
+      ${showPagamentoLead ? leadActionIconBtn({ action: 'pagamento', title: 'Registrar pagamento', icon: ICON_PAYMENT }) : ''}
       ${
         canMigrateToArtistico(item)
           ? leadActionIconBtn({ action: 'migrar-artistico', title: 'Mover para Artístico', icon: ICON_ARTISTIC })
@@ -3956,6 +4030,7 @@ export function initArrecadacaoModule(
     bindTableAction('edit', (item) => openLeadDetailModal(item.id));
     bindTableAction('excluir', (item) => deleteArtisticoLead(item));
     bindTableAction('migrar-artistico', (item) => migrateToArtistico(item.id));
+    bindTableAction('pagamento', (item) => openPagamentoModal(item));
 
     els.table.querySelectorAll('[data-action="perda-lead"]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -3975,16 +4050,38 @@ export function initArrecadacaoModule(
     bindWhatsappChatButtons(els.table, handleOpenWhatsappChat);
   }
 
+  function renderAlimentacaoFaltaPreview(item) {
+    const total = Number(item.valorTotal) || 0;
+    const pago = Number(item.valorPago) || 0;
+    const falta = Math.max(0, total - pago);
+    if (total <= 0) {
+      return '<span class="cell-muted arr-alim-falta-preview">Sem valor</span>';
+    }
+    if (falta <= 0) {
+      return '<span class="arr-valor-quitado arr-alim-falta-preview">Quitado</span>';
+    }
+    const title = `Total ${fmtMoney(total)} · Pago ${fmtMoney(pago)}`;
+    return `<span class="arr-valor-falta arr-alim-falta-preview" title="${escapeHtml(title)}">Falta ${fmtMoney(falta)}</span>`;
+  }
+
   function renderAlimentacaoTable() {
+    const displayItems = visibleItems();
     if (!items.length) {
       els.table.innerHTML =
-        '<tr><td colspan="7" class="cell-empty">Nenhum lead de alimentação cadastrado.</td></tr>';
+        '<tr><td colspan="8" class="cell-empty">Nenhum lead de alimentação cadastrado.</td></tr>';
       els.summary.textContent =
         'Leads entram por formulários de candidatura ou pelo botão Novo lead.';
       return;
     }
 
-    els.table.innerHTML = items
+    if (!displayItems.length) {
+      els.table.innerHTML =
+        '<tr><td colspan="8" class="cell-empty">Nenhum lead com os filtros selecionados.</td></tr>';
+      els.summary.textContent = `0 exibidos de ${items.length} lead(s)${alimentacaoFilterHint(0)}`;
+      return;
+    }
+
+    els.table.innerHTML = displayItems
       .map((item) => {
         const estabelecimento = item.descricao ? truncateText(item.descricao, 40) : '—';
         const estabCell = item.descricao
@@ -4012,12 +4109,17 @@ export function initArrecadacaoModule(
           <td><span class="badge ${candClass}">${escapeHtml(candLabel)}</span></td>
           <td class="${condicoes ? 'cell-muted' : 'cell-empty'}" title="${condTitle}">${condicoes || '—'}</td>
           <td class="${obs ? 'cell-muted' : 'cell-empty'}" title="${obs ? escapeHtml(item.obs) : ''}">${obs || '—'}</td>
+          <td class="arr-cell-falta cell-money" data-label="Falta">${renderAlimentacaoFaltaPreview(item)}</td>
           <td class="row-actions row-actions-icons arr-cell-acoes">${renderItemActions(item)}</td>
         </tr>`;
       })
       .join('');
 
-    els.summary.textContent = `${items.length} lead(s) de alimentação`;
+    const hint = alimentacaoFilterHint(displayItems.length);
+    els.summary.textContent =
+      displayItems.length === items.length
+        ? `${items.length} lead(s) de alimentação`
+        : `${displayItems.length} exibidos de ${items.length} lead(s)${hint}`;
     bindArtisticoTableActions();
   }
 
@@ -4317,6 +4419,12 @@ export function initArrecadacaoModule(
   document.querySelectorAll('[data-arr-situacao]').forEach((btn) => {
     btn.addEventListener('click', () => setSituacaoFilter(btn.dataset.arrSituacao));
   });
+  document.querySelectorAll('[data-alim-situacao]').forEach((btn) => {
+    btn.addEventListener('click', () => setAlimentacaoSituacaoFilter(btn.dataset.alimSituacao));
+  });
+  document.querySelectorAll('[data-alim-candidatura]').forEach((btn) => {
+    btn.addEventListener('click', () => setAlimentacaoCandidaturaFilter(btn.dataset.alimCandidatura));
+  });
   document.querySelectorAll('[data-arr-financial]').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (leadScope !== 'comercial') return;
@@ -4341,6 +4449,18 @@ export function initArrecadacaoModule(
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
   }
+  const savedAlimSituacao = localStorage.getItem('alimentacao-situacao-filter');
+  if (savedAlimSituacao && ['ativos', 'cancelados', 'todos'].includes(savedAlimSituacao)) {
+    alimentacaoSituacaoFilter = savedAlimSituacao;
+  }
+  const savedAlimCandidatura = localStorage.getItem('alimentacao-candidatura-filter');
+  if (
+    savedAlimCandidatura &&
+    ['todos', 'pendente', 'em_analise', 'aprovado', 'reprovado', 'sem'].includes(savedAlimCandidatura)
+  ) {
+    alimentacaoCandidaturaFilter = savedAlimCandidatura;
+  }
+  syncAlimentacaoFilterUi();
   syncFinancialFilterUi();
   document.getElementById('btn-arrecadacao-toggle-overview')?.addEventListener('click', () => {
     toggleOverviewVisible('comercial');

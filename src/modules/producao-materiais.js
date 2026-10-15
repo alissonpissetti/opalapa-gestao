@@ -11,6 +11,10 @@ import {
   duplicateProducaoMateriaisItem,
   moveProducaoMateriaisItem,
   fetchProducaoMateriaisPedidoTexto,
+  fetchProducaoMateriaisModeloDepara,
+  createProducaoMateriaisModeloDepara,
+  updateProducaoMateriaisModeloDepara,
+  deleteProducaoMateriaisModeloDepara,
 } from '../lib/api.js';
 import { escapeHtml } from '../lib/format.js';
 
@@ -28,6 +32,24 @@ const DEFAULT_CATEGORIAS = [
 const DEFAULT_UNIDADES = ['un', 'm²', 'm', 'par', 'kit', 'rolo', 'folha'];
 
 const DEFAULT_CAMISETA_TAMANHOS = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG', '3G'];
+
+const CAMISETA_TAMANHO_ORDER = new Map(DEFAULT_CAMISETA_TAMANHOS.map((t, i) => [t, i]));
+
+function compareCamisetaEspecificacao(a, b) {
+  const key = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw || raw === '—') return { band: 2, index: 0, label: '' };
+    const upper = raw.toUpperCase();
+    const idx = CAMISETA_TAMANHO_ORDER.get(upper);
+    if (idx !== undefined) return { band: 0, index: idx, label: upper };
+    return { band: 1, index: 0, label: raw };
+  };
+  const ka = key(a);
+  const kb = key(b);
+  if (ka.band !== kb.band) return ka.band - kb.band;
+  if (ka.band === 0) return ka.index - kb.index;
+  return ka.label.localeCompare(kb.label, 'pt-BR');
+}
 
 const DEFAULT_LOTE_STATUS_OPCOES = [
   { key: 'em_criacao', label: 'Em criação' },
@@ -170,6 +192,16 @@ export function initProducaoMateriaisModule() {
     pedidoModalClose: document.getElementById('materiais-pedido-modal-close'),
     pedidoModalRefresh: document.getElementById('materiais-pedido-modal-refresh'),
     pedidoModalCopy: document.getElementById('materiais-pedido-modal-copy'),
+    btnModeloDepara: document.getElementById('btn-materiais-modelo-depara'),
+    deparaModalBg: document.getElementById('materiais-depara-modal-bg'),
+    deparaModalErrors: document.getElementById('materiais-depara-modal-errors'),
+    deparaOrigem: document.getElementById('materiais-depara-origem'),
+    deparaDestino: document.getElementById('materiais-depara-destino'),
+    deparaOrigemList: document.getElementById('materiais-depara-origem-list'),
+    deparaTable: document.getElementById('materiais-depara-table'),
+    deparaPendentesHint: document.getElementById('materiais-depara-pendentes-hint'),
+    deparaAdd: document.getElementById('materiais-depara-add'),
+    deparaModalClose: document.getElementById('materiais-depara-modal-close'),
   };
 
   let lotes = [];
@@ -184,6 +216,11 @@ export function initProducaoMateriaisModule() {
   let itemOriginLoteId = null;
   let loteStatusOpcoes = [...DEFAULT_LOTE_STATUS_OPCOES];
   let loteStatusSaving = false;
+  let modeloDeparaData = { regras: [], modelosDistintos: [], modelosSemRegra: [] };
+  const deparaSavedSnapshot = new Map();
+  const deparaSaveTimers = new Map();
+  const deparaSaveInflight = new Set();
+  const DEPARA_SAVE_DEBOUNCE_MS = 500;
 
   function selectedLoteId() {
     const id = Number(els.loteSelect?.value);
@@ -317,7 +354,12 @@ export function initProducaoMateriaisModule() {
   }
 
   function renderResumo() {
-    const resumo = detail?.resumo || [];
+    const resumo = [...(detail?.resumo || [])].sort(
+      (a, b) =>
+        categoriaLabelFor(a).localeCompare(categoriaLabelFor(b), 'pt-BR') ||
+        String(a.modelo || '').localeCompare(String(b.modelo || ''), 'pt-BR') ||
+        compareCamisetaEspecificacao(a.especificacao, b.especificacao),
+    );
     if (!resumo.length) {
       els.resumoTable.innerHTML =
         '<tr><td colspan="5" class="cell-empty">Sem itens no lote.</td></tr>';
@@ -359,12 +401,16 @@ export function initProducaoMateriaisModule() {
         const espCell = esp
           ? escapeHtml(esp)
           : '<span class="cell-empty" title="Pendente">—</span>';
+        const prod =
+          item.modeloProducao && item.modeloProducao !== item.modelo
+            ? `${escapeHtml(item.modelo)}<br><span class="materiais-modelo-agrupado" title="Nome no resumo">→ ${escapeHtml(item.modeloProducao)}</span>`
+            : escapeHtml(item.modelo);
         return `
       <tr>
         <td>${escapeHtml(categoriaLabelFor(item))}</td>
         <td>${escapeHtml(origemLabel(item.origem))}</td>
         <td>${escapeHtml(item.referencia || '—')}</td>
-        <td>${escapeHtml(item.modelo)}</td>
+        <td>${prod}</td>
         <td>${espCell}</td>
         <td>${escapeHtml(item.unidade || 'un')}</td>
         <td class="num">${item.quantidade}</td>
@@ -871,6 +917,234 @@ export function initProducaoMateriaisModule() {
     }
   }
 
+  function fillDeparaOrigemDatalist() {
+    if (!els.deparaOrigemList) return;
+    const modelos = modeloDeparaData.modelosDistintos || [];
+    els.deparaOrigemList.innerHTML = modelos
+      .map((m) => `<option value="${escapeHtml(m)}"></option>`)
+      .join('');
+  }
+
+  function syncDeparaSnapshot(regras) {
+    deparaSavedSnapshot.clear();
+    for (const r of regras || []) {
+      deparaSavedSnapshot.set(r.id, {
+        origem: String(r.origemModelo || '').trim(),
+        destino: String(r.destinoModelo || '').trim(),
+      });
+    }
+  }
+
+  function refreshDeparaPendentesHint() {
+    const pendentes = modeloDeparaData.modelosSemRegra || [];
+    if (!els.deparaPendentesHint) return;
+    if (pendentes.length) {
+      const sample = pendentes.slice(0, 8).map((m) => escapeHtml(m)).join(', ');
+      const extra = pendentes.length > 8 ? ` (+${pendentes.length - 8})` : '';
+      els.deparaPendentesHint.innerHTML = `Modelos ainda sem regra (${pendentes.length}): ${sample}${extra}. Use o campo <strong>De</strong> para mapear.`;
+      els.deparaPendentesHint.classList.remove('hidden');
+    } else {
+      els.deparaPendentesHint.classList.add('hidden');
+      els.deparaPendentesHint.textContent = '';
+    }
+  }
+
+  function deparaRowValues(row) {
+    return {
+      origem: row.querySelector('[data-field="origem"]')?.value.trim() || '',
+      destino: row.querySelector('[data-field="destino"]')?.value.trim() || '',
+    };
+  }
+
+  function setDeparaRowStatus(row, status) {
+    if (!row) return;
+    row.classList.remove(
+      'materiais-depara-row--saving',
+      'materiais-depara-row--saved',
+      'materiais-depara-row--error',
+    );
+    if (status === 'saving') row.classList.add('materiais-depara-row--saving');
+    if (status === 'saved') row.classList.add('materiais-depara-row--saved');
+    if (status === 'error') row.classList.add('materiais-depara-row--error');
+  }
+
+  function scheduleDeparaSave(id) {
+    const prev = deparaSaveTimers.get(id);
+    if (prev) clearTimeout(prev);
+    deparaSaveTimers.set(
+      id,
+      setTimeout(() => {
+        deparaSaveTimers.delete(id);
+        void flushDeparaSave(id);
+      }, DEPARA_SAVE_DEBOUNCE_MS),
+    );
+  }
+
+  async function refreshDeparaMetaAfterChange() {
+    try {
+      const meta = await fetchProducaoMateriaisModeloDepara();
+      modeloDeparaData.modelosDistintos = meta.modelosDistintos || [];
+      modeloDeparaData.modelosSemRegra = meta.modelosSemRegra || [];
+      fillDeparaOrigemDatalist();
+      refreshDeparaPendentesHint();
+    } catch {
+      /* mantém lista visível mesmo se o refresh de metadados falhar */
+    }
+  }
+
+  async function flushDeparaSave(id, { fromBlur = false } = {}) {
+    const row = els.deparaTable?.querySelector(`tr[data-depara-id="${id}"]`);
+    if (!row) return;
+    const { origem, destino } = deparaRowValues(row);
+    const snap = deparaSavedSnapshot.get(id);
+    if (snap && snap.origem === origem && snap.destino === destino) {
+      setDeparaRowStatus(row, 'idle');
+      return;
+    }
+    if (!origem || !destino) {
+      if (fromBlur) showDeparaError('De e Para são obrigatórios em cada linha.');
+      setDeparaRowStatus(row, 'error');
+      return;
+    }
+    if (deparaSaveInflight.has(id)) return;
+    deparaSaveInflight.add(id);
+    setDeparaRowStatus(row, 'saving');
+    showDeparaError('');
+    try {
+      await updateProducaoMateriaisModeloDepara(id, {
+        origemModelo: origem,
+        destinoModelo: destino,
+      });
+      deparaSavedSnapshot.set(id, { origem, destino });
+      modeloDeparaData.regras = (modeloDeparaData.regras || []).map((r) =>
+        r.id === id ? { ...r, origemModelo: origem, destinoModelo: destino } : r,
+      );
+      setDeparaRowStatus(row, 'saved');
+      window.setTimeout(() => {
+        if (deparaRowValues(row).origem === origem && deparaRowValues(row).destino === destino) {
+          setDeparaRowStatus(row, 'idle');
+        }
+      }, 1200);
+      void reloadLoteAfterDeparaChange();
+      void refreshDeparaMetaAfterChange();
+    } catch (err) {
+      setDeparaRowStatus(row, 'error');
+      showDeparaError(err.message || 'Não foi possível salvar a regra.');
+    } finally {
+      deparaSaveInflight.delete(id);
+    }
+  }
+
+  function renderModeloDeparaTable() {
+    const regras = modeloDeparaData.regras || [];
+    if (!els.deparaTable) return;
+    if (!regras.length) {
+      els.deparaTable.innerHTML =
+        '<tr><td colspan="3" class="cell-empty">Nenhuma regra. Adicione acima para agrupar produtos no resumo.</td></tr>';
+      syncDeparaSnapshot([]);
+    } else {
+      els.deparaTable.innerHTML = regras
+        .map(
+          (r) => `
+        <tr data-depara-id="${r.id}">
+          <td><input type="text" class="materiais-depara-cell-input" data-field="origem" value="${escapeHtml(r.origemModelo)}" autocomplete="off" spellcheck="false" /></td>
+          <td><input type="text" class="materiais-depara-cell-input" data-field="destino" value="${escapeHtml(r.destinoModelo)}" autocomplete="off" spellcheck="false" /></td>
+          <td class="materiais-depara-actions">
+            <button type="button" class="tbtn tbtn-sm" data-action="delete-depara" data-id="${r.id}" title="Excluir regra">Excluir</button>
+          </td>
+        </tr>`,
+        )
+        .join('');
+      syncDeparaSnapshot(regras);
+    }
+
+    refreshDeparaPendentesHint();
+
+    els.deparaTable?.querySelectorAll('[data-action="delete-depara"]').forEach((btn) => {
+      btn.addEventListener('click', () => void removeDeparaRow(Number(btn.dataset.id)));
+    });
+  }
+
+  async function loadModeloDeparaState() {
+    modeloDeparaData = await fetchProducaoMateriaisModeloDepara();
+    fillDeparaOrigemDatalist();
+    renderModeloDeparaTable();
+  }
+
+  async function reloadLoteAfterDeparaChange() {
+    const id = selectedLoteId();
+    if (id) await loadLoteDetail(id);
+    else renderDetail();
+  }
+
+  function showDeparaError(message) {
+    if (!els.deparaModalErrors) return;
+    if (!message) {
+      els.deparaModalErrors.classList.add('hidden');
+      els.deparaModalErrors.textContent = '';
+      return;
+    }
+    els.deparaModalErrors.textContent = message;
+    els.deparaModalErrors.classList.remove('hidden');
+  }
+
+  async function openDeparaModal() {
+    showDeparaError('');
+    if (els.deparaOrigem) els.deparaOrigem.value = '';
+    if (els.deparaDestino) els.deparaDestino.value = '';
+    els.deparaModalBg?.classList.add('open');
+    try {
+      await loadModeloDeparaState();
+      els.deparaOrigem?.focus();
+    } catch (err) {
+      showDeparaError(err.message || 'Não foi possível carregar o de/para.');
+    }
+  }
+
+  function closeDeparaModal() {
+    els.deparaModalBg?.classList.remove('open');
+    showDeparaError('');
+  }
+
+  async function addDeparaRegra() {
+    const origemModelo = els.deparaOrigem?.value.trim() || '';
+    const destinoModelo = els.deparaDestino?.value.trim() || '';
+    if (!origemModelo || !destinoModelo) {
+      showDeparaError('Informe os campos De e Para.');
+      return;
+    }
+    els.deparaAdd.disabled = true;
+    showDeparaError('');
+    try {
+      await createProducaoMateriaisModeloDepara({ origemModelo, destinoModelo });
+      if (els.deparaOrigem) els.deparaOrigem.value = '';
+      if (els.deparaDestino) els.deparaDestino.value = '';
+      await loadModeloDeparaState();
+      await reloadLoteAfterDeparaChange();
+    } catch (err) {
+      showDeparaError(err.message || 'Não foi possível adicionar a regra.');
+    } finally {
+      els.deparaAdd.disabled = false;
+    }
+  }
+
+  async function removeDeparaRow(id) {
+    const pending = deparaSaveTimers.get(id);
+    if (pending) {
+      clearTimeout(pending);
+      deparaSaveTimers.delete(id);
+    }
+    if (!confirm('Excluir esta regra de de/para?')) return;
+    showDeparaError('');
+    try {
+      await deleteProducaoMateriaisModeloDepara(id);
+      await loadModeloDeparaState();
+      await reloadLoteAfterDeparaChange();
+    } catch (err) {
+      showDeparaError(err.message || 'Não foi possível excluir.');
+    }
+  }
+
   refreshItemCatalogSelects('camiseta', 'un');
   els.itemModalCategoria?.addEventListener('change', syncItemModalFields);
   els.loteSelect?.addEventListener('change', () => {
@@ -882,6 +1156,40 @@ export function initProducaoMateriaisModule() {
   els.btnImportEntregas?.addEventListener('click', () => void importEntregas());
   els.btnSiteItem?.addEventListener('click', () => openItemModal());
   els.btnPedidoTexto?.addEventListener('click', () => openPedidoModal());
+  els.btnModeloDepara?.addEventListener('click', () => void openDeparaModal());
+  els.deparaAdd?.addEventListener('click', () => void addDeparaRegra());
+  els.deparaModalClose?.addEventListener('click', closeDeparaModal);
+  els.deparaModalBg?.addEventListener('click', (e) => {
+    if (e.target === els.deparaModalBg) closeDeparaModal();
+  });
+  els.deparaTable?.addEventListener('input', (e) => {
+    const input = e.target.closest('.materiais-depara-cell-input');
+    if (!input) return;
+    const row = input.closest('tr[data-depara-id]');
+    if (!row) return;
+    const id = Number(row.dataset.deparaId);
+    if (!Number.isInteger(id) || id <= 0) return;
+    setDeparaRowStatus(row, 'idle');
+    scheduleDeparaSave(id);
+  });
+  els.deparaTable?.addEventListener(
+    'blur',
+    (e) => {
+      const input = e.target.closest('.materiais-depara-cell-input');
+      if (!input) return;
+      const row = input.closest('tr[data-depara-id]');
+      if (!row) return;
+      const id = Number(row.dataset.deparaId);
+      if (!Number.isInteger(id) || id <= 0) return;
+      const pending = deparaSaveTimers.get(id);
+      if (pending) {
+        clearTimeout(pending);
+        deparaSaveTimers.delete(id);
+      }
+      void flushDeparaSave(id, { fromBlur: true });
+    },
+    true,
+  );
   els.pedidoModalClose?.addEventListener('click', closePedidoModal);
   els.pedidoModalRefresh?.addEventListener('click', () => void refreshPedidoTexto());
   els.pedidoModalCopy?.addEventListener('click', () => void copyPedidoTexto());

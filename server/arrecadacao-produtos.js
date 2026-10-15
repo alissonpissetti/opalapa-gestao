@@ -40,6 +40,25 @@ export const BENEFICIOS_DEF = [
 
 export const CAMISETA_TAMANHOS = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG', '3G'];
 
+const CAMISETA_TAMANHO_ORDER = new Map(CAMISETA_TAMANHOS.map((t, i) => [t, i]));
+
+/** Ordenação fixa de tamanhos (PP → 3G); demais especificações por locale; vazio/— por último. */
+export function compareCamisetaEspecificacao(a, b) {
+  const key = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw || raw === '—') return { band: 2, index: 0, label: '' };
+    const upper = raw.toUpperCase();
+    const idx = CAMISETA_TAMANHO_ORDER.get(upper);
+    if (idx !== undefined) return { band: 0, index: idx, label: upper };
+    return { band: 1, index: 0, label: raw };
+  };
+  const ka = key(a);
+  const kb = key(b);
+  if (ka.band !== kb.band) return ka.band - kb.band;
+  if (ka.band === 0) return ka.index - kb.index;
+  return ka.label.localeCompare(kb.label, 'pt-BR');
+}
+
 export const ESPACOS_TIPOS_PADRAO = [
   '3x3',
   '4x3',

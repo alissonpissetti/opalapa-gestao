@@ -181,21 +181,27 @@ function summarizeFromContas(contas) {
   let previstoPos = 0;
   let realizadoPre = 0;
   let realizadoPos = 0;
+  let faltaPre = 0;
+  let faltaPos = 0;
 
   for (const c of ativas) {
     const prev = Number(c.valorPrevisto) || 0;
     const pago = Number(c.valorPago) || 0;
+    const falta = faltaValor(c);
     if (c.fase === 'pos') {
       previstoPos += prev;
       realizadoPos += pago;
+      faltaPos += falta;
     } else {
       previstoPre += prev;
       realizadoPre += pago;
+      faltaPre += falta;
     }
   }
 
   const previstoGeral = previstoPre + previstoPos;
   const realizadoGeral = realizadoPre + realizadoPos;
+  const faltaGeral = faltaPre + faltaPos;
 
   return {
     previstoPre,
@@ -204,10 +210,262 @@ function summarizeFromContas(contas) {
     realizadoPre,
     realizadoPos,
     realizadoGeral,
+    faltaPre,
+    faltaPos,
     previsto: previstoGeral,
     realizado: realizadoGeral,
-    falta: Math.max(0, previstoGeral - realizadoGeral),
+    falta: faltaGeral,
   };
+}
+
+function summarizeSaidasPorFase(contas, fase) {
+  const wantPos = fase === 'pos';
+  const ativas = contas.filter(
+    (c) => c.status !== 'cancelado' && (c.fase === 'pos' ? 'pos' : 'pre') === (wantPos ? 'pos' : 'pre'),
+  );
+  const byCategoria = new Map();
+  let previsto = 0;
+  let realizado = 0;
+
+  for (const c of ativas) {
+    const prev = Number(c.valorPrevisto) || 0;
+    const pago = Number(c.valorPago) || 0;
+    previsto += prev;
+    realizado += pago;
+    const key = c.categoriaId ?? 0;
+    const nome = normalizeNome(c.categoriaNome) || 'Sem categoria';
+    if (!byCategoria.has(key)) {
+      byCategoria.set(key, { nome, previsto: 0, realizado: 0, itens: 0 });
+    }
+    const bucket = byCategoria.get(key);
+    bucket.previsto += prev;
+    bucket.realizado += pago;
+    bucket.itens += 1;
+  }
+
+  const linhas = [...byCategoria.values()].sort((a, b) => b.previsto - a.previsto);
+  return { previsto, realizado, linhas };
+}
+
+function resumoPendente(previsto, realizado) {
+  const prev = Number(previsto) || 0;
+  const real = Number(realizado) || 0;
+  return Math.max(0, prev - real);
+}
+
+function resultadoValorClass(val) {
+  const n = Number(val) || 0;
+  if (n > 0) return 'cp-arr-num--resultado-pos';
+  if (n < 0) return 'cp-arr-num--resultado-neg';
+  return 'cp-arr-num--resultado-zero';
+}
+
+function summarizeResultado(arrecadacaoResumo, contas) {
+  const arr = arrecadacaoResumo?.totais || { previsto: 0, realizado: 0 };
+  const pre = summarizeSaidasPorFase(contas, 'pre');
+  const pos = summarizeSaidasPorFase(contas, 'pos');
+  const arrPrev = Number(arr.previsto) || 0;
+  const arrReal = Number(arr.realizado) || 0;
+  const saidasPrev = pre.previsto + pos.previsto;
+  const saidasReal = pre.realizado + pos.realizado;
+  const previsto = arrPrev - saidasPrev;
+  const realizado = arrReal - saidasReal;
+  const linhas = [
+    {
+      nome: 'Arrecadação',
+      descricao: 'Entradas',
+      previsto: arrPrev,
+      realizado: arrReal,
+    },
+    {
+      nome: 'Saídas pré-evento',
+      descricao: 'Deduz do resultado',
+      previsto: pre.previsto,
+      realizado: pre.realizado,
+    },
+    {
+      nome: 'Saídas pós-evento',
+      descricao: 'Deduz do resultado',
+      previsto: pos.previsto,
+      realizado: pos.realizado,
+    },
+  ];
+  return { previsto, realizado, linhas };
+}
+
+function renderResumoFinanceiroBoxHtml({
+  boxClass = '',
+  wrapSection = true,
+  title,
+  lead = '',
+  detalheLabel = 'Detalhamento',
+  totais,
+  linhas,
+  linhaColLabel,
+  realizadoClass = 'cp-arr-num--realizado',
+  pendenteClass = 'cp-arr-num--pendente',
+  kpiValClass = null,
+}) {
+  const rows = (linhas || [])
+    .map((f) => {
+      const pendente = resumoPendente(f.previsto, f.realizado);
+      return `
+        <tr>
+          <td class="cp-arr-fonte">
+            <span class="cp-arr-fonte-nome">${escapeHtml(f.nome)}</span>
+            ${
+              f.itens != null
+                ? `<span class="cp-arr-fonte-hint">${f.itens} conta${f.itens === 1 ? '' : 's'}</span>`
+                : f.descricao
+                  ? `<span class="cp-arr-fonte-hint">${escapeHtml(f.descricao)}</span>`
+                  : ''
+            }
+          </td>
+          <td class="cp-arr-num">${cellMoney(f.previsto)}</td>
+          <td class="cp-arr-num ${realizadoClass}">${cellMoney(f.realizado)}</td>
+          <td class="cp-arr-num ${pendenteClass}">${cellMoney(pendente)}</td>
+        </tr>`;
+    })
+    .join('');
+  const t = totais || { previsto: 0, realizado: 0 };
+  const pendenteTotal = resumoPendente(t.previsto, t.realizado);
+  const clsPrev = kpiValClass ? kpiValClass('previsto', t.previsto) : '';
+  const clsReal = kpiValClass ? kpiValClass('realizado', t.realizado) : realizadoClass;
+  const clsPend = kpiValClass ? kpiValClass('pendente', pendenteTotal) : pendenteClass;
+  const leadHtml = lead ? `<p class="cp-arr-lead">${escapeHtml(lead)}</p>` : '';
+  const nLinhas = (linhas || []).length;
+  const detalheHtml =
+    nLinhas > 0
+      ? `
+      <details class="cp-arr-detalhe">
+        <summary class="cp-arr-detalhe-summary">${escapeHtml(detalheLabel)} <span class="cp-arr-detalhe-count">(${nLinhas})</span></summary>
+        <div class="table-wrap cp-arr-table-wrap">
+          <table class="cp-arr-table">
+            <thead>
+              <tr>
+                <th>${escapeHtml(linhaColLabel)}</th>
+                <th>Prev.</th>
+                <th>Real.</th>
+                <th>Pend.</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </details>`
+      : '';
+  const body = `
+      <header class="cp-arr-head">
+        <h2 class="cp-arr-title">${escapeHtml(title)}</h2>
+        ${leadHtml}
+      </header>
+      <div class="cp-arr-kpi-row" role="group" aria-label="Totais">
+        <div class="cp-arr-kpi">
+          <span class="cp-arr-kpi-label">Previsto</span>
+          <strong class="cp-arr-kpi-val ${clsPrev}">${cellMoney(t.previsto)}</strong>
+        </div>
+        <div class="cp-arr-kpi cp-arr-kpi--realizado">
+          <span class="cp-arr-kpi-label">Realizado</span>
+          <strong class="cp-arr-kpi-val ${clsReal}">${cellMoney(t.realizado)}</strong>
+        </div>
+        <div class="cp-arr-kpi cp-arr-kpi--pendente">
+          <span class="cp-arr-kpi-label">Pendente</span>
+          <strong class="cp-arr-kpi-val ${clsPend}">${cellMoney(pendenteTotal)}</strong>
+        </div>
+      </div>
+      ${detalheHtml}`;
+  if (!wrapSection) return body;
+  const cls = boxClass ? ` class="${boxClass}"` : '';
+  return `<section${cls}>${body}</section>`;
+}
+
+function renderArrecadacaoResumoHtml(resumo) {
+  if (!resumo?.fontes) return '';
+  const totais = resumo.totais || { previsto: 0, realizado: 0 };
+  const fontes = resumo.fontes.flatMap((f) => {
+    if (f.detalhes?.length) {
+      return f.detalhes.map((d) => ({
+        nome: d.nome,
+        descricao: d.descricao,
+        previsto: d.previsto,
+        realizado: d.realizado,
+      }));
+    }
+    return [
+      {
+        nome: f.nome,
+        descricao: f.descricao,
+        previsto: f.previsto,
+        realizado: f.realizado,
+      },
+    ];
+  });
+  return renderResumoFinanceiroBoxHtml({
+    wrapSection: false,
+    title: 'Arrecadação',
+    detalheLabel: 'Por fonte',
+    totais,
+    linhas: fontes,
+    linhaColLabel: 'Fonte',
+    realizadoClass: 'cp-arr-num--realizado',
+  });
+}
+
+function renderSaidaFaseResumoHtml(contas, fase) {
+  const data = summarizeSaidasPorFase(contas, fase);
+  const isPre = fase !== 'pos';
+  return renderResumoFinanceiroBoxHtml({
+    wrapSection: false,
+    title: isPre ? 'Saídas pré-evento' : 'Saídas pós-evento',
+    detalheLabel: 'Por categoria',
+    totais: { previsto: data.previsto, realizado: data.realizado },
+    linhas: data.linhas,
+    linhaColLabel: 'Categoria',
+    realizadoClass: 'cp-arr-num--realizado-saida',
+  });
+}
+
+function renderSaidasTotalResumoHtml(contas) {
+  const pre = summarizeSaidasPorFase(contas, 'pre');
+  const pos = summarizeSaidasPorFase(contas, 'pos');
+  return renderResumoFinanceiroBoxHtml({
+    wrapSection: false,
+    title: 'Saídas totais',
+    detalheLabel: 'Composição',
+    totais: {
+      previsto: pre.previsto + pos.previsto,
+      realizado: pre.realizado + pos.realizado,
+    },
+    linhas: [
+      {
+        nome: 'Pré-evento',
+        descricao: 'Soma das contas pré',
+        previsto: pre.previsto,
+        realizado: pre.realizado,
+      },
+      {
+        nome: 'Pós-evento',
+        descricao: 'Soma das contas pós',
+        previsto: pos.previsto,
+        realizado: pos.realizado,
+      },
+    ],
+    linhaColLabel: 'Fase',
+    realizadoClass: 'cp-arr-num--realizado-saida',
+  });
+}
+
+function renderResultadoResumoHtml(arrecadacaoResumo, contas) {
+  const { previsto, realizado, linhas } = summarizeResultado(arrecadacaoResumo, contas);
+  return renderResumoFinanceiroBoxHtml({
+    wrapSection: false,
+    title: 'Resultado',
+    detalheLabel: 'Composição',
+    totais: { previsto, realizado },
+    linhas,
+    linhaColLabel: 'Item',
+    kpiValClass: (_kind, val) => resultadoValorClass(val),
+  });
 }
 
 function cellMoney(val) {
@@ -261,7 +519,12 @@ export function initContasPagarModule() {
   if (contasPagarInstance) return contasPagarInstance;
 
   const els = {
-    kpis: document.getElementById('contas-pagar-kpis'),
+    resumoPanel: document.getElementById('contas-pagar-resumo'),
+    arrecadacao: document.getElementById('contas-pagar-arrecadacao'),
+    saidaPre: document.getElementById('contas-pagar-saida-pre'),
+    saidaPos: document.getElementById('contas-pagar-saida-pos'),
+    saidaTotal: document.getElementById('contas-pagar-saida-total'),
+    resultado: document.getElementById('contas-pagar-resultado'),
     summary: document.getElementById('contas-pagar-summary'),
     empty: document.getElementById('contas-pagar-empty'),
     tableWrap: document.getElementById('contas-pagar-table-wrap'),
@@ -390,6 +653,7 @@ export function initContasPagarModule() {
   let categorias = [];
   let planoContas = [];
   let totais = summarizeFromContas([]);
+  let arrecadacaoResumo = null;
   let editId = null;
   let inlineEditId = null;
   let loading = false;
@@ -932,9 +1196,11 @@ export function initContasPagarModule() {
         <td class="fin-col-status">${statusBadge(c.status)}</td>
         <td class="fin-col-bonificado">${bonificadoCell(c)}</td>
         <td class="fin-col-date">${escapeHtml(fmtDateOnly(c.dtVencimento))}</td>
-        <td class="fin-col-actions row-actions-icons">
-          ${contaActionIconBtn('baixas', 'Registrar baixas e ver histórico', ICON_BAIXA)}
-          ${contaActionIconBtn('duplicate', 'Duplicar conta', ICON_DUPLICATE)}
+        <td class="fin-col-actions">
+          <div class="cp-row-actions row-actions-icons">
+            ${contaActionIconBtn('baixas', 'Registrar baixas e ver histórico', ICON_BAIXA)}
+            ${contaActionIconBtn('duplicate', 'Duplicar conta', ICON_DUPLICATE)}
+          </div>
         </td>
       </tr>`;
   }
@@ -1103,41 +1369,48 @@ export function initContasPagarModule() {
     });
   }
 
-  function renderKpis() {
-    if (!els.kpis) return;
-    const t = totais;
-    const hasContas = contas.some((c) => c.status !== 'cancelado');
-    els.kpis.classList.toggle('hidden', !hasContas);
-    if (!hasContas) {
-      els.kpis.innerHTML = '';
-      return;
-    }
+  function syncContasPagarResumoPanel() {
+    if (!els.resumoPanel) return;
+    const showArr = els.arrecadacao && !els.arrecadacao.classList.contains('hidden');
+    const showSaidas = Boolean(els.saidaPre && !els.saidaPre.classList.contains('hidden'));
+    const showResultado = Boolean(els.resultado && !els.resultado.classList.contains('hidden'));
+    els.resumoPanel.classList.toggle('hidden', !showArr && !showSaidas && !showResultado);
+  }
 
-    els.kpis.innerHTML = `
-      <div class="financeiro-kpi">
-        <span class="financeiro-kpi-label">Previsto pré-evento</span>
-        <strong class="financeiro-kpi-val">${cellMoney(t.previstoPre)}</strong>
-      </div>
-      <div class="financeiro-kpi">
-        <span class="financeiro-kpi-label">Previsto pós-evento</span>
-        <strong class="financeiro-kpi-val">${cellMoney(t.previstoPos)}</strong>
-      </div>
-      <div class="financeiro-kpi financeiro-kpi--total">
-        <span class="financeiro-kpi-label">Total previsto</span>
-        <strong class="financeiro-kpi-val">${cellMoney(t.previstoGeral)}</strong>
-      </div>
-      <div class="financeiro-kpi">
-        <span class="financeiro-kpi-label">Realizado pré-evento</span>
-        <strong class="financeiro-kpi-val fin-val--pos">${cellMoney(t.realizadoPre)}</strong>
-      </div>
-      <div class="financeiro-kpi">
-        <span class="financeiro-kpi-label">Realizado pós-evento</span>
-        <strong class="financeiro-kpi-val fin-val--pos">${cellMoney(t.realizadoPos)}</strong>
-      </div>
-      <div class="financeiro-kpi financeiro-kpi--total">
-        <span class="financeiro-kpi-label">Total realizado</span>
-        <strong class="financeiro-kpi-val fin-val--pos">${cellMoney(t.realizadoGeral)}</strong>
-      </div>`;
+  function renderArrecadacaoResumo() {
+    if (!els.arrecadacao) return;
+    const html = renderArrecadacaoResumoHtml(arrecadacaoResumo);
+    const show = Boolean(html);
+    els.arrecadacao.classList.toggle('hidden', !show);
+    els.arrecadacao.innerHTML = html;
+    syncContasPagarResumoPanel();
+  }
+
+  function renderSaidasResumo() {
+    const show = contas.length > 0;
+    if (els.saidaPre) {
+      els.saidaPre.classList.toggle('hidden', !show);
+      els.saidaPre.innerHTML = show ? renderSaidaFaseResumoHtml(contas, 'pre') : '';
+    }
+    if (els.saidaPos) {
+      els.saidaPos.classList.toggle('hidden', !show);
+      els.saidaPos.innerHTML = show ? renderSaidaFaseResumoHtml(contas, 'pos') : '';
+    }
+    if (els.saidaTotal) {
+      els.saidaTotal.classList.toggle('hidden', !show);
+      els.saidaTotal.innerHTML = show ? renderSaidasTotalResumoHtml(contas) : '';
+    }
+    syncContasPagarResumoPanel();
+  }
+
+  function renderResultadoResumo() {
+    if (!els.resultado) return;
+    const hasArr = Boolean(arrecadacaoResumo?.fontes);
+    const hasContas = contas.length > 0;
+    const show = hasArr || hasContas;
+    els.resultado.classList.toggle('hidden', !show);
+    els.resultado.innerHTML = show ? renderResultadoResumoHtml(arrecadacaoResumo, contas) : '';
+    syncContasPagarResumoPanel();
   }
 
   function renderTable() {
@@ -1156,7 +1429,9 @@ export function initContasPagarModule() {
       if (els.summary) els.summary.textContent = '';
       totais = summarizeFromContas([]);
       clearSelection();
-      renderKpis();
+      renderArrecadacaoResumo();
+      renderSaidasResumo();
+      renderResultadoResumo();
       syncFilterUi();
       return;
     }
@@ -1207,7 +1482,9 @@ export function initContasPagarModule() {
     }
 
     totais = summarizeFromContas(contas);
-    renderKpis();
+    renderArrecadacaoResumo();
+    renderSaidasResumo();
+    renderResultadoResumo();
     updateSelectionUi();
     syncFilterUi();
   }
@@ -1453,6 +1730,7 @@ export function initContasPagarModule() {
       categorias = catRes?.categorias || [];
       contas = contasRes?.contas || [];
       totais = contasRes?.totais || summarizeFromContas(contas);
+      arrecadacaoResumo = contasRes?.arrecadacaoResumo ?? null;
       planoContas = planoRes?.planoContas || [];
       inlineEditId = null;
       renderTable();

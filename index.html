@@ -615,6 +615,23 @@
       <div class="alimentacao-overview" id="alimentacao-overview">
         <div class="stats alimentacao-stats" id="alimentacao-stats"></div>
       </div>
+      <div class="arrecadacao-toolbar alimentacao-toolbar">
+        <div class="arrecadacao-toolbar-filters">
+          <div class="report-filters" role="tablist" aria-label="Filtro de situação">
+            <button class="tbtn active" type="button" data-alim-situacao="ativos" role="tab" aria-selected="true">Ativos</button>
+            <button class="tbtn" type="button" data-alim-situacao="cancelados" role="tab" aria-selected="false">Cancelados</button>
+            <button class="tbtn" type="button" data-alim-situacao="todos" role="tab" aria-selected="false">Todos</button>
+          </div>
+          <div class="report-filters" role="tablist" aria-label="Filtro de candidatura">
+            <button class="tbtn active" type="button" data-alim-candidatura="todos" role="tab" aria-selected="true">Todas</button>
+            <button class="tbtn" type="button" data-alim-candidatura="pendente" role="tab" aria-selected="false">Pendente</button>
+            <button class="tbtn" type="button" data-alim-candidatura="em_analise" role="tab" aria-selected="false">Em análise</button>
+            <button class="tbtn" type="button" data-alim-candidatura="aprovado" role="tab" aria-selected="false">Aprovado</button>
+            <button class="tbtn" type="button" data-alim-candidatura="reprovado" role="tab" aria-selected="false">Reprovado</button>
+            <button class="tbtn" type="button" data-alim-candidatura="sem" role="tab" aria-selected="false">Sem formulário</button>
+          </div>
+        </div>
+      </div>
       <p class="report-summary" id="alimentacao-summary"></p>
 
       <div id="alimentacao-lista-view">
@@ -628,6 +645,7 @@
                 <th>Candidatura</th>
                 <th>Condições</th>
                 <th>Obs</th>
+                <th class="arr-th-falta">Falta</th>
                 <th class="arr-th-acoes"></th>
               </tr>
             </thead>
@@ -1208,6 +1226,7 @@
       <div class="materiais-actions">
         <button class="tbtn" type="button" id="btn-materiais-import-entregas" disabled>Importar camisetas (entregas)</button>
         <button class="tbtn" type="button" id="btn-materiais-site-item" disabled>Adicionar item</button>
+        <button class="tbtn" type="button" id="btn-materiais-modelo-depara">De/para (agrupar produtos)</button>
         <button class="tbtn" type="button" id="btn-materiais-pedido-texto" disabled>Texto para gráfica</button>
       </div>
       <p class="report-summary" id="materiais-summary"></p>
@@ -1311,7 +1330,13 @@
         <button class="tbtn primary" type="button" id="btn-contas-pagar-new">Nova conta</button>
       </div>
 
-      <div class="financeiro-kpis financeiro-kpis--contas-pagar hidden" id="contas-pagar-kpis" aria-label="Totais por fase"></div>
+      <div class="contas-pagar-resumo hidden" id="contas-pagar-resumo">
+        <section class="contas-pagar-arrecadacao hidden" id="contas-pagar-arrecadacao" aria-label="Arrecadação do evento"></section>
+        <section class="contas-pagar-saida contas-pagar-saida--pre hidden" id="contas-pagar-saida-pre" aria-label="Saídas pré-evento"></section>
+        <section class="contas-pagar-saida contas-pagar-saida--pos hidden" id="contas-pagar-saida-pos" aria-label="Saídas pós-evento"></section>
+        <section class="contas-pagar-saida contas-pagar-saida--total hidden" id="contas-pagar-saida-total" aria-label="Saídas totais do evento"></section>
+        <section class="contas-pagar-resultado hidden" id="contas-pagar-resultado" aria-label="Resultado do evento"></section>
+      </div>
 
       <div class="contas-pagar-toolbar arrecadacao-toolbar">
         <div class="arrecadacao-toolbar-filters">
@@ -2366,6 +2391,45 @@
           <button class="btn" type="button" id="materiais-pedido-modal-close">Fechar</button>
           <button class="btn" type="button" id="materiais-pedido-modal-refresh">Atualizar texto</button>
           <button class="btn primary" type="button" id="materiais-pedido-modal-copy">Copiar texto</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="materiais-depara-modal-bg">
+      <div class="modal modal--materiais-depara" role="dialog" aria-modal="true" aria-labelledby="materiais-depara-modal-title">
+        <h2 id="materiais-depara-modal-title">De/para de produtos</h2>
+        <p class="msub" id="materiais-depara-modal-sub">
+          Agrupe modelos diferentes sob um mesmo nome no resumo para o fornecedor e no texto de produção. O detalhamento mantém o nome original de cada item.
+        </p>
+        <p class="form-errors hidden" id="materiais-depara-modal-errors" role="alert"></p>
+        <div class="materiais-depara-form">
+          <div class="field">
+            <label for="materiais-depara-origem">De (modelo no lote)</label>
+            <input id="materiais-depara-origem" type="text" placeholder="Ex.: Camiseta — Patrocínio Ouro" list="materiais-depara-origem-list" />
+            <datalist id="materiais-depara-origem-list"></datalist>
+          </div>
+          <div class="field">
+            <label for="materiais-depara-destino">Para (nome na produção)</label>
+            <input id="materiais-depara-destino" type="text" placeholder="Ex.: Camiseta oficial do evento" />
+          </div>
+          <button class="btn primary" type="button" id="materiais-depara-add">Adicionar regra</button>
+        </div>
+        <div class="table-wrap materiais-depara-table-wrap">
+          <table class="table-materiais materiais-depara-table">
+            <thead>
+              <tr>
+                <th>De (modelo no lote)</th>
+                <th>Para (nome na produção)</th>
+                <th class="col-num materiais-depara-col-acoes">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="materiais-depara-table"></tbody>
+          </table>
+        </div>
+        <p class="field-hint materiais-depara-edit-hint">As alterações na lista são salvas automaticamente ao editar.</p>
+        <p class="field-hint hidden" id="materiais-depara-pendentes-hint"></p>
+        <div class="modal-actions">
+          <button class="btn" type="button" id="materiais-depara-modal-close">Fechar</button>
         </div>
       </div>
     </div>

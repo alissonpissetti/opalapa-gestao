@@ -160,6 +160,10 @@ import {
   moveMateriaisItem,
   syncMateriaisItensForEntrega,
   getPedidoProducaoTexto,
+  listMateriaisModeloDepara,
+  createMateriaisModeloDepara,
+  updateMateriaisModeloDepara,
+  deleteMateriaisModeloDepara,
 } from './producao-materiais.js';
 import {
   migrateFinanceiroResultado,
@@ -173,7 +177,7 @@ import {
   patchSumarioArrecadacaoRealizado,
   patchFaturamentoPracaAlimentacao,
 } from './financeiro-resultado.js';
-import { buildFinanceiroPainel } from './financeiro-painel.js';
+import { buildArrecadacaoTresFontes, buildFinanceiroPainel } from './financeiro-painel.js';
 import {
   listVendasHora,
   patchVendaHora,
@@ -2103,6 +2107,49 @@ app.get('/api/producao/materiais/pedido-texto', requireEvento, async (req, res) 
   }
 });
 
+app.get('/api/producao/materiais/modelo-depara', requireEvento, async (req, res) => {
+  try {
+    res.json(await listMateriaisModeloDepara(pool, req.eventoId));
+  } catch (err) {
+    console.error('GET /api/producao/materiais/modelo-depara', err);
+    res.status(500).json({ error: 'Falha ao carregar de/para de modelos' });
+  }
+});
+
+app.post('/api/producao/materiais/modelo-depara', requireEvento, async (req, res) => {
+  try {
+    const regra = await createMateriaisModeloDepara(pool, req.eventoId, req.body);
+    res.status(201).json(regra);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/producao/materiais/modelo-depara', err);
+    res.status(500).json({ error: 'Falha ao salvar de/para' });
+  }
+});
+
+app.put('/api/producao/materiais/modelo-depara/:id', requireEvento, async (req, res) => {
+  try {
+    const regra = await updateMateriaisModeloDepara(pool, req.params.id, req.eventoId, req.body);
+    if (!regra) return res.status(404).json({ error: 'Regra não encontrada' });
+    res.json(regra);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/producao/materiais/modelo-depara/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar de/para' });
+  }
+});
+
+app.delete('/api/producao/materiais/modelo-depara/:id', requireEvento, async (req, res) => {
+  try {
+    const ok = await deleteMateriaisModeloDepara(pool, req.params.id, req.eventoId);
+    if (!ok) return res.status(404).json({ error: 'Regra não encontrada' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/producao/materiais/modelo-depara/:id', err);
+    res.status(500).json({ error: 'Falha ao excluir de/para' });
+  }
+});
+
 app.get('/api/producao/materiais/lotes', requireEvento, async (req, res) => {
   try {
     res.json(await listMateriaisLotes(pool, req.eventoId));
@@ -2350,7 +2397,13 @@ app.get('/api/financeiro/contas-pagar', requireEvento, async (req, res) => {
   try {
     const contas = await listContasPagar(pool, req.eventoId);
     const { totais } = summarizeContasPagar(contas);
-    res.json({ contas, totais });
+    let arrecadacaoResumo = null;
+    try {
+      arrecadacaoResumo = await buildArrecadacaoTresFontes(pool, req.eventoId);
+    } catch (arrecErr) {
+      console.error('GET /api/financeiro/contas-pagar (arrecadação)', arrecErr);
+    }
+    res.json({ contas, totais, arrecadacaoResumo });
   } catch (err) {
     console.error('GET /api/financeiro/contas-pagar', err);
     res.status(500).json({ error: 'Falha ao carregar contas a pagar' });

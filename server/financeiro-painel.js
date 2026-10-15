@@ -348,3 +348,129 @@ export async function buildFinanceiroPainel(pool, eventoId) {
     totalItens: contas.filter((c) => c.status !== 'cancelado').length,
   };
 }
+
+function sumArrecadacaoLeads(items, perdas) {
+  const active = items.filter((i) => !perdas.has(i.status));
+  const previsto = active.reduce((s, i) => s + (Number(i.valorTotal) || 0), 0);
+  const realizado = active.reduce((s, i) => s + (Number(i.valorPago) || 0), 0);
+  return { previsto, realizado };
+}
+
+function sumarioLinhaChave(resultadoLinhas, chave) {
+  const def = SUMARIO_ARRECADACAO_DEFS.find((d) => d.chave === chave);
+  if (!def) return { previsto: 0, realizado: 0 };
+  const linha = findSumarioArrecadacaoLinha(resultadoLinhas, chave);
+  let previstoCalculado = 0;
+  let realizadoOverride = null;
+  if (chave === 'bebidas') {
+    const { totais } = buildBebidasFromLinhas(resultadoLinhas);
+    previstoCalculado = totais.previstoReceita;
+    realizadoOverride = totais.realizadoReceita;
+  }
+  const built = buildLinhaSumario({
+    chave,
+    nome: def.item,
+    linha,
+    previstoCalculado,
+    realizado: realizadoOverride,
+    previstoEditavel: def.previstoEditavel !== false,
+    realizadoEditavel: def.realizadoEditavel === true,
+    posEvento: def.posEvento === true,
+  });
+  return {
+    previsto: Number(built.previsto) || 0,
+    realizado: Number(built.realizado) || 0,
+  };
+}
+
+function sumarioVendasOnline(resultadoLinhas) {
+  const chaves = ['ingressos-digitais', 'produtos'];
+  let previsto = 0;
+  let realizado = 0;
+  for (const chave of chaves) {
+    const parte = sumarioLinhaChave(resultadoLinhas, chave);
+    previsto += parte.previsto;
+    realizado += parte.realizado;
+  }
+  return { previsto, realizado };
+}
+
+/** Resumo simples: três fontes de entrada (vendas online, comercial, alimentação). */
+export async function buildArrecadacaoTresFontes(pool, eventoId) {
+  const [
+    resultadoLinhas,
+    etapasComercial,
+    etapasAlimentacao,
+    leadsComercial,
+    leadsAlimentacaoItens,
+  ] = await Promise.all([
+    listFinanceiroResultado(pool, eventoId),
+    listFunilEtapas(pool, eventoId, { escopo: 'comercial' }),
+    listFunilEtapas(pool, eventoId, { escopo: 'alimentacao' }),
+    listArrecadacao(pool, eventoId, { scope: 'comercial' }),
+    listArrecadacao(pool, eventoId, { scope: 'alimentacao' }),
+  ]);
+
+  const vendasOnline = sumarioVendasOnline(resultadoLinhas);
+  const comercial = sumArrecadacaoLeads(leadsComercial, perdaStatuses(etapasComercial));
+  const leadsAlimentacao = sumArrecadacaoLeads(
+    leadsAlimentacaoItens,
+    perdaStatuses(etapasAlimentacao),
+  );
+  const preAlimentacao = sumarioLinhaChave(resultadoLinhas, 'pre-alimentacao');
+  const bebidas = sumarioLinhaChave(resultadoLinhas, 'bebidas');
+  const alimentacaoPrevisto =
+    leadsAlimentacao.previsto + preAlimentacao.previsto + bebidas.previsto;
+  const alimentacaoRealizado =
+    leadsAlimentacao.realizado + preAlimentacao.realizado + bebidas.realizado;
+  const alimentacaoDetalhes = [
+    {
+      id: 'leads-alimentacao',
+      nome: 'Leads alimentação',
+      descricao: 'Funil de alimentação',
+      ...leadsAlimentacao,
+    },
+    {
+      id: 'pre-alimentacao',
+      nome: 'Pré-alimentação',
+      descricao: 'Planilha de resultado',
+      ...preAlimentacao,
+    },
+    {
+      id: 'bebidas',
+      nome: 'Bebidas',
+      descricao: 'Quantidade × valor unitário',
+      ...bebidas,
+    },
+  ].filter((d) => (Number(d.previsto) || 0) > 0 || (Number(d.realizado) || 0) > 0);
+
+  const fontes = [
+    {
+      id: 'vendas-online',
+      nome: 'Vendas online',
+      descricao: 'Ingressos e produtos',
+      ...vendasOnline,
+    },
+    {
+      id: 'comercial',
+      nome: 'Patrocínios e espaços comerciais',
+      descricao: 'Leads comerciais',
+      ...comercial,
+    },
+    {
+      id: 'alimentacao',
+      nome: 'Alimentação e bebidas',
+      descricao: 'Leads, pré-alimentação e bebidas',
+      previsto: alimentacaoPrevisto,
+      realizado: alimentacaoRealizado,
+      detalhes: alimentacaoDetalhes,
+    },
+  ];
+
+  const totais = {
+    previsto: fontes.reduce((s, f) => s + f.previsto, 0),
+    realizado: fontes.reduce((s, f) => s + f.realizado, 0),
+  };
+
+  return { totais, fontes };
+}

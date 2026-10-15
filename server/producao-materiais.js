@@ -1,4 +1,4 @@
-import { CAMISETA_TAMANHOS } from './arrecadacao-produtos.js';
+import { CAMISETA_TAMANHOS, compareCamisetaEspecificacao } from './arrecadacao-produtos.js';
 import { listProducaoEntregas } from './producao-entregas.js';
 
 export const MATERIAL_CATEGORIAS = [
@@ -157,14 +157,37 @@ function itemEspecificacao(item) {
   return '—';
 }
 
-function aggregateItens(itens) {
+function normalizeModeloKey(modelo) {
+  return String(modelo || '').trim().toLowerCase();
+}
+
+export function buildModeloDeparaLookup(deparaList) {
+  const map = new Map();
+  for (const row of deparaList || []) {
+    const origem = String(row.origemModelo ?? row.origem_modelo ?? '').trim();
+    const destino = String(row.destinoModelo ?? row.destino_modelo ?? '').trim();
+    if (!origem || !destino) continue;
+    map.set(normalizeModeloKey(origem), destino);
+  }
+  return map;
+}
+
+export function resolveModeloProducao(modelo, lookup) {
+  const original = String(modelo || '').trim() || '—';
+  if (!lookup || lookup.size === 0) return original;
+  const mapped = lookup.get(normalizeModeloKey(original));
+  return mapped || original;
+}
+
+function aggregateItens(itens, deparaLookup) {
+  const lookup = deparaLookup || new Map();
   const map = new Map();
   for (const item of itens) {
     const categoria = resolveItemCategoria(
       { categoria: item.categoria, origem: item.origem, modelo: item.modelo },
       item.atributos,
     );
-    const modelo = String(item.modelo || '').trim() || '—';
+    const modelo = resolveModeloProducao(item.modelo, lookup);
     const especificacao = itemEspecificacao(item);
     const unidade = String(item.unidade || 'un');
     const key = `${categoria}\0${modelo}\0${especificacao}\0${unidade}`;
@@ -185,8 +208,22 @@ function aggregateItens(itens) {
     (a, b) =>
       a.categoriaLabel.localeCompare(b.categoriaLabel, 'pt-BR') ||
       a.modelo.localeCompare(b.modelo, 'pt-BR') ||
-      a.especificacao.localeCompare(b.especificacao, 'pt-BR'),
+      compareCamisetaEspecificacao(a.especificacao, b.especificacao),
   );
+}
+
+function compareMateriaisItens(a, b) {
+  const origemRank = (o) => (o === 'entregas' ? 0 : 1);
+  const oa = origemRank(a.origem);
+  const ob = origemRank(b.origem);
+  if (oa !== ob) return oa - ob;
+  const modeloCmp = String(a.modelo || '').localeCompare(String(b.modelo || ''), 'pt-BR');
+  if (modeloCmp) return modeloCmp;
+  const espCmp = compareCamisetaEspecificacao(itemEspecificacao(a), itemEspecificacao(b));
+  if (espCmp) return espCmp;
+  const refCmp = String(a.referencia || '').localeCompare(String(b.referencia || ''), 'pt-BR');
+  if (refCmp) return refCmp;
+  return (Number(a.id) || 0) - (Number(b.id) || 0);
 }
 
 async function findLoteRow(pool, loteId, eventoId) {
@@ -272,6 +309,156 @@ export async function migrateProducaoMateriais(pool) {
   await pool.query(
     `UPDATE producao_materiais_itens SET categoria = 'camiseta' WHERE origem = 'entregas' AND (categoria = '' OR categoria = 'outro')`,
   );
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS producao_materiais_modelo_depara (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      evento_id INT UNSIGNED NOT NULL,
+      origem_modelo VARCHAR(200) NOT NULL,
+      destino_modelo VARCHAR(200) NOT NULL,
+      created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      UNIQUE KEY uk_producao_materiais_depara_origem (evento_id, origem_modelo),
+      INDEX idx_producao_materiais_depara_evento (evento_id),
+      CONSTRAINT fk_producao_materiais_depara_evento
+        FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
+function rowToModeloDepara(row) {
+  return {
+    id: Number(row.id),
+    origemModelo: row.origem_modelo || '',
+    destinoModelo: row.destino_modelo || '',
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+  };
+}
+
+async function loadModeloDeparaRows(pool, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT * FROM producao_materiais_modelo_depara
+     WHERE evento_id = ?
+     ORDER BY origem_modelo ASC`,
+    [eventoId],
+  );
+  return rows.map(rowToModeloDepara);
+}
+
+export async function listMateriaisModeloDepara(pool, eventoId) {
+  const regras = await loadModeloDeparaRows(pool, eventoId);
+  const [modeloRows] = await pool.query(
+    `SELECT DISTINCT i.modelo AS modelo
+     FROM producao_materiais_itens i
+     INNER JOIN producao_materiais_lotes l ON l.id = i.lote_id
+     WHERE l.evento_id = ? AND TRIM(i.modelo) <> ''
+     ORDER BY i.modelo ASC`,
+    [eventoId],
+  );
+  const lookup = buildModeloDeparaLookup(regras);
+  const modelosDistintos = modeloRows
+    .map((r) => String(r.modelo || '').trim())
+    .filter(Boolean);
+  const modelosSemRegra = modelosDistintos.filter(
+    (m) => !lookup.has(normalizeModeloKey(m)),
+  );
+  return { regras, modelosDistintos, modelosSemRegra };
+}
+
+export async function createMateriaisModeloDepara(pool, eventoId, body) {
+  const origemModelo = String(body?.origemModelo ?? body?.origem ?? body?.de ?? '').trim();
+  const destinoModelo = String(body?.destinoModelo ?? body?.destino ?? body?.para ?? '').trim();
+  if (!origemModelo) {
+    throw Object.assign(new Error('Informe o modelo de origem (de)'), { status: 400 });
+  }
+  if (!destinoModelo) {
+    throw Object.assign(new Error('Informe o modelo para produção (para)'), { status: 400 });
+  }
+  if (normalizeModeloKey(origemModelo) === normalizeModeloKey(destinoModelo)) {
+    throw Object.assign(new Error('Origem e destino devem ser diferentes'), { status: 400 });
+  }
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO producao_materiais_modelo_depara (evento_id, origem_modelo, destino_modelo)
+       VALUES (?, ?, ?)`,
+      [eventoId, origemModelo, destinoModelo],
+    );
+    const [rows] = await pool.query(
+      'SELECT * FROM producao_materiais_modelo_depara WHERE id = ? LIMIT 1',
+      [result.insertId],
+    );
+    return rowToModeloDepara(rows[0]);
+  } catch (err) {
+    if (err?.code === 'ER_DUP_ENTRY') {
+      throw Object.assign(new Error('Já existe um de/para para este modelo de origem'), {
+        status: 409,
+      });
+    }
+    throw err;
+  }
+}
+
+export async function updateMateriaisModeloDepara(pool, regraId, eventoId, body) {
+  const id = Number(regraId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+
+  const [existingRows] = await pool.query(
+    'SELECT * FROM producao_materiais_modelo_depara WHERE id = ? AND evento_id = ? LIMIT 1',
+    [id, eventoId],
+  );
+  const existing = existingRows[0];
+  if (!existing) return null;
+
+  const origemModelo =
+    body?.origemModelo !== undefined
+      ? String(body.origemModelo).trim()
+      : existing.origem_modelo;
+  const destinoModelo =
+    body?.destinoModelo !== undefined
+      ? String(body.destinoModelo).trim()
+      : existing.destino_modelo;
+  if (!origemModelo) {
+    throw Object.assign(new Error('Informe o modelo de origem (de)'), { status: 400 });
+  }
+  if (!destinoModelo) {
+    throw Object.assign(new Error('Informe o modelo para produção (para)'), { status: 400 });
+  }
+  if (normalizeModeloKey(origemModelo) === normalizeModeloKey(destinoModelo)) {
+    throw Object.assign(new Error('Origem e destino devem ser diferentes'), { status: 400 });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE producao_materiais_modelo_depara
+       SET origem_modelo = ?, destino_modelo = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND evento_id = ?`,
+      [origemModelo, destinoModelo, id, eventoId],
+    );
+  } catch (err) {
+    if (err?.code === 'ER_DUP_ENTRY') {
+      throw Object.assign(new Error('Já existe um de/para para este modelo de origem'), {
+        status: 409,
+      });
+    }
+    throw err;
+  }
+
+  const [rows] = await pool.query(
+    'SELECT * FROM producao_materiais_modelo_depara WHERE id = ? LIMIT 1',
+    [id],
+  );
+  return rowToModeloDepara(rows[0]);
+}
+
+export async function deleteMateriaisModeloDepara(pool, regraId, eventoId) {
+  const id = Number(regraId);
+  if (!Number.isInteger(id) || id <= 0) return false;
+  const [result] = await pool.query(
+    'DELETE FROM producao_materiais_modelo_depara WHERE id = ? AND evento_id = ?',
+    [id, eventoId],
+  );
+  return result.affectedRows > 0;
 }
 
 export async function listMateriaisLotes(pool, eventoId) {
@@ -300,16 +487,25 @@ async function loadLoteDetail(pool, loteId, eventoId) {
   if (!loteRow) return null;
 
   const [itemRows] = await pool.query(
-    `SELECT * FROM producao_materiais_itens
-     WHERE lote_id = ?
-     ORDER BY origem ASC, modelo ASC, tamanho ASC, referencia ASC, id ASC`,
+    `SELECT * FROM producao_materiais_itens WHERE lote_id = ?`,
     [loteId],
   );
-  const itens = itemRows.map(rowToItem);
+  const modeloDepara = await loadModeloDeparaRows(pool, eventoId);
+  const deparaLookup = buildModeloDeparaLookup(modeloDepara);
+  const itens = itemRows
+    .map((row) => {
+      const item = rowToItem(row);
+      return {
+        ...item,
+        modeloProducao: resolveModeloProducao(item.modelo, deparaLookup),
+      };
+    })
+    .sort(compareMateriaisItens);
   return {
     lote: rowToLote(loteRow),
     itens,
-    resumo: aggregateItens(itens),
+    resumo: aggregateItens(itens, deparaLookup),
+    modeloDepara,
     camisetaTamanhos: CAMISETA_TAMANHOS,
     categorias: MATERIAL_CATEGORIAS,
     unidades: MATERIAL_UNIDADES,

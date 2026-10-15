@@ -646,6 +646,28 @@ export function fetchProducaoMateriaisLotes() {
   return apiRequest('/api/producao/materiais/lotes');
 }
 
+export function fetchProducaoMateriaisModeloDepara() {
+  return apiRequest('/api/producao/materiais/modelo-depara');
+}
+
+export function createProducaoMateriaisModeloDepara(data) {
+  return apiRequest('/api/producao/materiais/modelo-depara', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateProducaoMateriaisModeloDepara(id, data) {
+  return apiRequest(`/api/producao/materiais/modelo-depara/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProducaoMateriaisModeloDepara(id) {
+  return apiRequest(`/api/producao/materiais/modelo-depara/${id}`, { method: 'DELETE' });
+}
+
 export function fetchProducaoMateriaisPedidoTexto({ loteId, detalhe = true } = {}) {
   const params = new URLSearchParams();
   if (loteId != null && loteId !== '') params.set('loteId', String(loteId));
