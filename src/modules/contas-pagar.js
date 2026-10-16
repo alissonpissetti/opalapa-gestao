@@ -46,6 +46,9 @@ const SORT_STORAGE_KEY = 'contas-pagar-sort';
 const VIEW_LAYOUT_STORAGE_KEY = 'contas-pagar-view-layout';
 const STATUS_FILTER_STORAGE_KEY = 'contas-pagar-status-filter';
 const BONIFICADO_FILTER_STORAGE_KEY = 'contas-pagar-bonificado-filter';
+const CATEGORIA_FILTER_STORAGE_KEY = 'contas-pagar-categoria-filter';
+const FORNECEDOR_FILTER_STORAGE_KEY = 'contas-pagar-fornecedor-filter';
+const FORNECEDOR_FILTER_DEBOUNCE_MS = 280;
 const TABLE_COL_COUNT = 11;
 
 function tableColCount(viewLayout) {
@@ -538,6 +541,8 @@ export function initContasPagarModule() {
     btnFasePos: document.getElementById('btn-contas-pagar-fase-pos'),
     btnBulkValores: document.getElementById('btn-contas-pagar-bulk-valores'),
     btnClearSelection: document.getElementById('btn-contas-pagar-clear-selection'),
+    categoriaFilter: document.getElementById('contas-pagar-categoria-filter'),
+    fornecedorFilter: document.getElementById('contas-pagar-fornecedor-filter'),
     bulkModalBg: document.getElementById('contas-pagar-bulk-modal-bg'),
     bulkModalSub: document.getElementById('contas-pagar-bulk-modal-sub'),
     bulkModalErrors: document.getElementById('contas-pagar-bulk-modal-errors'),
@@ -665,6 +670,9 @@ export function initContasPagarModule() {
   let viewLayout = readViewLayout();
   let statusFilter = readStatusFilter();
   let bonificadoFilter = readBonificadoFilter();
+  let categoriaFilter = readCategoriaFilter();
+  let fornecedorFilter = readFornecedorFilter();
+  let fornecedorFilterTimer = null;
 
   function readViewLayout() {
     try {
@@ -719,6 +727,110 @@ export function initContasPagarModule() {
     } catch {
       return 'todos';
     }
+  }
+
+  function readCategoriaFilter() {
+    try {
+      const v = localStorage.getItem(CATEGORIA_FILTER_STORAGE_KEY);
+      if (v == null || v === '') return '';
+      if (v === 'sem') return 'sem';
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 ? String(n) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function writeCategoriaFilter() {
+    try {
+      localStorage.setItem(CATEGORIA_FILTER_STORAGE_KEY, categoriaFilter || '');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function categoriaFilterLabel() {
+    if (!categoriaFilter) return '';
+    if (categoriaFilter === 'sem') return 'Sem categoria';
+    const cat = categorias.find((c) => String(c.id) === categoriaFilter);
+    return cat?.nome || 'Categoria';
+  }
+
+  function syncCategoriaFilterSelect() {
+    if (!els.categoriaFilter) return;
+    const prev = categoriaFilter;
+    const usedIds = new Set(contas.map((c) => c.categoriaId).filter(Boolean));
+    const list = [...categorias]
+      .filter((c) => c.ativo !== false || usedIds.has(c.id))
+      .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+    const hasSem = contas.some((c) => !c.categoriaId);
+    const parts = ['<option value="">Todas</option>'];
+    if (hasSem) parts.push('<option value="sem">Sem categoria</option>');
+    for (const cat of list) {
+      parts.push(`<option value="${cat.id}">${escapeHtml(cat.nome || '—')}</option>`);
+    }
+    els.categoriaFilter.innerHTML = parts.join('');
+    const valid = [...els.categoriaFilter.options].some((o) => o.value === prev);
+    categoriaFilter = valid ? prev : '';
+    els.categoriaFilter.value = categoriaFilter;
+    if (!valid && prev) writeCategoriaFilter();
+  }
+
+  function setCategoriaFilter(value) {
+    if (value === 'sem') {
+      categoriaFilter = 'sem';
+    } else if (value === '' || value == null) {
+      categoriaFilter = '';
+    } else {
+      const n = Number(value);
+      categoriaFilter = Number.isInteger(n) && n > 0 ? String(n) : '';
+    }
+    writeCategoriaFilter();
+    if (els.categoriaFilter) els.categoriaFilter.value = categoriaFilter;
+    renderTable();
+  }
+
+  function readFornecedorFilter() {
+    try {
+      const v = localStorage.getItem(FORNECEDOR_FILTER_STORAGE_KEY);
+      return normalizeNome(v);
+    } catch {
+      return '';
+    }
+  }
+
+  function writeFornecedorFilter() {
+    try {
+      localStorage.setItem(FORNECEDOR_FILTER_STORAGE_KEY, fornecedorFilter);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function fornecedorMatchesFilter(conta) {
+    const q = normalizeNome(fornecedorFilter).toLowerCase();
+    if (!q) return true;
+    const nome = normalizeNome(conta.fornecedor).toLowerCase();
+    return nome.includes(q);
+  }
+
+  function applyFornecedorFilterFromInput() {
+    fornecedorFilter = normalizeNome(els.fornecedorFilter?.value);
+    writeFornecedorFilter();
+    renderTable();
+  }
+
+  function scheduleFornecedorFilterApply() {
+    if (fornecedorFilterTimer) clearTimeout(fornecedorFilterTimer);
+    fornecedorFilterTimer = setTimeout(() => {
+      fornecedorFilterTimer = null;
+      applyFornecedorFilterFromInput();
+    }, FORNECEDOR_FILTER_DEBOUNCE_MS);
+  }
+
+  function syncFornecedorFilterInput() {
+    if (!els.fornecedorFilter) return;
+    els.fornecedorFilter.value = fornecedorFilter;
   }
 
   function syncFilterUi() {
@@ -793,6 +905,15 @@ export function initContasPagarModule() {
     } else if (bonificadoFilter === 'nao') {
       out = out.filter((c) => !c.bonificado);
     }
+    if (categoriaFilter === 'sem') {
+      out = out.filter((c) => !c.categoriaId);
+    } else if (categoriaFilter) {
+      const catId = Number(categoriaFilter);
+      out = out.filter((c) => Number(c.categoriaId) === catId);
+    }
+    if (fornecedorFilter) {
+      out = out.filter((c) => fornecedorMatchesFilter(c));
+    }
     return out;
   }
 
@@ -817,6 +938,8 @@ export function initContasPagarModule() {
     }
     if (bonificadoFilter === 'sim') hints.push('bonificados');
     else if (bonificadoFilter === 'nao') hints.push('não bonificados');
+    if (categoriaFilter) hints.push(`categoria: ${categoriaFilterLabel()}`);
+    if (fornecedorFilter) hints.push(`fornecedor: ${fornecedorFilter}`);
     if (!hints.length) return '';
     return ` · filtro: ${hints.join(' · ')}`;
   }
@@ -1733,6 +1856,7 @@ export function initContasPagarModule() {
       arrecadacaoResumo = contasRes?.arrecadacaoResumo ?? null;
       planoContas = planoRes?.planoContas || [];
       inlineEditId = null;
+      syncCategoriaFilterSelect();
       renderTable();
     } catch (err) {
       if (els.summary) els.summary.textContent = err.message || 'Falha ao carregar.';
@@ -2078,6 +2202,15 @@ export function initContasPagarModule() {
   document.querySelectorAll('[data-cp-bonificado]').forEach((btn) => {
     btn.addEventListener('click', () => setBonificadoFilter(btn.dataset.cpBonificado));
   });
+  els.categoriaFilter?.addEventListener('change', () => {
+    setCategoriaFilter(els.categoriaFilter.value);
+  });
+  els.fornecedorFilter?.addEventListener('input', scheduleFornecedorFilterApply);
+  els.fornecedorFilter?.addEventListener('search', () => {
+    if (fornecedorFilterTimer) clearTimeout(fornecedorFilterTimer);
+    applyFornecedorFilterFromInput();
+  });
+  syncFornecedorFilterInput();
   syncFilterUi();
 
   els.btnBaixaCancel?.addEventListener('click', closeBaixaModal);

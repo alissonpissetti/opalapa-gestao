@@ -139,6 +139,14 @@ function itemsForScope(list, scope) {
   return list.filter((i) => i.tipo === 'espaco' || i.tipo === 'patrocinio');
 }
 
+const PAGAMENTO_FILTER_KEYS = ['quitado', 'parcial', 'nada'];
+
+const PAGAMENTO_FILTER_LABELS = {
+  quitado: 'quitado',
+  parcial: 'parcialmente pago',
+  nada: 'nada pago',
+};
+
 function paymentStatusForGroup(group) {
   const pago = Number(group.valorPago) || 0;
   const falta = Number(group.valorFalta) || 0;
@@ -147,11 +155,11 @@ function paymentStatusForGroup(group) {
   return 'parcial';
 }
 
-function applyPagamentoFilter(list, filter) {
-  if (filter === 'todos') return list;
+function applyPagamentoFilter(list, filterSet) {
+  if (!filterSet?.size) return list;
   const allowedIds = new Set(
     groupItemsForTable(list)
-      .filter((group) => paymentStatusForGroup(group) === filter)
+      .filter((group) => filterSet.has(paymentStatusForGroup(group)))
       .map((group) => group.participanteId),
   );
   return list.filter((item) => allowedIds.has(item.participanteId));
@@ -174,6 +182,11 @@ function applyAlimentacaoCandidaturaFilter(list, filter) {
   if (!filter || filter === 'todos') return list;
   if (filter === 'sem') return list.filter((item) => !item.candidatura);
   return list.filter((item) => candidaturaClassificacaoKey(item) === filter);
+}
+
+function applyEtapaFilter(list, filterSet) {
+  if (!filterSet?.size) return list;
+  return list.filter((item) => filterSet.has(item.status));
 }
 
   async function notifyEspacosDataChanged(item) {
@@ -515,7 +528,8 @@ export function initArrecadacaoModule(
   let leadOrigemSaving = false;
   let draftFunilEtapas = [];
   let viewMode = 'lista';
-  let pagamentoFilter = 'todos';
+  let pagamentoFilter = readPagamentoFilter();
+  let etapaFilter = readEtapaFilter();
   let situacaoFilter = 'ativos';
   let alimentacaoSituacaoFilter = 'ativos';
   let alimentacaoCandidaturaFilter = 'todos';
@@ -538,6 +552,7 @@ export function initArrecadacaoModule(
     }
     if (isArtisticoScope(leadScope)) return items;
     let list = applySituacaoFilter(items, situacaoFilter, funilEtapas);
+    list = applyEtapaFilter(list, etapaFilter);
     list = applyPagamentoFilter(list, pagamentoFilter);
     return list;
   }
@@ -548,15 +563,182 @@ export function initArrecadacaoModule(
     else renderTable();
   }
 
-  function setPagamentoFilter(value) {
-    const allowed = new Set(['todos', 'quitado', 'parcial', 'nada']);
-    pagamentoFilter = allowed.has(value) ? value : 'todos';
-    localStorage.setItem('arrecadacao-pagamento-filter', pagamentoFilter);
+  function readPagamentoFilter() {
+    try {
+      const raw = localStorage.getItem('arrecadacao-pagamento-filter');
+      if (!raw || raw === 'todos') return new Set();
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return new Set(parsed.filter((k) => PAGAMENTO_FILTER_KEYS.includes(k)));
+        }
+      } catch {
+        /* legado: string única */
+      }
+      if (PAGAMENTO_FILTER_KEYS.includes(raw)) return new Set([raw]);
+      return new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  function pagamentoFilterShowsAll() {
+    return pagamentoFilter.size === 0;
+  }
+
+  function writePagamentoFilter() {
+    try {
+      localStorage.setItem(
+        'arrecadacao-pagamento-filter',
+        pagamentoFilterShowsAll() ? '[]' : JSON.stringify([...pagamentoFilter]),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function syncPagamentoFilterUi() {
     document.querySelectorAll('[data-arr-pagamento]').forEach((btn) => {
-      const active = btn.dataset.arrPagamento === pagamentoFilter;
+      const key = btn.dataset.arrPagamento;
+      const active =
+        key === 'todos' ? pagamentoFilterShowsAll() : pagamentoFilter.has(key);
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+  }
+
+  function togglePagamentoFilter(value) {
+    if (value === 'todos') {
+      pagamentoFilter = new Set();
+      writePagamentoFilter();
+      syncPagamentoFilterUi();
+      refreshFilteredView();
+      return;
+    }
+    if (!PAGAMENTO_FILTER_KEYS.includes(value)) return;
+
+    const next = new Set(pagamentoFilter);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    pagamentoFilter = next;
+    writePagamentoFilter();
+    syncPagamentoFilterUi();
+    refreshFilteredView();
+  }
+
+  function readEtapaFilter() {
+    try {
+      const raw = localStorage.getItem('arrecadacao-etapa-filter');
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.map((s) => String(s)).filter(Boolean));
+    } catch {
+      return new Set();
+    }
+  }
+
+  function writeEtapaFilter() {
+    try {
+      localStorage.setItem(
+        'arrecadacao-etapa-filter',
+        etapaFilter.size ? JSON.stringify([...etapaFilter]) : '[]',
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function etapaFilterShowsAll() {
+    return etapaFilter.size === 0;
+  }
+
+  function activeFunilEtapasForFilter() {
+    return [...funilEtapas]
+      .filter((e) => e.ativo !== false)
+      .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+  }
+
+  function vendaEtapaStatuses() {
+    return activeFunilEtapasForFilter()
+      .filter((e) => e.tipo === 'venda')
+      .map((e) => e.status);
+  }
+
+  function isFechadosEtapaFilterActive() {
+    const vendas = vendaEtapaStatuses();
+    if (!vendas.length || etapaFilter.size !== vendas.length) return false;
+    return vendas.every((s) => etapaFilter.has(s));
+  }
+
+  function pruneEtapaFilter() {
+    const valid = new Set(funilEtapas.map((e) => e.status));
+    etapaFilter = new Set([...etapaFilter].filter((s) => valid.has(s)));
+    writeEtapaFilter();
+  }
+
+  function etapaFilterHintLabels() {
+    if (!etapaFilter.size) return [];
+    const byStatus = new Map(funilEtapas.map((e) => [e.status, e.titulo]));
+    return [...etapaFilter]
+      .map((s) => byStatus.get(s) || s)
+      .sort((a, b) => String(a).localeCompare(String(b), 'pt-BR'));
+  }
+
+  function renderEtapaFilterButtons() {
+    const container = document.getElementById('arrecadacao-etapa-filters');
+    if (!container) return;
+    if (leadScope !== 'comercial' || !funilEtapas.length) {
+      container.innerHTML = '';
+      container.classList.add('hidden');
+      return;
+    }
+    container.classList.remove('hidden');
+    const etapas = activeFunilEtapasForFilter().filter((e) => e.tipo !== 'perda');
+    const vendas = vendaEtapaStatuses();
+    const parts = [
+      `<button class="tbtn${etapaFilterShowsAll() ? ' active' : ''}" type="button" data-arr-etapa="todos" role="tab" aria-selected="${etapaFilterShowsAll() ? 'true' : 'false'}">Todas etapas</button>`,
+    ];
+    if (vendas.length) {
+      const fechadosActive = isFechadosEtapaFilterActive();
+      parts.push(
+        `<button class="tbtn${fechadosActive ? ' active' : ''}" type="button" data-arr-etapa="fechados" role="tab" aria-selected="${fechadosActive ? 'true' : 'false'}">Fechados</button>`,
+      );
+    }
+    for (const etapa of etapas) {
+      const active = etapaFilter.has(etapa.status);
+      parts.push(
+        `<button class="tbtn${active ? ' active' : ''}" type="button" data-arr-etapa="${escapeHtml(etapa.status)}" role="tab" aria-selected="${active ? 'true' : 'false'}">${escapeHtml(etapa.titulo)}</button>`,
+      );
+    }
+    container.innerHTML = parts.join('');
+  }
+
+  function toggleEtapaFilter(value) {
+    if (value === 'todos') {
+      etapaFilter = new Set();
+      writeEtapaFilter();
+      renderEtapaFilterButtons();
+      refreshFilteredView();
+      return;
+    }
+    if (value === 'fechados') {
+      const vendas = vendaEtapaStatuses();
+      if (!vendas.length) return;
+      if (isFechadosEtapaFilterActive()) etapaFilter = new Set();
+      else etapaFilter = new Set(vendas);
+      writeEtapaFilter();
+      renderEtapaFilterButtons();
+      refreshFilteredView();
+      return;
+    }
+    if (!funilEtapas.some((e) => e.status === value)) return;
+    const next = new Set(etapaFilter);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    etapaFilter = next;
+    writeEtapaFilter();
+    renderEtapaFilterButtons();
     refreshFilteredView();
   }
 
@@ -630,7 +812,15 @@ export function initArrecadacaoModule(
     const hints = [];
     if (situacaoFilter === 'ativos') hints.push('cancelados ocultos');
     else if (situacaoFilter === 'cancelados') hints.push('só cancelados');
-    if (pagamentoFilter !== 'todos') hints.push('filtro de pagamento');
+    if (pagamentoFilter.size > 0) {
+      const labels = [...pagamentoFilter]
+        .map((k) => PAGAMENTO_FILTER_LABELS[k] || k)
+        .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      hints.push(`pagamento: ${labels.join(', ')}`);
+    }
+    if (etapaFilter.size > 0) {
+      hints.push(`etapa: ${etapaFilterHintLabels().join(', ')}`);
+    }
     if (!hints.length || displayCount === items.length) return '';
     return ` · ${hints.join(' · ')}`;
   }
@@ -3731,6 +3921,10 @@ export function initArrecadacaoModule(
     espacosTipos = data.espacosTipos || [];
     funilEtapas = data.funilEtapas || [];
     funilEscopoAtual = data.funilEscopo || funilEscopoForLeadScope(scope);
+    if (scope === 'comercial') {
+      pruneEtapaFilter();
+      renderEtapaFilterButtons();
+    }
     store?.setParticipantes(participantes);
     renderParticipantesDatalist();
     renderStats(summarizeItems(visibleItems(), funilEtapas));
@@ -4414,7 +4608,13 @@ export function initArrecadacaoModule(
     });
   });
   document.querySelectorAll('[data-arr-pagamento]').forEach((btn) => {
-    btn.addEventListener('click', () => setPagamentoFilter(btn.dataset.arrPagamento));
+    btn.addEventListener('click', () => togglePagamentoFilter(btn.dataset.arrPagamento));
+  });
+  const etapaFiltersEl = document.getElementById('arrecadacao-etapa-filters');
+  etapaFiltersEl?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-arr-etapa]');
+    if (!btn) return;
+    toggleEtapaFilter(btn.dataset.arrEtapa);
   });
   document.querySelectorAll('[data-arr-situacao]').forEach((btn) => {
     btn.addEventListener('click', () => setSituacaoFilter(btn.dataset.arrSituacao));
@@ -4431,15 +4631,9 @@ export function initArrecadacaoModule(
       setFinancialFilter(btn.dataset.arrFinancial);
     });
   });
-  const savedPagamentoFilter = localStorage.getItem('arrecadacao-pagamento-filter');
-  if (savedPagamentoFilter && ['todos', 'quitado', 'parcial', 'nada'].includes(savedPagamentoFilter)) {
-    pagamentoFilter = savedPagamentoFilter;
-    document.querySelectorAll('[data-arr-pagamento]').forEach((btn) => {
-      const active = btn.dataset.arrPagamento === pagamentoFilter;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
-  }
+  pagamentoFilter = readPagamentoFilter();
+  syncPagamentoFilterUi();
+  etapaFilter = readEtapaFilter();
   const savedSituacaoFilter = localStorage.getItem('arrecadacao-situacao-filter');
   if (savedSituacaoFilter && ['ativos', 'cancelados', 'todos'].includes(savedSituacaoFilter)) {
     situacaoFilter = savedSituacaoFilter;

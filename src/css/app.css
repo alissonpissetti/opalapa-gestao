@@ -2117,6 +2117,61 @@ polygon.selected {
   flex-wrap: wrap;
 }
 
+/* Arrecadação comercial: filtros + ações em uma única linha (scroll horizontal se precisar) */
+#view-arrecadacao .arrecadacao-toolbar {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  max-width: 100%;
+  padding-bottom: 2px;
+}
+
+#view-arrecadacao .arrecadacao-toolbar-filters,
+#view-arrecadacao .arrecadacao-toolbar-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+#view-arrecadacao .arrecadacao-toolbar .report-filters {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 4px;
+  padding-right: 6px;
+  margin-right: 2px;
+  border-right: 1px solid var(--content-border, #e2e8f0);
+}
+
+#view-arrecadacao .arrecadacao-toolbar-actions {
+  padding-left: 2px;
+  border-right: none;
+}
+
+#view-arrecadacao .arrecadacao-toolbar-filters > .report-filters:last-child {
+  border-right: none;
+  padding-right: 0;
+  margin-right: 0;
+}
+
+#view-arrecadacao .arrecadacao-etapa-filters {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+#view-arrecadacao .arrecadacao-toolbar .tbtn {
+  padding: 5px 9px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .espacos-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -9321,23 +9376,23 @@ body.wa-inbox-open {
     text-align: center;
   }
 
-  .arrecadacao-toolbar {
-    flex-direction: column;
-    align-items: stretch;
+  #view-arrecadacao .arrecadacao-toolbar {
+    flex-direction: row;
+    align-items: center;
   }
 
-  .arrecadacao-toolbar-filters {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
+  #view-arrecadacao .arrecadacao-toolbar-filters {
+    width: auto;
+    flex-direction: row;
+    align-items: center;
   }
 
-  .arrecadacao-toolbar-actions {
-    width: 100%;
+  #view-arrecadacao .arrecadacao-toolbar-actions {
+    width: auto;
   }
 
-  .arrecadacao-toolbar-actions .tbtn {
-    flex: 1;
+  #view-arrecadacao .arrecadacao-toolbar-actions .tbtn {
+    flex: 0 0 auto;
     min-width: 0;
   }
 
@@ -12042,6 +12097,54 @@ body.wa-inbox-open {
 
 #view-financeiro-contas-pagar .contas-pagar-toolbar .report-filters {
   flex-wrap: wrap;
+}
+
+#view-financeiro-contas-pagar .contas-pagar-categoria-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+#view-financeiro-contas-pagar .contas-pagar-categoria-filter label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+#view-financeiro-contas-pagar .contas-pagar-categoria-filter select {
+  min-width: 9rem;
+  max-width: 14rem;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+#view-financeiro-contas-pagar .contas-pagar-fornecedor-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+#view-financeiro-contas-pagar .contas-pagar-fornecedor-filter label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+#view-financeiro-contas-pagar .contas-pagar-fornecedor-filter input {
+  min-width: 10rem;
+  max-width: 16rem;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
 }
 
 .table-contas-pagar tr.contas-pagar-grupo-head td {

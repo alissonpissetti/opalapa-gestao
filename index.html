@@ -474,6 +474,12 @@
             <button class="tbtn" type="button" data-arr-situacao="cancelados" role="tab" aria-selected="false">Cancelados</button>
             <button class="tbtn" type="button" data-arr-situacao="todos" role="tab" aria-selected="false">Todos</button>
           </div>
+          <div
+            class="report-filters arrecadacao-etapa-filters hidden"
+            id="arrecadacao-etapa-filters"
+            role="tablist"
+            aria-label="Filtro por etapa do funil"
+          ></div>
           <div class="report-filters" role="tablist" aria-label="Filtro de pagamento">
             <button class="tbtn active" type="button" data-arr-pagamento="todos" role="tab" aria-selected="true">Todos</button>
             <button class="tbtn" type="button" data-arr-pagamento="quitado" role="tab" aria-selected="false">Quitado</button>
@@ -1355,6 +1361,22 @@
             <button class="tbtn active" type="button" data-cp-bonificado="todos" role="tab" aria-selected="true">Todos</button>
             <button class="tbtn" type="button" data-cp-bonificado="sim" role="tab" aria-selected="false">Bonificados</button>
             <button class="tbtn" type="button" data-cp-bonificado="nao" role="tab" aria-selected="false">Não bonificados</button>
+          </div>
+          <div class="field-inline contas-pagar-categoria-filter">
+            <label for="contas-pagar-categoria-filter">Categoria</label>
+            <select id="contas-pagar-categoria-filter">
+              <option value="">Todas</option>
+            </select>
+          </div>
+          <div class="field-inline contas-pagar-fornecedor-filter">
+            <label for="contas-pagar-fornecedor-filter">Fornecedor</label>
+            <input
+              type="search"
+              id="contas-pagar-fornecedor-filter"
+              placeholder="Buscar nome…"
+              autocomplete="off"
+              enterkeyhint="search"
+            />
           </div>
         </div>
       </div>
