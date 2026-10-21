@@ -294,6 +294,24 @@ export function buildResultadoFinal({
   };
 }
 
+export async function buildSumarioArrecadacaoForEvento(pool, eventoId) {
+  const [contas, arrecadacao, etapas, resultadoLinhas] = await Promise.all([
+    listContasPagar(pool, eventoId),
+    listArrecadacao(pool, eventoId, { scope: 'comercial' }),
+    listFunilEtapas(pool, eventoId, { escopo: 'comercial' }),
+    listFinanceiroResultado(pool, eventoId),
+  ]);
+
+  const perdas = perdaStatuses(etapas);
+  await clearSumarioArrecadacaoOverridesNaoEditaveis(pool, eventoId, resultadoLinhas);
+  return buildSumarioArrecadacao({
+    arrecadacao,
+    perdas,
+    contas,
+    resultadoLinhas,
+  });
+}
+
 export async function buildFinanceiroPainel(pool, eventoId) {
   const [contas, arrecadacao, etapas, resultadoLinhas] = await Promise.all([
     listContasPagar(pool, eventoId),

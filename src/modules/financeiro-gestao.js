@@ -11,6 +11,10 @@ import {
 import { escapeHtml, fmtMoney, formatValorInput, maskValorInput, parseValor } from '../lib/format.js';
 import { BAR_CHART_COLORS, renderBarChart } from '../lib/bar-chart.js';
 import { renderFinSwatch, renderPieChart, resolvePieSliceColors } from '../lib/pie-chart.js';
+import {
+  renderSumarioArrecadacao,
+  resolveSumarioGrupos,
+} from '../lib/financeiro-sumario-arrecadacao-render.js';
 
 function custoCategoriaValor(c) {
   const custoTotal = Number(c.custoTotal) || 0;
@@ -25,133 +29,8 @@ function buildCustoPieSlices(categorias) {
   }));
 }
 
-function buildArrecadacaoPieSlices(linhas) {
-  return linhas.map((l) => ({
-    label: l.nome,
-    value: Number(l.previsto) || 0,
-  }));
-}
-
 function cellMoney(val) {
   return fmtMoney(val);
-}
-
-function renderPrevistoCell(l) {
-  if (l.previstoEditavel === false) {
-    return `<span class="fin-val fin-sumario-previsto-readonly" title="Calculado automaticamente pelo sistema">${cellMoney(l.previsto)}</span><span class="fin-sumario-auto-hint">calculado automaticamente</span>`;
-  }
-  return `<input type="text" class="fin-inline-input fin-inline-money fin-sumario-previsto" data-chave="${escapeHtml(l.id)}" title="Valor previsto editável" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(l.previsto))}" />`;
-}
-
-function renderRealizadoCell(l) {
-  if (l.realizadoEditavel === true) {
-    return `<input type="text" class="fin-inline-input fin-inline-money fin-sumario-realizado" data-chave="${escapeHtml(l.id)}" title="Valor realizado editável manualmente" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(l.realizado))}" />`;
-  }
-  return cellMoney(l.realizado);
-}
-
-function resolveSumarioGrupos(sumario) {
-  const linhas = sumario?.linhas || [];
-  const linhasPre = sumario.linhasPre?.length ? sumario.linhasPre : linhas.filter((l) => !l.posEvento);
-  const linhasPos = sumario.linhasPos?.length ? sumario.linhasPos : linhas.filter((l) => l.posEvento);
-  const sumTotais = (items) => {
-    const previsto = items.reduce((s, l) => s + (Number(l.previsto) || 0), 0);
-    const realizado = items.reduce((s, l) => s + (Number(l.realizado) || 0), 0);
-    return { previsto, realizado, falta: Math.max(0, previsto - realizado) };
-  };
-  return {
-    linhasPre,
-    linhasPos,
-    totaisPre: sumario.totaisPre || sumTotais(linhasPre),
-    totaisPos: sumario.totaisPos || sumTotais(linhasPos),
-    totais: sumario.totais || sumTotais(linhas),
-  };
-}
-
-function renderSumarioLinha(l, colorIndex, arrecadacaoColors) {
-  return `
-              <tr data-sumario-chave="${escapeHtml(l.id)}">
-                <td class="fin-custo-cat"><span class="fin-cat-with-swatch">${renderFinSwatch(arrecadacaoColors[colorIndex])}<span>${escapeHtml(l.nome)}</span></span></td>
-                <td class="fin-col-money fin-col-previsto">${renderPrevistoCell(l)}</td>
-                <td class="fin-col-money fin-col-realizado">${renderRealizadoCell(l)}</td>
-              </tr>`;
-}
-
-function renderSumarioGrupo({ titulo, grupo, linhas, totais, colorById, arrecadacaoColors }) {
-  if (!linhas.length) return '';
-  const rows = linhas
-    .map((l) => renderSumarioLinha(l, colorById.get(l.id) ?? 0, arrecadacaoColors))
-    .join('');
-  return `
-            <tbody class="fin-sumario-grupo" data-sumario-grupo="${grupo}">
-              <tr class="fin-sumario-grupo-head">
-                <th colspan="3" scope="rowgroup">${escapeHtml(titulo)}</th>
-              </tr>
-              ${rows}
-              <tr class="fin-sumario-subtotal" data-sumario-subtotal="${grupo}">
-                <td>Subtotal</td>
-                <td class="fin-col-money fin-col-previsto">${cellMoney(totais.previsto)}</td>
-                <td class="fin-col-money fin-col-realizado">${cellMoney(totais.realizado)}</td>
-              </tr>
-            </tbody>`;
-}
-
-function renderSumarioArrecadacao(sumario) {
-  if (!sumario?.linhas?.length) return '';
-
-  const { linhasPre, linhasPos, totaisPre, totaisPos, totais } = resolveSumarioGrupos(sumario);
-  const arrecadacaoSlices = buildArrecadacaoPieSlices(sumario.linhas);
-  const { colorByIndex: arrecadacaoColors } = resolvePieSliceColors(arrecadacaoSlices);
-  const colorById = new Map(sumario.linhas.map((l, i) => [l.id, i]));
-  const pieArrecadacao = renderPieChart(arrecadacaoSlices, {
-    title: 'Participação na arrecadação (previsto)',
-    showLegend: false,
-  });
-
-  return `
-      <section class="financeiro-arrecadacao" id="financeiro-sumario-arrecadacao" aria-label="Sumário de arrecadação">
-        <div class="financeiro-custos-head">
-          <h2 class="financeiro-custos-title">Sumário de arrecadação</h2>
-          <span class="financeiro-painel-lead">Previsto editável por categoria · realizado manual em ingressos digitais</span>
-        </div>
-        <div class="financeiro-chart-row">
-        <div class="table-wrap">
-          <table class="table-financeiro-custos table-financeiro-arrecadacao">
-            <thead>
-              <tr>
-                <th>Categoria</th>
-                <th class="fin-col-money">Previsto</th>
-                <th class="fin-col-money fin-col-realizado">Realizado</th>
-              </tr>
-            </thead>
-            ${renderSumarioGrupo({
-              titulo: 'Arrecadação pré',
-              grupo: 'pre',
-              linhas: linhasPre,
-              totais: totaisPre,
-              colorById,
-              arrecadacaoColors,
-            })}
-            ${renderSumarioGrupo({
-              titulo: 'Arrecadação pós',
-              grupo: 'pos',
-              linhas: linhasPos,
-              totais: totaisPos,
-              colorById,
-              arrecadacaoColors,
-            })}
-            <tfoot>
-              <tr class="fin-custo-total" data-sumario-totais>
-                <td>Total</td>
-                <td class="fin-col-money fin-col-previsto-total">${cellMoney(totais.previsto)}</td>
-                <td class="fin-col-money fin-col-realizado">${cellMoney(totais.realizado)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <div class="financeiro-pie-wrap" aria-label="Gráfico de participação na arrecadação">${pieArrecadacao}</div>
-        </div>
-      </section>`;
 }
 
 function renderVendaHoraQtyInput(item, field, value) {

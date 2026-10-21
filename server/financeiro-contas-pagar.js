@@ -110,6 +110,13 @@ function rowToPlanoConta(row) {
   };
 }
 
+function faseExplicitInRaw(raw) {
+  if (raw == null || typeof raw !== 'object') return false;
+  if (raw.fase !== undefined && raw.fase !== null && raw.fase !== '') return true;
+  if (raw.preEvento !== undefined || raw.pre_evento !== undefined) return true;
+  return false;
+}
+
 function normalizeFase(raw) {
   if (raw == null || raw === '') return 'pre';
   if (typeof raw === 'boolean') return raw ? 'pre' : 'pos';
@@ -308,6 +315,160 @@ export async function migrateFinanceiroContasPagar(pool) {
         SELECT 1 FROM financeiro_contas_pagar_baixas b WHERE b.conta_id = cp.id
       )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS financeiro_caixa_evento (
+      evento_id INT UNSIGNED NOT NULL PRIMARY KEY,
+      valor DECIMAL(14,2) NOT NULL DEFAULT 0,
+      updated_at DATETIME(3) NULL,
+      CONSTRAINT fk_fin_caixa_evento FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS financeiro_caixa_itens (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      evento_id INT UNSIGNED NOT NULL,
+      descricao VARCHAR(160) NOT NULL,
+      valor DECIMAL(14,2) NOT NULL DEFAULT 0,
+      ordem INT NOT NULL DEFAULT 0,
+      created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updated_at DATETIME(3) NULL,
+      INDEX idx_fin_caixa_itens_evento (evento_id),
+      CONSTRAINT fk_fin_caixa_itens_evento FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await pool.query(`
+    INSERT INTO financeiro_caixa_itens (evento_id, descricao, valor, ordem, updated_at)
+    SELECT c.evento_id, 'Saldo registrado', c.valor, 0, c.updated_at
+    FROM financeiro_caixa_evento c
+    WHERE c.valor <> 0
+      AND NOT EXISTS (
+        SELECT 1 FROM financeiro_caixa_itens i WHERE i.evento_id = c.evento_id
+      )
+  `);
+}
+
+function rowToCaixaItem(row) {
+  return {
+    id: Number(row.id),
+    eventoId: Number(row.evento_id),
+    descricao: row.descricao || '',
+    valor: Number(row.valor) || 0,
+    ordem: Number(row.ordem) || 0,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+  };
+}
+
+function summarizeCaixaItens(itens) {
+  const total = itens.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+  return { itens, total };
+}
+
+export async function getCaixaAtualEvento(pool, eventoId) {
+  const [rows] = await pool.query(
+    `SELECT id, evento_id, descricao, valor, ordem, created_at, updated_at
+     FROM financeiro_caixa_itens
+     WHERE evento_id = ?
+     ORDER BY ordem ASC, id ASC`,
+    [eventoId],
+  );
+  const itens = rows.map(rowToCaixaItem);
+  const { total } = summarizeCaixaItens(itens);
+  return { itens, total, valor: total };
+}
+
+function normalizeCaixaDescricao(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) {
+    throw Object.assign(new Error('Informe a descrição do saldo'), { status: 400 });
+  }
+  if (s.length > 160) {
+    throw Object.assign(new Error('Descrição muito longa (máx. 160 caracteres)'), { status: 400 });
+  }
+  return s;
+}
+
+export async function createCaixaItem(pool, eventoId, body) {
+  const descricao = normalizeCaixaDescricao(body?.descricao);
+  const valor = parseMoney(body?.valor, 'Saldo');
+  const [ordemRows] = await pool.query(
+    'SELECT COALESCE(MAX(ordem), -1) + 1 AS next_ordem FROM financeiro_caixa_itens WHERE evento_id = ?',
+    [eventoId],
+  );
+  const ordem = Number(ordemRows[0]?.next_ordem) || 0;
+  const [result] = await pool.query(
+    `INSERT INTO financeiro_caixa_itens (evento_id, descricao, valor, ordem, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
+    [eventoId, descricao, valor, ordem],
+  );
+  const [rows] = await pool.query(
+    `SELECT id, evento_id, descricao, valor, ordem, created_at, updated_at
+     FROM financeiro_caixa_itens WHERE id = ? AND evento_id = ? LIMIT 1`,
+    [result.insertId, eventoId],
+  );
+  if (!rows.length) {
+    throw Object.assign(new Error('Item de caixa não encontrado'), { status: 404 });
+  }
+  return rowToCaixaItem(rows[0]);
+}
+
+export async function updateCaixaItem(pool, eventoId, itemId, body) {
+  const id = Number(itemId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw Object.assign(new Error('Item inválido'), { status: 400 });
+  }
+  const [existing] = await pool.query(
+    'SELECT id FROM financeiro_caixa_itens WHERE id = ? AND evento_id = ? LIMIT 1',
+    [id, eventoId],
+  );
+  if (!existing.length) {
+    throw Object.assign(new Error('Item de caixa não encontrado'), { status: 404 });
+  }
+  const descricao = body?.descricao != null ? normalizeCaixaDescricao(body.descricao) : undefined;
+  const valor = body?.valor != null ? parseMoney(body.valor, 'Saldo') : undefined;
+  if (descricao === undefined && valor === undefined) {
+    throw Object.assign(new Error('Nada para atualizar'), { status: 400 });
+  }
+  const sets = [];
+  const params = [];
+  if (descricao !== undefined) {
+    sets.push('descricao = ?');
+    params.push(descricao);
+  }
+  if (valor !== undefined) {
+    sets.push('valor = ?');
+    params.push(valor);
+  }
+  sets.push('updated_at = CURRENT_TIMESTAMP(3)');
+  params.push(id, eventoId);
+  await pool.query(
+    `UPDATE financeiro_caixa_itens SET ${sets.join(', ')} WHERE id = ? AND evento_id = ?`,
+    params,
+  );
+  const [rows] = await pool.query(
+    `SELECT id, evento_id, descricao, valor, ordem, created_at, updated_at
+     FROM financeiro_caixa_itens WHERE id = ? AND evento_id = ? LIMIT 1`,
+    [id, eventoId],
+  );
+  return rowToCaixaItem(rows[0]);
+}
+
+export async function deleteCaixaItem(pool, eventoId, itemId) {
+  const id = Number(itemId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw Object.assign(new Error('Item inválido'), { status: 400 });
+  }
+  const [result] = await pool.query(
+    'DELETE FROM financeiro_caixa_itens WHERE id = ? AND evento_id = ?',
+    [id, eventoId],
+  );
+  if (!result.affectedRows) {
+    throw Object.assign(new Error('Item de caixa não encontrado'), { status: 404 });
+  }
+  return { ok: true };
 }
 
 function rowToBaixa(row) {
@@ -874,8 +1035,10 @@ export async function updateContaPagar(pool, id, eventoId, raw) {
   if (!current) return null;
 
   const data = normalizeContaInput(raw);
+  if (!faseExplicitInRaw(raw)) {
+    data.fase = current.fase === 'pos' ? 'pos' : 'pre';
+  }
   await validateContaRefs(pool, eventoId, data);
-  await inferFaseOnSave(pool, eventoId, data);
 
   data.valorPago = current.valorPago;
   data.dtPagamento = current.dtPagamento;

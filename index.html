@@ -144,13 +144,62 @@
     </section>
 
     <div id="app-screen" class="hidden">
+    <div class="app-shell-head">
     <header class="app-header">
       <div class="app-header-inner">
-        <div class="brand">Opalapa <span>· Gestão</span></div>
-        <div class="nav-scroll" role="presentation">
-          <div class="nav-drawer-backdrop" id="nav-drawer-backdrop" hidden></div>
-        <nav class="nav nav-drawer" id="nav-drawer" aria-label="Módulos">
-          <div class="nav-drawer-links">
+        <button
+          type="button"
+          class="nav-menu-toggle"
+          id="nav-menu-toggle"
+          aria-expanded="false"
+          aria-controls="nav-drawer"
+          aria-label="Abrir menu de navegação"
+        >
+          <span class="nav-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+        <div class="brand">
+          <span class="brand-full">Opalapa <span>· Gestão</span></span>
+          <span class="brand-mobile-title" id="nav-mobile-title" hidden></span>
+        </div>
+        <div class="evento-selector header-evento-selector"></div>
+        <div class="user-menu">
+          <button
+            class="tbtn wa-header-btn"
+            type="button"
+            id="btn-whatsapp-inbox"
+            title="Conversas dos leads"
+            aria-label="Conversas WhatsApp dos leads"
+          >
+            <span class="wa-dot" aria-hidden="true"></span>
+            <span class="wa-header-label">Conversas</span>
+          </button>
+          <button
+            class="tbtn wa-header-btn"
+            type="button"
+            id="btn-whatsapp-connect"
+            data-state="unknown"
+            title="WhatsApp"
+            aria-label="WhatsApp"
+          >
+            <span class="wa-dot" aria-hidden="true"></span>
+            <span class="wa-header-label">WhatsApp</span>
+          </button>
+          <span id="user-name" class="user-name"></span>
+          <button class="tbtn" type="button" id="btn-logout">Sair</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="nav-scroll" role="presentation">
+      <div class="nav-drawer-backdrop" id="nav-drawer-backdrop" hidden></div>
+      <nav class="nav nav-drawer" id="nav-drawer" aria-label="Módulos" aria-hidden="true">
+        <div class="nav-drawer-head">
+          <span class="nav-drawer-head-title">Menu</span>
+          <button type="button" class="nav-drawer-close" id="nav-drawer-close" aria-label="Fechar menu">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div class="nav-drawer-links">
           <div class="nav-section" id="nav-section-principal">
             <p class="nav-section-label">Principal</p>
             <div class="nav-section-links">
@@ -227,46 +276,9 @@
             <select id="evento-select" class="evento-select" title="Evento ativo"></select>
           </div>
           <button type="button" class="nav-drawer-logout" id="btn-logout-drawer">Sair</button>
-        </nav>
-        </div>
-        <div class="evento-selector header-evento-selector"></div>
-        <div class="user-menu">
-          <button
-            class="tbtn wa-header-btn"
-            type="button"
-            id="btn-whatsapp-inbox"
-            title="Conversas dos leads"
-            aria-label="Conversas WhatsApp dos leads"
-          >
-            <span class="wa-dot" aria-hidden="true"></span>
-            <span class="wa-header-label">Conversas</span>
-          </button>
-          <button
-            class="tbtn wa-header-btn"
-            type="button"
-            id="btn-whatsapp-connect"
-            data-state="unknown"
-            title="WhatsApp"
-            aria-label="WhatsApp"
-          >
-            <span class="wa-dot" aria-hidden="true"></span>
-            <span class="wa-header-label">WhatsApp</span>
-          </button>
-          <span id="user-name" class="user-name"></span>
-          <button class="tbtn" type="button" id="btn-logout">Sair</button>
-        </div>
-        <button
-          type="button"
-          class="nav-menu-toggle"
-          id="nav-menu-toggle"
-          aria-expanded="false"
-          aria-controls="nav-drawer"
-          aria-label="Abrir menu de navegação"
-        >
-          <span class="nav-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
-        </button>
-      </div>
-    </header>
+      </nav>
+    </div>
+    </div>
 
     <main id="view-eventos" class="page view hidden">
       <div class="report-head">
@@ -1334,6 +1346,54 @@
           <p class="subtitle">Lançamento dos custos do evento. Categoria e plano de contas são obrigatórios; fornecedor é opcional.</p>
         </div>
         <button class="tbtn primary" type="button" id="btn-contas-pagar-new">Nova conta</button>
+      </div>
+
+      <div class="financeiro-kpis financeiro-kpis--contas-pagar" id="contas-pagar-caixa-wrap" aria-label="Caixa atual">
+        <div class="cp-resumo contas-pagar-caixa contas-pagar-caixa-grid">
+          <div class="contas-pagar-caixa-col contas-pagar-caixa-col--kpis" aria-label="Resumo do caixa">
+            <div class="contas-pagar-caixa-kpi contas-pagar-caixa-kpi--caixa">
+              <span class="contas-pagar-caixa-kpi-label">Caixa atual</span>
+              <strong class="contas-pagar-caixa-kpi-val contas-pagar-caixa-kpi-val--caixa" id="contas-pagar-caixa-total">—</strong>
+              <span class="contas-pagar-caixa-kpi-hint" id="contas-pagar-caixa-hint">Soma dos saldos</span>
+            </div>
+            <div class="contas-pagar-caixa-kpi contas-pagar-caixa-kpi--falta">
+              <span class="contas-pagar-caixa-kpi-label">Custos à pagar</span>
+              <strong class="contas-pagar-caixa-kpi-val" id="contas-pagar-caixa-falta">—</strong>
+              <span class="contas-pagar-caixa-kpi-hint" id="contas-pagar-caixa-falta-det">pré · pós</span>
+            </div>
+            <div class="contas-pagar-caixa-kpi contas-pagar-caixa-kpi--sobra">
+              <span class="contas-pagar-caixa-kpi-label">Sobra no caixa</span>
+              <strong class="contas-pagar-caixa-kpi-val" id="contas-pagar-caixa-sobra">—</strong>
+              <span class="contas-pagar-caixa-kpi-hint">caixa − custos</span>
+            </div>
+          </div>
+          <div class="contas-pagar-caixa-col contas-pagar-caixa-col--itens">
+            <div class="contas-pagar-caixa-itens-head">
+              <h3 class="contas-pagar-caixa-itens-title">Saldos em caixa</h3>
+              <button class="tbtn primary" type="button" id="btn-contas-pagar-caixa-new">Adicionar saldo</button>
+            </div>
+            <p class="contas-pagar-caixa-itens-empty hidden" id="contas-pagar-caixa-empty">Nenhum saldo cadastrado. Adicione contas, cofre, dinheiro físico etc.</p>
+            <div class="table-wrap contas-pagar-caixa-table-wrap hidden" id="contas-pagar-caixa-table-wrap">
+              <table class="contas-pagar-caixa-table">
+                <thead>
+                  <tr>
+                    <th>Descrição</th>
+                    <th class="contas-pagar-caixa-col-valor">Saldo</th>
+                    <th class="contas-pagar-caixa-col-acoes" aria-label="Ações"></th>
+                  </tr>
+                </thead>
+                <tbody id="contas-pagar-caixa-table"></tbody>
+                <tfoot>
+                  <tr>
+                    <th scope="row">Total</th>
+                    <td class="contas-pagar-caixa-col-valor" id="contas-pagar-caixa-foot-total">—</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="contas-pagar-resumo hidden" id="contas-pagar-resumo">
@@ -2647,6 +2707,34 @@
         <div class="btns">
           <button class="btn" type="button" id="contas-pagar-bulk-modal-cancel">Cancelar</button>
           <button class="btn primary" type="button" id="contas-pagar-bulk-modal-apply">Aplicar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="contas-pagar-caixa-modal-bg">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="contas-pagar-caixa-modal-title">
+        <h2 id="contas-pagar-caixa-modal-title">Saldo em caixa</h2>
+        <p class="msub" id="contas-pagar-caixa-modal-sub">Ex.: conta corrente, dinheiro físico, PIX reserva</p>
+        <p class="form-errors hidden" id="contas-pagar-caixa-modal-errors" role="alert"></p>
+        <div class="field">
+          <label for="contas-pagar-caixa-modal-descricao">Descrição <span class="req">*</span></label>
+          <input id="contas-pagar-caixa-modal-descricao" type="text" maxlength="160" autocomplete="off" placeholder="Onde está o dinheiro" required />
+        </div>
+        <div class="field">
+          <label for="contas-pagar-caixa-modal-valor">Saldo (R$) <span class="req">*</span></label>
+          <input
+            id="contas-pagar-caixa-modal-valor"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            placeholder="0,00"
+            maxlength="18"
+          />
+        </div>
+        <div class="btns">
+          <button class="btn" type="button" id="contas-pagar-caixa-modal-cancel">Cancelar</button>
+          <button class="btn danger hidden" type="button" id="contas-pagar-caixa-modal-delete">Excluir</button>
+          <button class="btn primary" type="button" id="contas-pagar-caixa-modal-save">Salvar</button>
         </div>
       </div>
     </div>

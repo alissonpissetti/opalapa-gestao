@@ -177,7 +177,7 @@ import {
   patchSumarioArrecadacaoRealizado,
   patchFaturamentoPracaAlimentacao,
 } from './financeiro-resultado.js';
-import { buildArrecadacaoTresFontes, buildFinanceiroPainel } from './financeiro-painel.js';
+import { buildSumarioArrecadacaoForEvento, buildFinanceiroPainel } from './financeiro-painel.js';
 import {
   listVendasHora,
   patchVendaHora,
@@ -205,6 +205,10 @@ import {
   listBaixasContaPagar,
   registerBaixaContaPagar,
   deleteBaixaContaPagar,
+  getCaixaAtualEvento,
+  createCaixaItem,
+  updateCaixaItem,
+  deleteCaixaItem,
 } from './financeiro-contas-pagar.js';
 import {
   migrateWhatsapp,
@@ -2397,16 +2401,53 @@ app.get('/api/financeiro/contas-pagar', requireEvento, async (req, res) => {
   try {
     const contas = await listContasPagar(pool, req.eventoId);
     const { totais } = summarizeContasPagar(contas);
-    let arrecadacaoResumo = null;
+    const caixaAtual = await getCaixaAtualEvento(pool, req.eventoId);
+    let sumarioArrecadacao = null;
     try {
-      arrecadacaoResumo = await buildArrecadacaoTresFontes(pool, req.eventoId);
+      sumarioArrecadacao = await buildSumarioArrecadacaoForEvento(pool, req.eventoId);
     } catch (arrecErr) {
-      console.error('GET /api/financeiro/contas-pagar (arrecadação)', arrecErr);
+      console.error('GET /api/financeiro/contas-pagar (sumário arrecadação)', arrecErr);
     }
-    res.json({ contas, totais, arrecadacaoResumo });
+    res.json({ contas, totais, sumarioArrecadacao, caixaAtual });
   } catch (err) {
     console.error('GET /api/financeiro/contas-pagar', err);
     res.status(500).json({ error: 'Falha ao carregar contas a pagar' });
+  }
+});
+
+app.post('/api/financeiro/contas-pagar/caixa/itens', requireEvento, async (req, res) => {
+  try {
+    const item = await createCaixaItem(pool, req.eventoId, req.body);
+    const caixaAtual = await getCaixaAtualEvento(pool, req.eventoId);
+    res.status(201).json({ item, caixaAtual });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/financeiro/contas-pagar/caixa/itens', err);
+    res.status(500).json({ error: 'Falha ao adicionar saldo ao caixa' });
+  }
+});
+
+app.put('/api/financeiro/contas-pagar/caixa/itens/:id', requireEvento, async (req, res) => {
+  try {
+    const item = await updateCaixaItem(pool, req.eventoId, req.params.id, req.body);
+    const caixaAtual = await getCaixaAtualEvento(pool, req.eventoId);
+    res.json({ item, caixaAtual });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('PUT /api/financeiro/contas-pagar/caixa/itens/:id', err);
+    res.status(500).json({ error: 'Falha ao atualizar saldo do caixa' });
+  }
+});
+
+app.delete('/api/financeiro/contas-pagar/caixa/itens/:id', requireEvento, async (req, res) => {
+  try {
+    await deleteCaixaItem(pool, req.eventoId, req.params.id);
+    const caixaAtual = await getCaixaAtualEvento(pool, req.eventoId);
+    res.json({ caixaAtual });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('DELETE /api/financeiro/contas-pagar/caixa/itens/:id', err);
+    res.status(500).json({ error: 'Falha ao remover saldo do caixa' });
   }
 });
 

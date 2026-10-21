@@ -60,9 +60,11 @@ async function openLeadFromApp(arrecadacaoId, { tipo } = {}) {
 }
 
 function syncAppHeaderHeight() {
+  const shellHead = document.querySelector('.app-shell-head');
   const header = document.querySelector('.app-header');
-  if (!header) return;
-  document.documentElement.style.setProperty('--app-header-height', `${header.offsetHeight}px`);
+  const el = shellHead || header;
+  if (!el) return;
+  document.documentElement.style.setProperty('--app-header-height', `${el.offsetHeight}px`);
 }
 
 function showApp(user) {

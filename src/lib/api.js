@@ -877,6 +877,26 @@ export function fetchContasPagar() {
   return apiRequest('/api/financeiro/contas-pagar');
 }
 
+export function createContasPagarCaixaItem(data) {
+  return apiRequest('/api/financeiro/contas-pagar/caixa/itens', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateContasPagarCaixaItem(id, data) {
+  return apiRequest(`/api/financeiro/contas-pagar/caixa/itens/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteContasPagarCaixaItem(id) {
+  return apiRequest(`/api/financeiro/contas-pagar/caixa/itens/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 export function createContaPagar(data) {
   return apiRequest('/api/financeiro/contas-pagar', {
     method: 'POST',

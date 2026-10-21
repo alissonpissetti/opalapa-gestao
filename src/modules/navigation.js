@@ -36,12 +36,34 @@ const VIEWS = {
   permissoes: { viewId: 'view-permissoes', navId: 'nav-permissoes', parentId: 'nav-acessos' },
 };
 
-const MOBILE_NAV_MQ = window.matchMedia('(max-width: 900px)');
+const MOBILE_NAV_MQ = window.matchMedia('(max-width: 1024px)');
+
+const VIEW_MOBILE_TITLES = {
+  eventos: 'Eventos',
+  espacos: 'Espaços',
+  arrecadacao: 'Leads comerciais',
+  'arrecadacao-planos': 'Planos e produtos',
+  artistico: 'Leads artísticos',
+  alimentacao: 'Leads alimentação',
+  tarefas: 'Tarefas',
+  marketing: 'Marketing',
+  cronologia: 'Cronologia',
+  premiacoes: 'Premiações',
+  entregas: 'Entregas',
+  materiais: 'Materiais',
+  'financeiro-gestao': 'Painel financeiro',
+  'financeiro-contas-pagar': 'Contas a pagar',
+  'financeiro-plano-contas': 'Plano de contas',
+  usuarios: 'Usuários',
+  permissoes: 'Permissões',
+};
 
 function syncHeaderHeight() {
+  const shellHead = document.querySelector('.app-shell-head');
   const header = document.querySelector('.app-header');
-  if (!header) return;
-  document.documentElement.style.setProperty('--app-header-height', `${header.offsetHeight}px`);
+  const el = isMobileNav() && shellHead ? shellHead : header || shellHead;
+  if (!el) return;
+  document.documentElement.style.setProperty('--app-header-height', `${el.offsetHeight}px`);
 }
 
 function isMobileNav() {
@@ -60,6 +82,22 @@ function syncEventoSelectorPlacement() {
 
   while (source.firstChild) {
     target.appendChild(source.firstChild);
+  }
+}
+
+function syncNavScrollPlacement() {
+  const navScroll = document.querySelector('.nav-scroll');
+  const headerInner = document.querySelector('.app-header-inner');
+  const shellHead = document.querySelector('.app-shell-head');
+  const eventoSlot = document.querySelector('.header-evento-selector');
+  if (!navScroll || !headerInner || !shellHead || !eventoSlot) return;
+
+  if (isMobileNav()) {
+    if (navScroll.parentElement !== shellHead) {
+      shellHead.appendChild(navScroll);
+    }
+  } else if (navScroll.parentElement !== headerInner) {
+    headerInner.insertBefore(navScroll, eventoSlot);
   }
 }
 
@@ -92,6 +130,21 @@ export function initNavigation({ onViewChange }) {
   const navScrollEl = document.querySelector('.nav-scroll');
   const navMenuToggle = document.getElementById('nav-menu-toggle');
   const navDrawerBackdrop = document.getElementById('nav-drawer-backdrop');
+  const navDrawerClose = document.getElementById('nav-drawer-close');
+  const navMobileTitle = document.getElementById('nav-mobile-title');
+  let drawerScrollY = 0;
+
+  function lockPageScroll() {
+    drawerScrollY = window.scrollY;
+    document.body.classList.add('nav-scroll-locked');
+    document.body.style.top = `-${drawerScrollY}px`;
+  }
+
+  function unlockPageScroll() {
+    document.body.classList.remove('nav-scroll-locked');
+    document.body.style.top = '';
+    window.scrollTo(0, drawerScrollY);
+  }
 
   function closeAllDropdowns() {
     navDropdowns.forEach((dropdown) => {
@@ -134,20 +187,37 @@ export function initNavigation({ onViewChange }) {
     requestAnimationFrame(updateNavScrollHints);
   }
 
+  function setDrawerA11y(open) {
+    navDrawer?.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (navDrawer && 'inert' in navDrawer) {
+      if (open) navDrawer.removeAttribute('inert');
+      else navDrawer.setAttribute('inert', '');
+    }
+  }
+
   function openNavDrawer() {
     if (!isMobileNav()) return;
+    lockPageScroll();
     document.body.classList.add('nav-drawer-open');
     navMenuToggle?.setAttribute('aria-expanded', 'true');
     navMenuToggle?.setAttribute('aria-label', 'Fechar menu de navegação');
     navDrawerBackdrop?.removeAttribute('hidden');
+    setDrawerA11y(true);
+    requestAnimationFrame(() => navDrawerClose?.focus());
   }
 
   function closeNavDrawer() {
+    const wasOpen = document.body.classList.contains('nav-drawer-open');
     document.body.classList.remove('nav-drawer-open');
     navMenuToggle?.setAttribute('aria-expanded', 'false');
     navMenuToggle?.setAttribute('aria-label', 'Abrir menu de navegação');
     navDrawerBackdrop?.setAttribute('hidden', '');
+    setDrawerA11y(false);
+    if (wasOpen) unlockPageScroll();
     closeAllDropdowns();
+    if (isMobileNav() && document.activeElement?.closest?.('#nav-drawer')) {
+      navMenuToggle?.focus();
+    }
   }
 
   function toggleNavDrawer() {
@@ -163,15 +233,34 @@ export function initNavigation({ onViewChange }) {
     });
 
     navDrawerBackdrop?.addEventListener('click', closeNavDrawer);
+    navDrawerClose?.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeNavDrawer();
+    });
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeNavDrawer();
     });
 
     MOBILE_NAV_MQ.addEventListener('change', (e) => {
+      syncNavScrollPlacement();
       syncEventoSelectorPlacement();
       closeAllDropdowns();
+      updateMobileNavTitle(currentView);
       if (!e.matches) closeNavDrawer();
+      else setDrawerA11y(false);
+      requestAnimationFrame(syncHeaderHeight);
+    });
+
+    const shellHead = document.querySelector('.app-shell-head');
+    const header = document.querySelector('.app-header');
+    const heightEl = shellHead || header;
+    if (heightEl && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => syncHeaderHeight());
+      ro.observe(heightEl);
+    }
+    window.addEventListener('orientationchange', () => {
+      requestAnimationFrame(syncHeaderHeight);
     });
   }
 
@@ -258,6 +347,14 @@ export function initNavigation({ onViewChange }) {
     }
 
     scrollActiveNavIntoView(view);
+    updateMobileNavTitle(view);
+  }
+
+  function updateMobileNavTitle(view) {
+    if (!navMobileTitle) return;
+    const title = VIEW_MOBILE_TITLES[view] || 'Gestão';
+    navMobileTitle.textContent = title;
+    navMobileTitle.toggleAttribute('hidden', !isMobileNav());
   }
 
   function navigate(view, { replace = false, force = false } = {}) {
@@ -336,9 +433,12 @@ export function initNavigation({ onViewChange }) {
   }
 
   applyNavPermissions();
+  syncNavScrollPlacement();
   syncEventoSelectorPlacement();
   bindNavDrawer();
   bindNavDragScroll();
+  setDrawerA11y(false);
+  requestAnimationFrame(syncHeaderHeight);
   if (initialView) {
     navigate(initialView, { replace: true, force: true });
   }

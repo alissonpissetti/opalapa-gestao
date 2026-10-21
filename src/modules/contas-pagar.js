@@ -2,6 +2,9 @@ import {
   fetchFinanceiroCategorias,
   fetchFinanceiroPlanoContas,
   fetchContasPagar,
+  createContasPagarCaixaItem,
+  updateContasPagarCaixaItem,
+  deleteContasPagarCaixaItem,
   createFinanceiroCategoria,
   createFinanceiroPlanoConta,
   createContaPagar,
@@ -263,8 +266,8 @@ function resultadoValorClass(val) {
   return 'cp-arr-num--resultado-zero';
 }
 
-function summarizeResultado(arrecadacaoResumo, contas) {
-  const arr = arrecadacaoResumo?.totais || { previsto: 0, realizado: 0 };
+function summarizeResultado(sumarioArrecadacao, contas) {
+  const arr = sumarioArrecadacao?.totais || { previsto: 0, realizado: 0 };
   const pre = summarizeSaidasPorFase(contas, 'pre');
   const pos = summarizeSaidasPorFase(contas, 'pos');
   const arrPrev = Number(arr.previsto) || 0;
@@ -308,10 +311,16 @@ function renderResumoFinanceiroBoxHtml({
   realizadoClass = 'cp-arr-num--realizado',
   pendenteClass = 'cp-arr-num--pendente',
   kpiValClass = null,
+  previstoOnly = false,
 }) {
   const rows = (linhas || [])
     .map((f) => {
       const pendente = resumoPendente(f.previsto, f.realizado);
+      const valorCols = previstoOnly
+        ? `<td class="cp-arr-num">${cellMoney(f.previsto)}</td>`
+        : `<td class="cp-arr-num">${cellMoney(f.previsto)}</td>
+          <td class="cp-arr-num ${realizadoClass}">${cellMoney(f.realizado)}</td>
+          <td class="cp-arr-num ${pendenteClass}">${cellMoney(pendente)}</td>`;
       return `
         <tr>
           <td class="cp-arr-fonte">
@@ -324,9 +333,7 @@ function renderResumoFinanceiroBoxHtml({
                   : ''
             }
           </td>
-          <td class="cp-arr-num">${cellMoney(f.previsto)}</td>
-          <td class="cp-arr-num ${realizadoClass}">${cellMoney(f.realizado)}</td>
-          <td class="cp-arr-num ${pendenteClass}">${cellMoney(pendente)}</td>
+          ${valorCols}
         </tr>`;
     })
     .join('');
@@ -337,6 +344,9 @@ function renderResumoFinanceiroBoxHtml({
   const clsPend = kpiValClass ? kpiValClass('pendente', pendenteTotal) : pendenteClass;
   const leadHtml = lead ? `<p class="cp-arr-lead">${escapeHtml(lead)}</p>` : '';
   const nLinhas = (linhas || []).length;
+  const detalheHead = previstoOnly
+    ? `<tr><th>${escapeHtml(linhaColLabel)}</th><th>Previsto</th></tr>`
+    : `<tr><th>${escapeHtml(linhaColLabel)}</th><th>Prev.</th><th>Real.</th><th>Pend.</th></tr>`;
   const detalheHtml =
     nLinhas > 0
       ? `
@@ -344,24 +354,21 @@ function renderResumoFinanceiroBoxHtml({
         <summary class="cp-arr-detalhe-summary">${escapeHtml(detalheLabel)} <span class="cp-arr-detalhe-count">(${nLinhas})</span></summary>
         <div class="table-wrap cp-arr-table-wrap">
           <table class="cp-arr-table">
-            <thead>
-              <tr>
-                <th>${escapeHtml(linhaColLabel)}</th>
-                <th>Prev.</th>
-                <th>Real.</th>
-                <th>Pend.</th>
-              </tr>
-            </thead>
+            <thead>${detalheHead}</thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
       </details>`
       : '';
-  const body = `
-      <header class="cp-arr-head">
-        <h2 class="cp-arr-title">${escapeHtml(title)}</h2>
-        ${leadHtml}
-      </header>
+  const kpiRow = previstoOnly
+    ? `
+      <div class="cp-arr-kpi-row cp-arr-kpi-row--previsto-only" role="group" aria-label="Total previsto">
+        <div class="cp-arr-kpi cp-arr-kpi--previsto-hero">
+          <span class="cp-arr-kpi-label">Total previsto</span>
+          <strong class="cp-arr-kpi-val ${clsPrev}">${cellMoney(t.previsto)}</strong>
+        </div>
+      </div>`
+    : `
       <div class="cp-arr-kpi-row" role="group" aria-label="Totais">
         <div class="cp-arr-kpi">
           <span class="cp-arr-kpi-label">Previsto</span>
@@ -375,41 +382,35 @@ function renderResumoFinanceiroBoxHtml({
           <span class="cp-arr-kpi-label">Pendente</span>
           <strong class="cp-arr-kpi-val ${clsPend}">${cellMoney(pendenteTotal)}</strong>
         </div>
-      </div>
+      </div>`;
+  const body = `
+      <header class="cp-arr-head">
+        <h2 class="cp-arr-title">${escapeHtml(title)}</h2>
+        ${leadHtml}
+      </header>
+      ${kpiRow}
       ${detalheHtml}`;
   if (!wrapSection) return body;
   const cls = boxClass ? ` class="${boxClass}"` : '';
   return `<section${cls}>${body}</section>`;
 }
 
-function renderArrecadacaoResumoHtml(resumo) {
-  if (!resumo?.fontes) return '';
-  const totais = resumo.totais || { previsto: 0, realizado: 0 };
-  const fontes = resumo.fontes.flatMap((f) => {
-    if (f.detalhes?.length) {
-      return f.detalhes.map((d) => ({
-        nome: d.nome,
-        descricao: d.descricao,
-        previsto: d.previsto,
-        realizado: d.realizado,
-      }));
-    }
-    return [
-      {
-        nome: f.nome,
-        descricao: f.descricao,
-        previsto: f.previsto,
-        realizado: f.realizado,
-      },
-    ];
-  });
+function renderArrecadacaoResumoHtml(sumario) {
+  if (!sumario?.linhas?.length) return '';
+  const totais = sumario.totais || { previsto: 0, realizado: 0 };
+  const linhas = sumario.linhas.map((l) => ({
+    nome: l.nome,
+    descricao: l.posEvento ? 'Pós-evento' : 'Pré-evento',
+    previsto: l.previsto,
+    realizado: l.realizado,
+  }));
   return renderResumoFinanceiroBoxHtml({
     wrapSection: false,
     title: 'Arrecadação',
-    detalheLabel: 'Por fonte',
+    detalheLabel: 'Por categoria',
     totais,
-    linhas: fontes,
-    linhaColLabel: 'Fonte',
+    linhas,
+    linhaColLabel: 'Categoria',
     realizadoClass: 'cp-arr-num--realizado',
   });
 }
@@ -458,8 +459,8 @@ function renderSaidasTotalResumoHtml(contas) {
   });
 }
 
-function renderResultadoResumoHtml(arrecadacaoResumo, contas) {
-  const { previsto, realizado, linhas } = summarizeResultado(arrecadacaoResumo, contas);
+function renderResultadoResumoHtml(sumarioArrecadacao, contas) {
+  const { previsto, realizado, linhas } = summarizeResultado(sumarioArrecadacao, contas);
   return renderResumoFinanceiroBoxHtml({
     wrapSection: false,
     title: 'Resultado',
@@ -522,6 +523,25 @@ export function initContasPagarModule() {
   if (contasPagarInstance) return contasPagarInstance;
 
   const els = {
+    caixaTotal: document.getElementById('contas-pagar-caixa-total'),
+    caixaHint: document.getElementById('contas-pagar-caixa-hint'),
+    caixaFalta: document.getElementById('contas-pagar-caixa-falta'),
+    caixaFaltaDet: document.getElementById('contas-pagar-caixa-falta-det'),
+    caixaSobra: document.getElementById('contas-pagar-caixa-sobra'),
+    caixaEmpty: document.getElementById('contas-pagar-caixa-empty'),
+    caixaTableWrap: document.getElementById('contas-pagar-caixa-table-wrap'),
+    caixaTable: document.getElementById('contas-pagar-caixa-table'),
+    caixaFootTotal: document.getElementById('contas-pagar-caixa-foot-total'),
+    btnCaixaNew: document.getElementById('btn-contas-pagar-caixa-new'),
+    caixaModalBg: document.getElementById('contas-pagar-caixa-modal-bg'),
+    caixaModalTitle: document.getElementById('contas-pagar-caixa-modal-title'),
+    caixaModalSub: document.getElementById('contas-pagar-caixa-modal-sub'),
+    caixaModalErrors: document.getElementById('contas-pagar-caixa-modal-errors'),
+    caixaModalDescricao: document.getElementById('contas-pagar-caixa-modal-descricao'),
+    caixaModalValor: document.getElementById('contas-pagar-caixa-modal-valor'),
+    btnCaixaModalCancel: document.getElementById('contas-pagar-caixa-modal-cancel'),
+    btnCaixaModalDelete: document.getElementById('contas-pagar-caixa-modal-delete'),
+    btnCaixaModalSave: document.getElementById('contas-pagar-caixa-modal-save'),
     resumoPanel: document.getElementById('contas-pagar-resumo'),
     arrecadacao: document.getElementById('contas-pagar-arrecadacao'),
     saidaPre: document.getElementById('contas-pagar-saida-pre'),
@@ -586,8 +606,190 @@ export function initContasPagarModule() {
     draftDiscard: document.getElementById('contas-pagar-modal-draft-discard'),
   };
 
-  [els.baixaValor, els.bulkValorPrevisto].filter(Boolean).forEach((input) => {
+  [els.baixaValor, els.bulkValorPrevisto, els.caixaModalValor].filter(Boolean).forEach((input) => {
     input.addEventListener('input', () => maskValorInput(input));
+  });
+
+  function applyCaixaAtualFromApi(data) {
+    const itens = data?.itens ?? caixaItens;
+    const total =
+      data?.total != null ? Number(data.total) || 0 : itens.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+    caixaAtual = { itens, total, valor: total };
+    caixaItens = itens;
+  }
+
+  function caixaTotalValor() {
+    return Number(caixaAtual.total ?? caixaAtual.valor) || 0;
+  }
+
+  function renderCaixaItensTable() {
+    const total = caixaTotalValor();
+    const hasItens = caixaItens.length > 0;
+
+    els.caixaEmpty?.classList.toggle('hidden', hasItens);
+    els.caixaTableWrap?.classList.toggle('hidden', !hasItens);
+
+    if (els.caixaTable) {
+      els.caixaTable.innerHTML = caixaItens
+        .map(
+          (item) => `
+        <tr data-caixa-id="${item.id}">
+          <td class="contas-pagar-caixa-desc">${escapeHtml(item.descricao)}</td>
+          <td class="contas-pagar-caixa-col-valor">${cellMoney(item.valor)}</td>
+          <td class="contas-pagar-caixa-col-acoes">
+            <button class="icon-btn" type="button" data-caixa-action="edit" data-id="${item.id}" title="Editar" aria-label="Editar saldo">✎</button>
+          </td>
+        </tr>`,
+        )
+        .join('');
+    }
+    if (els.caixaFootTotal) els.caixaFootTotal.textContent = fmtMoney(total);
+    if (els.caixaHint) {
+      els.caixaHint.textContent = hasItens
+        ? `${caixaItens.length} saldo${caixaItens.length === 1 ? '' : 's'} cadastrado${caixaItens.length === 1 ? '' : 's'}`
+        : 'Soma dos saldos abaixo';
+    }
+  }
+
+  function renderCaixaPainel() {
+    const k = summarizeFromContas(contas);
+    const faltaGeral = Number(k.falta) || 0;
+    const caixa = caixaTotalValor();
+    const sobra = caixa - faltaGeral;
+
+    if (els.caixaTotal) els.caixaTotal.textContent = fmtMoney(caixa);
+    if (els.caixaFalta) els.caixaFalta.textContent = fmtMoney(faltaGeral);
+    if (els.caixaFaltaDet) {
+      els.caixaFaltaDet.textContent = `pré ${fmtMoney(k.faltaPre)} · pós ${fmtMoney(k.faltaPos)}`;
+    }
+    if (els.caixaSobra) {
+      els.caixaSobra.textContent = fmtMoney(sobra);
+      els.caixaSobra.classList.toggle('contas-pagar-caixa-kpi-val--positivo', sobra > 0);
+      els.caixaSobra.classList.toggle('contas-pagar-caixa-kpi-val--negativo', sobra < 0);
+    }
+    renderCaixaItensTable();
+  }
+
+  function showCaixaModalErrors(message) {
+    if (!els.caixaModalErrors) return;
+    if (!message) {
+      els.caixaModalErrors.classList.add('hidden');
+      els.caixaModalErrors.textContent = '';
+      return;
+    }
+    els.caixaModalErrors.textContent = message;
+    els.caixaModalErrors.classList.remove('hidden');
+  }
+
+  function openCaixaItemModal(item = null) {
+    caixaEditId = item?.id ?? null;
+    const editing = caixaEditId != null;
+    if (els.caixaModalTitle) {
+      els.caixaModalTitle.textContent = editing ? 'Editar saldo em caixa' : 'Adicionar saldo em caixa';
+    }
+    if (els.caixaModalSub) {
+      els.caixaModalSub.textContent = editing
+        ? 'Atualize a descrição ou o valor deste saldo.'
+        : 'Ex.: conta corrente, dinheiro físico, PIX reserva';
+    }
+    if (els.caixaModalDescricao) els.caixaModalDescricao.value = item?.descricao ?? '';
+    if (els.caixaModalValor) {
+      els.caixaModalValor.value =
+        item?.valor != null && Number(item.valor) !== 0 ? formatValorInput(item.valor) : '';
+    }
+    els.btnCaixaModalDelete?.classList.toggle('hidden', !editing);
+    showCaixaModalErrors(null);
+    els.caixaModalBg?.classList.add('open');
+    (els.caixaModalDescricao || els.caixaModalValor)?.focus();
+  }
+
+  function closeCaixaItemModal() {
+    caixaEditId = null;
+    showCaixaModalErrors(null);
+    els.caixaModalBg?.classList.remove('open');
+  }
+
+  async function saveCaixaItemModal() {
+    if (caixaSaving) return;
+    const descricao = normalizeNome(els.caixaModalDescricao?.value);
+    const valorRaw = els.caixaModalValor?.value?.trim() || '';
+    if (!descricao) {
+      showCaixaModalErrors('Informe a descrição.');
+      els.caixaModalDescricao?.focus();
+      return;
+    }
+    if (!valorRaw) {
+      showCaixaModalErrors('Informe o saldo.');
+      els.caixaModalValor?.focus();
+      return;
+    }
+    const valor = parseValor(valorRaw);
+    if (!Number.isFinite(valor)) {
+      showCaixaModalErrors('Saldo inválido.');
+      els.caixaModalValor?.focus();
+      return;
+    }
+
+    caixaSaving = true;
+    els.btnCaixaModalSave.disabled = true;
+    showCaixaModalErrors(null);
+    try {
+      const res =
+        caixaEditId != null
+          ? await updateContasPagarCaixaItem(caixaEditId, { descricao, valor })
+          : await createContasPagarCaixaItem({ descricao, valor });
+      applyCaixaAtualFromApi(res?.caixaAtual);
+      closeCaixaItemModal();
+      renderCaixaPainel();
+    } catch (err) {
+      showCaixaModalErrors(err.message || 'Não foi possível salvar.');
+    } finally {
+      caixaSaving = false;
+      els.btnCaixaModalSave.disabled = false;
+    }
+  }
+
+  async function deleteCaixaItemModal() {
+    if (caixaEditId == null || caixaSaving) return;
+    const item = caixaItens.find((i) => i.id === caixaEditId);
+    const label = item?.descricao ? `“${item.descricao}”` : 'este saldo';
+    if (!window.confirm(`Remover ${label} do caixa?`)) return;
+
+    caixaSaving = true;
+    els.btnCaixaModalDelete.disabled = true;
+    try {
+      const res = await deleteContasPagarCaixaItem(caixaEditId);
+      applyCaixaAtualFromApi(res?.caixaAtual);
+      closeCaixaItemModal();
+      renderCaixaPainel();
+    } catch (err) {
+      showCaixaModalErrors(err.message || 'Não foi possível excluir.');
+    } finally {
+      caixaSaving = false;
+      els.btnCaixaModalDelete.disabled = false;
+    }
+  }
+
+  els.btnCaixaNew?.addEventListener('click', () => openCaixaItemModal());
+  els.btnCaixaModalCancel?.addEventListener('click', () => closeCaixaItemModal());
+  els.btnCaixaModalSave?.addEventListener('click', () => saveCaixaItemModal());
+  els.btnCaixaModalDelete?.addEventListener('click', () => deleteCaixaItemModal());
+  els.caixaModalBg?.addEventListener('click', (ev) => {
+    if (ev.target === els.caixaModalBg) closeCaixaItemModal();
+  });
+  els.caixaTable?.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-caixa-action="edit"]');
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    const item = caixaItens.find((i) => i.id === id);
+    if (item) openCaixaItemModal(item);
+  });
+  els.caixaTable?.addEventListener('dblclick', (ev) => {
+    const row = ev.target.closest('tr[data-caixa-id]');
+    if (!row) return;
+    const id = Number(row.dataset.caixaId);
+    const item = caixaItens.find((i) => i.id === id);
+    if (item) openCaixaItemModal(item);
   });
 
   let valorRecalcLock = false;
@@ -658,7 +860,11 @@ export function initContasPagarModule() {
   let categorias = [];
   let planoContas = [];
   let totais = summarizeFromContas([]);
-  let arrecadacaoResumo = null;
+  let sumarioArrecadacao = null;
+  let caixaAtual = { itens: [], total: 0, valor: 0 };
+  let caixaItens = [];
+  let caixaEditId = null;
+  let caixaSaving = false;
   let editId = null;
   let inlineEditId = null;
   let loading = false;
@@ -1263,6 +1469,7 @@ export function initContasPagarModule() {
       obs: conta.obs || '',
       bonificado: overrides.bonificado ?? conta.bonificado ?? false,
       bonificadoRef: overrides.bonificadoRef ?? conta.bonificadoRef ?? '',
+      fase: overrides.fase ?? (conta.fase === 'pos' ? 'pos' : 'pre'),
     };
   }
 
@@ -1502,7 +1709,7 @@ export function initContasPagarModule() {
 
   function renderArrecadacaoResumo() {
     if (!els.arrecadacao) return;
-    const html = renderArrecadacaoResumoHtml(arrecadacaoResumo);
+    const html = renderArrecadacaoResumoHtml(sumarioArrecadacao);
     const show = Boolean(html);
     els.arrecadacao.classList.toggle('hidden', !show);
     els.arrecadacao.innerHTML = html;
@@ -1528,11 +1735,11 @@ export function initContasPagarModule() {
 
   function renderResultadoResumo() {
     if (!els.resultado) return;
-    const hasArr = Boolean(arrecadacaoResumo?.fontes);
+    const hasArr = Boolean(sumarioArrecadacao?.linhas?.length);
     const hasContas = contas.length > 0;
     const show = hasArr || hasContas;
     els.resultado.classList.toggle('hidden', !show);
-    els.resultado.innerHTML = show ? renderResultadoResumoHtml(arrecadacaoResumo, contas) : '';
+    els.resultado.innerHTML = show ? renderResultadoResumoHtml(sumarioArrecadacao, contas) : '';
     syncContasPagarResumoPanel();
   }
 
@@ -1555,6 +1762,7 @@ export function initContasPagarModule() {
       renderArrecadacaoResumo();
       renderSaidasResumo();
       renderResultadoResumo();
+      renderCaixaPainel();
       syncFilterUi();
       return;
     }
@@ -1608,6 +1816,7 @@ export function initContasPagarModule() {
     renderArrecadacaoResumo();
     renderSaidasResumo();
     renderResultadoResumo();
+    renderCaixaPainel();
     updateSelectionUi();
     syncFilterUi();
   }
@@ -1853,7 +2062,8 @@ export function initContasPagarModule() {
       categorias = catRes?.categorias || [];
       contas = contasRes?.contas || [];
       totais = contasRes?.totais || summarizeFromContas(contas);
-      arrecadacaoResumo = contasRes?.arrecadacaoResumo ?? null;
+      sumarioArrecadacao = contasRes?.sumarioArrecadacao ?? null;
+      applyCaixaAtualFromApi(contasRes?.caixaAtual ?? { itens: [], total: 0 });
       planoContas = planoRes?.planoContas || [];
       inlineEditId = null;
       syncCategoriaFilterSelect();
@@ -1907,6 +2117,7 @@ export function initContasPagarModule() {
         return;
       }
 
+      const editing = editId ? contas.find((c) => c.id === editId) : null;
       const data = {
         categoriaId,
         planoContaId,
@@ -1914,12 +2125,13 @@ export function initContasPagarModule() {
         descricao: fields.descricao,
         quantidadePrevista: fields.quantidadePrevista,
         valorPrevisto: fields.valorPrevisto,
-        valorPago: 0,
+        valorPago: editing ? Number(editing.valorPago) || 0 : 0,
         dtVencimento: fields.dtVencimento,
         status: fields.status,
         obs: fields.obs,
         bonificado: fields.bonificado,
         bonificadoRef: fields.bonificado ? fields.bonificadoRef : '',
+        ...(editing ? { fase: editing.fase === 'pos' ? 'pos' : 'pre' } : {}),
       };
 
       if (editId) {
