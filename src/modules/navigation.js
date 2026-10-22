@@ -188,6 +188,11 @@ export function initNavigation({ onViewChange }) {
   }
 
   function setDrawerA11y(open) {
+    if (!isMobileNav()) {
+      navDrawer?.setAttribute('aria-hidden', 'false');
+      navDrawer?.removeAttribute('inert');
+      return;
+    }
     navDrawer?.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (navDrawer && 'inert' in navDrawer) {
       if (open) navDrawer.removeAttribute('inert');
