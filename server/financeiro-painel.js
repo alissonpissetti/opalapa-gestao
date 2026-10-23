@@ -4,12 +4,11 @@ import { listFunilEtapas, perdaStatuses } from './funil.js';
 import {
   listFinanceiroResultado,
   findSumarioArrecadacaoLinha,
-  findFaturamentoPracaLinha,
   clearSumarioArrecadacaoOverridesNaoEditaveis,
   SUMARIO_ARRECADACAO_DEFS,
+  TAXA_PRACA_ALIMENTACAO,
+  computeTaxaPracaAlimentacao,
 } from './financeiro-resultado.js';
-
-const TAXA_PRACA_ALIMENTACAO = 0.2;
 import { buildVendasHoraFromLinhas } from './financeiro-vendas-hora.js';
 import { buildBebidasFromLinhas } from './financeiro-bebidas.js';
 
@@ -178,6 +177,26 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
     });
   });
 
+  const taxaPraca = computeTaxaPracaAlimentacao(resultadoLinhas);
+  if (taxaPraca.previsto != null || taxaPraca.realizado > 0) {
+    const pctLabel = Math.round((taxaPraca.taxaPct ?? TAXA_PRACA_ALIMENTACAO) * 100);
+    linhas.push({
+      id: 'taxa-praca-alimentacao',
+      linhaId: taxaPraca.linhaId,
+      nome: `TAXA ALIMENTAÇÃO (${pctLabel}% PRAÇA)`,
+      refAnterior: null,
+      previsto: taxaPraca.previsto ?? 0,
+      previstoManual: false,
+      previstoCalculado: taxaPraca.previsto ?? 0,
+      previstoEditavel: false,
+      realizadoEditavel: false,
+      posEvento: false,
+      fase: null,
+      realizado: taxaPraca.realizado,
+      calculado: true,
+    });
+  }
+
   const sumTotais = (items) => {
     const prev = items.reduce((s, l) => s + (Number(l.previsto) || 0), 0);
     const real = items.reduce((s, l) => s + (Number(l.realizado) || 0), 0);
@@ -208,26 +227,26 @@ export function buildResultadoFinal({
   custosTotais,
   resultadoLinhas,
 }) {
-  const arrecadacaoPrevisto = Number(sumarioArrecadacao?.totais?.previsto) || 0;
-  const arrecadacaoRealizado = Number(sumarioArrecadacao?.totais?.realizado) || 0;
+  const taxaPraca = computeTaxaPracaAlimentacao(resultadoLinhas);
+  const taxaPrevisto = taxaPraca.previsto;
+  const taxaRealizado = taxaPraca.realizado;
+  const taxaPrevistoValor = taxaPrevisto ?? 0;
+
+  const arrecadacaoComTaxaPrevisto = Number(sumarioArrecadacao?.totais?.previsto) || 0;
+  const arrecadacaoComTaxaRealizado = Number(sumarioArrecadacao?.totais?.realizado) || 0;
+  const arrecadacaoPrevisto = arrecadacaoComTaxaPrevisto - taxaPrevistoValor;
+  const arrecadacaoRealizado = arrecadacaoComTaxaRealizado - taxaRealizado;
 
   const custoPrevisto =
     Number(totaisContasPagar?.custoTotal) || Number(custosTotais?.previsto) || 0;
   const custoRealizado =
     Number(totaisContasPagar?.realizado) || Number(custosTotais?.realizado) || 0;
 
-  const faturamentoLinha = findFaturamentoPracaLinha(resultadoLinhas || []);
-  const faturamentoPrevisto = Number(faturamentoLinha?.preEvento) || 0;
-  const faturamentoRealizado = Number(faturamentoLinha?.posEvento) || 0;
+  const faturamentoPrevisto = taxaPraca.faturamentoPrevisto;
+  const faturamentoRealizado = taxaPraca.faturamentoRealizado;
 
-  const taxaPrevisto =
-    faturamentoPrevisto > 0 ? faturamentoPrevisto * TAXA_PRACA_ALIMENTACAO : null;
-  const taxaRealizado =
-    faturamentoRealizado > 0 ? faturamentoRealizado * TAXA_PRACA_ALIMENTACAO : 0;
-
-  const taxaPrevistoValor = taxaPrevisto ?? 0;
-  const resultadoFinalPrevisto = arrecadacaoPrevisto + taxaPrevistoValor - custoPrevisto;
-  const resultadoFinalRealizado = arrecadacaoRealizado + taxaRealizado - custoRealizado;
+  const resultadoFinalPrevisto = arrecadacaoComTaxaPrevisto - custoPrevisto;
+  const resultadoFinalRealizado = arrecadacaoComTaxaRealizado - custoRealizado;
 
   const aporteNecessario = resultadoFinalRealizado < 0 ? Math.abs(resultadoFinalRealizado) : 0;
 
@@ -245,8 +264,8 @@ export function buildResultadoFinal({
     faturamentoPraca: {
       previsto: faturamentoPrevisto,
       realizado: faturamentoRealizado,
-      linhaId: faturamentoLinha?.id ?? null,
-      taxaPct: TAXA_PRACA_ALIMENTACAO,
+      linhaId: taxaPraca.linhaId,
+      taxaPct: taxaPraca.taxaPct ?? TAXA_PRACA_ALIMENTACAO,
     },
     linhas: [
       {

@@ -65,6 +65,25 @@ export function findFaturamentoPracaLinha(linhas) {
   );
 }
 
+export const TAXA_PRACA_ALIMENTACAO = 0.2;
+
+/** Taxa de receita sobre o faturamento informado da praça (ex.: 20%). */
+export function computeTaxaPracaAlimentacao(resultadoLinhas, taxaPct = TAXA_PRACA_ALIMENTACAO) {
+  const faturamentoLinha = findFaturamentoPracaLinha(resultadoLinhas || []);
+  const faturamentoPrevisto = Number(faturamentoLinha?.preEvento) || 0;
+  const faturamentoRealizado = Number(faturamentoLinha?.posEvento) || 0;
+  const previsto = faturamentoPrevisto > 0 ? faturamentoPrevisto * taxaPct : null;
+  const realizado = faturamentoRealizado > 0 ? faturamentoRealizado * taxaPct : 0;
+  return {
+    faturamentoPrevisto,
+    faturamentoRealizado,
+    linhaId: faturamentoLinha?.id ?? null,
+    previsto,
+    realizado,
+    taxaPct,
+  };
+}
+
 export async function patchFaturamentoPracaAlimentacao(pool, eventoId, { previsto, realizado } = {}) {
   if (previsto === undefined && realizado === undefined) {
     throw Object.assign(new Error('Informe o faturamento previsto ou realizado'), { status: 400 });
