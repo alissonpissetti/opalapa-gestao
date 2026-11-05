@@ -8,6 +8,8 @@ import {
   gerarPreviewMarketingComunicacao,
   reaplicarTemplateMarketingComunicacao,
   addMarketingComunicacaoItem,
+  analisarTagplayIngressosMarketing,
+  importarTagplayIngressosMarketing,
   fetchArrecadacao,
   fetchFunilEtapas,
   fetchParticipantes,
@@ -77,6 +79,16 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     addNome: document.getElementById('marketing-com-add-nome'),
     addContato: document.getElementById('marketing-com-add-contato'),
     addTelefone: document.getElementById('marketing-com-add-telefone'),
+    addEmail: document.getElementById('marketing-com-add-email'),
+    addImportPanel: document.getElementById('marketing-com-add-import-panel'),
+    importFile: document.getElementById('marketing-com-import-file'),
+    importExcluirPos: document.getElementById('marketing-com-import-excluir-pos'),
+    importConfirmados: document.getElementById('marketing-com-import-confirmados'),
+    importAgrupar: document.getElementById('marketing-com-import-agrupar'),
+    importCanal: document.getElementById('marketing-com-import-canal'),
+    importSummary: document.getElementById('marketing-com-import-summary'),
+    btnImportAnalyze: document.getElementById('btn-marketing-com-import-analyze'),
+    btnImportRun: document.getElementById('btn-marketing-com-import-run'),
     btnRefreshLeads: document.getElementById('btn-marketing-com-refresh-leads'),
     btnAddItem: document.getElementById('btn-marketing-com-add-item'),
     comTemplate: document.getElementById('marketing-com-template'),
@@ -87,6 +99,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     btnPreview: document.getElementById('btn-marketing-com-preview'),
     btnApplyTemplate: document.getElementById('btn-marketing-com-apply-template'),
     btnClear: document.getElementById('btn-marketing-com-clear'),
+    btnCopyEmails: document.getElementById('btn-marketing-com-copy-emails'),
     comPreview: document.getElementById('marketing-com-preview'),
     comMeta: document.getElementById('marketing-com-meta'),
     comTable: document.getElementById('marketing-com-table'),
@@ -108,6 +121,45 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
   let updatingItemId = null;
   let addMode = 'lead';
   let leadPickerOptions = [];
+  let importCsvText = '';
+  let importAnalyzeResult = null;
+
+  function hasWhatsAppPhone(telefone) {
+    let d = String(telefone || '').replace(/\D/g, '');
+    if (d.startsWith('55') && d.length > 11) d = d.slice(2);
+    return d.length === 10 || d.length === 11;
+  }
+
+  function readTagplayImportOptions() {
+    return {
+      excluirPos: els.importExcluirPos?.checked !== false,
+      somenteConfirmados: els.importConfirmados?.checked !== false,
+      agrupar: els.importAgrupar?.checked !== false,
+      canal: els.importCanal?.value || 'qualquer',
+    };
+  }
+
+  function renderImportSummary(data) {
+    if (!els.importSummary) return;
+    if (!data) {
+      els.importSummary.classList.add('hidden');
+      els.importSummary.textContent = '';
+      return;
+    }
+    const s = data.stats || {};
+    els.importSummary.classList.remove('hidden');
+    els.importSummary.innerHTML = `
+      <p><strong>${data.total ?? 0}</strong> contato(s) prontos para importar (canal: ${escapeHtml(data.canal || 'qualquer')}).</p>
+      <p class="field-hint">Linhas no CSV: ${s.linhasCsv ?? '—'} · Agrupados: ${s.contatos ?? '—'} · Ignorados POS: ${s.ignoradas?.pos ?? 0} · Não confirmados: ${s.ignoradas?.naoConfirmado ?? 0}</p>
+      <p class="field-hint">Com WhatsApp: ${s.comWhatsApp ?? '—'} · Com e-mail: ${s.comEmail ?? '—'}</p>
+    `;
+  }
+
+  function syncAddRecipientActions() {
+    const isImport = addMode === 'import';
+    els.btnAddItem?.classList.toggle('hidden', isImport);
+    els.btnImportRun?.toggleAttribute('disabled', isImport && !importAnalyzeResult);
+  }
 
   function showPanel(visible) {
     els.panel?.classList.toggle('hidden', !visible);
@@ -241,6 +293,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     return (
       item.incluido &&
       !item.pausado &&
+      hasWhatsAppPhone(item.telefone) &&
       (item.status === 'pendente' || item.status === 'erro' || item.status === 'reenvio_pendente')
     );
   }
@@ -330,6 +383,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
       empresa: empresa || '—',
       contato,
       telefone: String(item.telefone || '').trim(),
+      email: String(item.email || '').trim(),
     };
   }
 
@@ -349,6 +403,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
               !comDispatching &&
               !sendingItemId &&
               !updatingItemId &&
+              hasWhatsAppPhone(item.telefone) &&
               (item.status === 'pendente' ||
                 item.status === 'erro' ||
                 item.status === 'enviado' ||
@@ -384,6 +439,8 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
             <div class="marketing-com-dest-empresa">${escapeHtml(dest.empresa)}</div>
             ${dest.contato ? `<div class="marketing-com-dest-contato">${escapeHtml(dest.contato)}</div>` : ''}
             ${dest.telefone ? `<div class="marketing-com-dest-tel">${escapeHtml(dest.telefone)}</div>` : ''}
+            ${dest.email ? `<div class="marketing-com-dest-email">${escapeHtml(dest.email)}</div>` : ''}
+            ${!dest.telefone && dest.email ? `<div class="marketing-com-dest-hint field-hint">Sem WhatsApp — use o e-mail em campanha externa</div>` : ''}
           </td>
           <td class="marketing-com-info-cell">
             <div class="marketing-com-info-tipo">${escapeHtml(item.tipoLabel || item.tipo)}</div>
@@ -596,6 +653,15 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
     els.comPreview?.classList.toggle('hidden', !hasPreview);
     if (els.btnClear) {
       els.btnClear.disabled = comDispatching || sendingItemId || !itens.length;
+    }
+    const emails = [
+      ...new Set(
+        itens.filter((i) => i.incluido && String(i.email || '').trim()).map((i) => String(i.email).trim()),
+      ),
+    ];
+    els.btnCopyEmails?.classList.toggle('hidden', emails.length === 0);
+    if (els.btnCopyEmails) {
+      els.btnCopyEmails.dataset.emails = emails.join('; ');
     }
     if (els.comMeta) {
       els.comMeta.textContent = hasPreview
@@ -876,12 +942,14 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
   }
 
   function setAddMode(mode) {
-    addMode = mode === 'manual' ? 'manual' : 'lead';
+    addMode = mode === 'manual' ? 'manual' : mode === 'import' ? 'import' : 'lead';
     els.addLeadPanel?.classList.toggle('hidden', addMode !== 'lead');
     els.addManualPanel?.classList.toggle('hidden', addMode !== 'manual');
+    els.addImportPanel?.classList.toggle('hidden', addMode !== 'import');
     document.querySelectorAll('.marketing-com-add-tab').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.addMode === addMode);
     });
+    syncAddRecipientActions();
   }
 
   async function refreshLeadPicker() {
@@ -943,6 +1011,7 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
           nome: els.addNome?.value?.trim(),
           contatoNome: els.addContato?.value?.trim(),
           telefone: els.addTelefone?.value?.trim(),
+          email: els.addEmail?.value?.trim(),
         };
       }
       const data = await addMarketingComunicacaoItem(editId, payload);
@@ -951,11 +1020,87 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
       if (els.addNome) els.addNome.value = '';
       if (els.addContato) els.addContato.value = '';
       if (els.addTelefone) els.addTelefone.value = '';
+      if (els.addEmail) els.addEmail.value = '';
       fillEditor(current);
       renderPreviewState();
       await refreshLeadPicker();
     } catch (err) {
       alert(err.message || 'Não foi possível adicionar.');
+    }
+  }
+
+  async function readImportCsvFile() {
+    const file = els.importFile?.files?.[0];
+    if (!file) {
+      alert('Selecione o arquivo CSV exportado pelo TagPlay.');
+      return null;
+    }
+    try {
+      importCsvText = await file.text();
+      importAnalyzeResult = null;
+      if (els.btnImportRun) els.btnImportRun.disabled = true;
+      renderImportSummary(null);
+      return importCsvText;
+    } catch {
+      alert('Não foi possível ler o arquivo.');
+      return null;
+    }
+  }
+
+  async function analyzeImportCsv() {
+    const csv = importCsvText || (await readImportCsvFile());
+    if (!csv) return;
+    try {
+      const data = await analisarTagplayIngressosMarketing({
+        csv,
+        ...readTagplayImportOptions(),
+      });
+      importAnalyzeResult = data;
+      renderImportSummary(data);
+      if (els.btnImportRun) els.btnImportRun.disabled = !data.total;
+    } catch (err) {
+      importAnalyzeResult = null;
+      renderImportSummary(null);
+      alert(err.message || 'Falha ao analisar o CSV.');
+    }
+  }
+
+  async function runImportCsv() {
+    if (!editId) {
+      alert('Salve o rascunho antes de importar destinatários.');
+      return;
+    }
+    const csv = importCsvText || (await readImportCsvFile());
+    if (!csv) return;
+    if (
+      !confirm(
+        `Importar ${importAnalyzeResult?.total ?? 'os'} contato(s) para esta comunicação?\n\nDuplicados (mesmo e-mail ou telefone) serão ignorados.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const data = await importarTagplayIngressosMarketing(editId, {
+        csv,
+        ...readTagplayImportOptions(),
+      });
+      const bundle = data.comunicacao;
+      if (bundle?.comunicacao) {
+        current = bundle.comunicacao;
+        itens = bundle.itens || [];
+      } else {
+        const refreshed = await fetchMarketingComunicacao(editId);
+        current = refreshed.comunicacao;
+        itens = refreshed.itens || [];
+      }
+      fillEditor(current);
+      renderPreviewState();
+      await loadList();
+      alert(
+        `Importação concluída: ${data.inseridos ?? 0} incluído(s), ${data.duplicados ?? 0} duplicado(s) ignorado(s).`,
+      );
+    } catch (err) {
+      alert(err.message || 'Falha na importação.');
     }
   }
 
@@ -974,6 +1119,16 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
   els.btnPreview?.addEventListener('click', () => void generatePreview());
   els.btnApplyTemplate?.addEventListener('click', () => void applyTemplateToList());
   els.btnClear?.addEventListener('click', () => void clearPreviewList());
+  els.btnCopyEmails?.addEventListener('click', async () => {
+    const text = els.btnCopyEmails?.dataset.emails || '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('E-mails copiados (separados por ponto e vírgula).');
+    } catch {
+      prompt('Copie os e-mails:', text);
+    }
+  });
   els.btnStart?.addEventListener('click', () => void runDispatch());
   els.btnPause?.addEventListener('click', () => void pauseDispatch());
   els.somenteVendidos?.addEventListener('change', () => {
@@ -984,6 +1139,26 @@ export function initMarketingComunicacao({ onSummaryChange, onTabOpen } = {}) {
   });
   els.btnRefreshLeads?.addEventListener('click', () => void refreshLeadPicker());
   els.btnAddItem?.addEventListener('click', () => void addRecipientToList());
+  els.btnImportAnalyze?.addEventListener('click', () => void analyzeImportCsv());
+  els.btnImportRun?.addEventListener('click', () => void runImportCsv());
+  els.importFile?.addEventListener('change', () => {
+    importCsvText = '';
+    importAnalyzeResult = null;
+    renderImportSummary(null);
+    if (els.btnImportRun) els.btnImportRun.disabled = true;
+  });
+  for (const el of [
+    els.importExcluirPos,
+    els.importConfirmados,
+    els.importAgrupar,
+    els.importCanal,
+  ]) {
+    el?.addEventListener('change', () => {
+      if (importCsvText) void analyzeImportCsv();
+    });
+  }
+
+  syncAddRecipientActions();
 
   void loadVars();
   if (els.comTemplate && !els.comTemplate.value.trim()) {

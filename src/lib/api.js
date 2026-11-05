@@ -439,6 +439,20 @@ export function addMarketingComunicacaoItem(comunicacaoId, data) {
   });
 }
 
+export function analisarTagplayIngressosMarketing(data) {
+  return apiRequest('/api/marketing/comunicacao/tagplay-ingressos/analisar', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function importarTagplayIngressosMarketing(comunicacaoId, data) {
+  return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/importar-tagplay-ingressos`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export function updateMarketingComunicacaoItem(comunicacaoId, itemId, data) {
   return apiRequest(`/api/marketing/comunicacoes/${comunicacaoId}/itens/${itemId}`, {
     method: 'PUT',

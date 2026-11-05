@@ -749,7 +749,7 @@
           <article class="marketing-tool-card marketing-tool-card--wide" aria-labelledby="marketing-tool-com-title">
             <h3 class="marketing-tool-card-title" id="marketing-tool-com-title">Comunicação</h3>
             <p class="marketing-tool-card-sub">
-              Disparo em massa de WhatsApp com template personalizado, prévia obrigatória e histórico salvo.
+              Disparo em massa de WhatsApp com template personalizado, importação de compradores TagPlay, prévia e histórico.
             </p>
             <button class="tbtn primary" type="button" id="btn-marketing-com-open">Abrir comunicações</button>
           </article>
@@ -762,8 +762,8 @@
             <h2>Comunicações WhatsApp</h2>
             <button class="tbtn primary" type="button" id="btn-marketing-com-new">Nova comunicação</button>
           </div>
-          <p class="subtitle marketing-com-list-hint">
-            Monte o template, gere a prévia por lead e só então dispare. Cada comunicação fica salva para revisão.
+            <p class="marketing-com-list-hint">
+            Monte o template, gere a prévia por lead ou importe compradores do TagPlay. Cada comunicação fica salva para revisão.
           </p>
           <div class="table-wrap">
             <table class="marketing-com-list-table">
@@ -844,6 +844,7 @@
             <div class="marketing-com-add-tabs" role="tablist">
               <button type="button" class="tbtn marketing-com-add-tab active" data-add-mode="lead" role="tab">Lead cadastrado</button>
               <button type="button" class="tbtn marketing-com-add-tab" data-add-mode="manual" role="tab">Contato avulso</button>
+              <button type="button" class="tbtn marketing-com-add-tab" data-add-mode="import" role="tab">Importar TagPlay</button>
             </div>
             <div class="marketing-com-add-panel" id="marketing-com-add-lead-panel">
               <label class="marketing-com-add-label" for="marketing-com-add-lead">Lead</label>
@@ -865,8 +866,49 @@
                 <label for="marketing-com-add-telefone">WhatsApp</label>
                 <input id="marketing-com-add-telefone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(11) 99999-9999" />
               </div>
+              <div class="field">
+                <label for="marketing-com-add-email">E-mail (opcional se tiver WhatsApp)</label>
+                <input id="marketing-com-add-email" type="email" autocomplete="email" placeholder="contato@empresa.com" />
+              </div>
             </div>
-            <button class="tbtn primary" type="button" id="btn-marketing-com-add-item">Incluir na lista</button>
+            <div class="marketing-com-add-panel hidden" id="marketing-com-add-import-panel">
+              <p class="field-hint">
+                CSV exportado em TagPlay → Relatório de vendas de ingressos (formato com colunas Pedido e Cliente).
+              </p>
+              <div class="field">
+                <label for="marketing-com-import-file">Arquivo CSV</label>
+                <input id="marketing-com-import-file" type="file" accept=".csv,text/csv" />
+              </div>
+              <fieldset class="marketing-com-import-options">
+                <legend>Opções</legend>
+                <label class="marketing-origem-check">
+                  <input type="checkbox" id="marketing-com-import-excluir-pos" checked />
+                  Excluir vendas POS / bilheteria e contas internas
+                </label>
+                <label class="marketing-origem-check">
+                  <input type="checkbox" id="marketing-com-import-confirmados" checked />
+                  Somente pedidos confirmados
+                </label>
+                <label class="marketing-origem-check">
+                  <input type="checkbox" id="marketing-com-import-agrupar" checked />
+                  Agrupar linhas por cliente (soma ingressos)
+                </label>
+              </fieldset>
+              <div class="field">
+                <label for="marketing-com-import-canal">Importar contatos com</label>
+                <select id="marketing-com-import-canal">
+                  <option value="qualquer">E-mail ou WhatsApp</option>
+                  <option value="whatsapp">Somente WhatsApp válido</option>
+                  <option value="email">Somente e-mail</option>
+                </select>
+              </div>
+              <div class="marketing-com-import-summary hidden" id="marketing-com-import-summary" aria-live="polite"></div>
+              <div class="marketing-tool-actions">
+                <button class="tbtn" type="button" id="btn-marketing-com-import-analyze">Analisar arquivo</button>
+                <button class="tbtn primary" type="button" id="btn-marketing-com-import-run" disabled>Importar para a lista</button>
+              </div>
+            </div>
+            <button class="tbtn primary hidden" type="button" id="btn-marketing-com-add-item">Incluir na lista</button>
           </div>
 
           <div class="marketing-com-preview hidden" id="marketing-com-preview">
@@ -875,6 +917,7 @@
               <p class="marketing-com-meta" id="marketing-com-meta"></p>
               <div class="marketing-com-preview-head-actions">
                 <button class="tbtn" type="button" id="btn-marketing-com-clear">Limpar lista</button>
+                <button class="tbtn" type="button" id="btn-marketing-com-copy-emails" hidden>Copiar e-mails</button>
               </div>
             </div>
 

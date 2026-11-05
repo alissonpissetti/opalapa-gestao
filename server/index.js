@@ -108,6 +108,8 @@ import {
   limparPreviewComunicacao,
   marcarComunicacaoEnviando,
   pausarComunicacao,
+  analisarTagplayIngressosContatos,
+  importarTagplayContatosComunicacao,
 } from './marketing-comunicacao.js';
 import {
   migrateMarketingFormularios,
@@ -1462,6 +1464,17 @@ app.get('/api/marketing/comunicacao/variaveis', requireEvento, (_req, res) => {
   res.json({ variaveis: COMUNICACAO_TEMPLATE_VARS });
 });
 
+app.post('/api/marketing/comunicacao/tagplay-ingressos/analisar', requireEvento, (req, res) => {
+  try {
+    const data = analisarTagplayIngressosContatos(req.body);
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacao/tagplay-ingressos/analisar', err);
+    res.status(500).json({ error: 'Falha ao analisar CSV' });
+  }
+});
+
 app.post('/api/marketing/comunicacao/preview', requireEvento, async (req, res) => {
   try {
     const data = await previewComunicacao(pool, req.eventoId, req.body);
@@ -1580,6 +1593,19 @@ app.post('/api/marketing/comunicacoes/:id/itens', requireEvento, async (req, res
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /api/marketing/comunicacoes/:id/itens', err);
     res.status(500).json({ error: 'Falha ao adicionar destinatário' });
+  }
+});
+
+app.post('/api/marketing/comunicacoes/:id/importar-tagplay-ingressos', requireEvento, async (req, res) => {
+  try {
+    const comunicacaoId = Number(req.params.id);
+    const data = await importarTagplayContatosComunicacao(pool, comunicacaoId, req.eventoId, req.body);
+    if (!data) return res.status(404).json({ error: 'Comunicação não encontrada' });
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /api/marketing/comunicacoes/:id/importar-tagplay-ingressos', err);
+    res.status(500).json({ error: 'Falha ao importar contatos' });
   }
 });
 

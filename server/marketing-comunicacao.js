@@ -3,6 +3,10 @@ import { listFunilEtapas } from './funil.js';
 import { toWhatsAppNumber } from './whatsapp-phone.js';
 import { sendTextMessage } from './evolution.js';
 import { sendWhatsappToLead, getWhatsappStatusQuick } from './whatsapp.js';
+import {
+  parseTagplayVendasIngressosCsv,
+  filterContatosPorCanal,
+} from '../shared/tagplay-vendas-ingressos-csv.js';
 
 const TIPO_LABELS = {
   espaco: 'Espaço',
@@ -10,6 +14,7 @@ const TIPO_LABELS = {
   artistico: 'Artístico',
   contato: 'Contato',
   manual: 'Contato avulso',
+  tagplay: 'Venda TagPlay',
 };
 
 const TIPO_PRIORITY = { espaco: 0, patrocinio: 1, artistico: 2, contato: 3 };
@@ -38,6 +43,8 @@ export const COMUNICACAO_TEMPLATE_VARS = [
   { key: 'qtd_ingressos', label: 'Igual a {{ingressos}}' },
   { key: 'ingressos_padrao', label: 'Ingressos padrão do plano (sem ajuste individual)' },
   { key: 'evento', label: 'Nome do evento' },
+  { key: 'email', label: 'E-mail do contato' },
+  { key: 'ingressos_tipos', label: 'Tipos de ingresso comprados (lista)' },
 ];
 
 const VALID_TIPOS = new Set(Object.keys(TIPO_LABELS));
@@ -333,6 +340,7 @@ function rowToComunicacaoItem(row) {
     nome: row.nome || '',
     contatoNome: row.contato_nome || '',
     telefone: row.telefone || '',
+    email: row.email || '',
     tipo: row.tipo || '',
     tipoLabel: tipoLabel(row.tipo),
     mensagem: row.mensagem || '',
@@ -395,6 +403,7 @@ export async function migrateComunicacoes(pool) {
     `ALTER TABLE marketing_comunicacao_itens ADD COLUMN contato_nome VARCHAR(160) NULL AFTER nome`,
     `ALTER TABLE marketing_comunicacao_itens ADD COLUMN pausado TINYINT(1) NOT NULL DEFAULT 0 AFTER incluido`,
     `ALTER TABLE marketing_comunicacao_itens ADD COLUMN manual TINYINT(1) NOT NULL DEFAULT 0 AFTER pausado`,
+    `ALTER TABLE marketing_comunicacao_itens ADD COLUMN email VARCHAR(254) NULL AFTER telefone`,
   ]) {
     try {
       await pool.query(stmt);
@@ -438,6 +447,14 @@ export async function migrateComunicacoes(pool) {
        ADD CONSTRAINT fk_mci_arrecadacao
        FOREIGN KEY (arrecadacao_id) REFERENCES arrecadacao(id) ON DELETE CASCADE`,
     );
+  }
+
+  try {
+    await pool.query(
+      'ALTER TABLE marketing_comunicacao_itens MODIFY telefone VARCHAR(40) NULL',
+    );
+  } catch (err) {
+    if (err?.code !== 'ER_PARSE_ERROR') throw err;
   }
 }
 
@@ -922,6 +939,179 @@ function manualTemplateContext({ nome, contatoNome, telefone }) {
     qtd_ingressos: '0',
     numero_ingressos: '0',
     evento: '',
+    email: '',
+    ingressos_tipos: '',
+  };
+}
+
+function tagplayTemplateContext(contact, eventoNome = '') {
+  const nome = String(contact?.nome || '').trim();
+  const telefone = String(contact?.telefone || '').trim();
+  const ingressosText = String(contact?.totalIngressos ?? 0);
+  const tipos = Array.isArray(contact?.ingressosTipos) ? contact.ingressosTipos.join(', ') : '';
+  return {
+    nome,
+    empresa: nome,
+    contato: nome,
+    telefone,
+    email: String(contact?.email || '').trim(),
+    tipo: tipoLabel('tagplay'),
+    espaco: '',
+    grupo: '',
+    instagram: '',
+    descricao: tipos,
+    cota: tipos,
+    produto: (contact?.ingressosTipos || [])[0] || '',
+    status: '',
+    valor_total: formatBRL(contact?.valorTotal || 0),
+    valor_pago: formatBRL(contact?.valorTotal || 0),
+    valor_em_aberto: formatBRL(0),
+    ingressos: ingressosText,
+    ingressos_padrao: ingressosText,
+    ingresso: ingressosText,
+    qtd_ingressos: ingressosText,
+    numero_ingressos: ingressosText,
+    ingressos_tipos: tipos,
+    evento: eventoNome,
+  };
+}
+
+function parseTagplayImportOptions(body) {
+  const raw = body?.opcoes && typeof body.opcoes === 'object' ? body.opcoes : body;
+  return {
+    excluirPos: raw?.excluirPos !== false && raw?.excluir_pos !== false,
+    somenteConfirmados: raw?.somenteConfirmados !== false && raw?.somente_confirmados !== false,
+    agrupar: raw?.agrupar !== false,
+    canal: String(raw?.canal || 'qualquer').toLowerCase(),
+  };
+}
+
+export function analisarTagplayIngressosContatos(body) {
+  const csv = String(body?.csv ?? body?.texto ?? body?.conteudo ?? '').trim();
+  if (!csv) {
+    throw Object.assign(new Error('Envie o conteúdo do CSV exportado pelo TagPlay'), { status: 400 });
+  }
+  const opts = parseTagplayImportOptions(body);
+  const parsed = parseTagplayVendasIngressosCsv(csv, {
+    excluirPos: opts.excluirPos,
+    somenteConfirmados: opts.somenteConfirmados,
+    agrupar: opts.agrupar,
+  });
+  const contatos = filterContatosPorCanal(parsed.contatos, opts.canal);
+  const comWhats = filterContatosPorCanal(contatos, 'whatsapp').length;
+  const comEmail = filterContatosPorCanal(contatos, 'email').length;
+  return {
+    stats: {
+      ...parsed.stats,
+      contatosFiltrados: contatos.length,
+      comWhatsApp: comWhats,
+      comEmail,
+    },
+    canal: opts.canal,
+    amostra: contatos.slice(0, 8).map((c) => ({
+      nome: c.nome,
+      email: c.email,
+      telefone: c.telefone,
+      totalIngressos: c.totalIngressos,
+      ingressosTipos: c.ingressosTipos,
+    })),
+    total: contatos.length,
+  };
+}
+
+async function loadExistingImportKeys(pool, comunicacaoId) {
+  const [rows] = await pool.query(
+    `SELECT telefone, email FROM marketing_comunicacao_itens WHERE comunicacao_id = ?`,
+    [comunicacaoId],
+  );
+  const phoneKeys = new Set();
+  const emailKeys = new Set();
+  for (const row of rows) {
+    const phoneKey = toWhatsAppNumber(row.telefone);
+    if (phoneKey) phoneKeys.add(phoneKey);
+    const email = String(row.email || '').trim().toLowerCase();
+    if (email) emailKeys.add(email);
+  }
+  return { phoneKeys, emailKeys };
+}
+
+export async function importarTagplayContatosComunicacao(pool, comunicacaoId, eventoId, body) {
+  const com = await findComunicacaoRow(pool, comunicacaoId, eventoId);
+  if (!com) return null;
+
+  const csv = String(body?.csv ?? body?.texto ?? body?.conteudo ?? '').trim();
+  if (!csv) {
+    throw Object.assign(new Error('Envie o conteúdo do CSV exportado pelo TagPlay'), { status: 400 });
+  }
+
+  const opts = parseTagplayImportOptions(body);
+  const parsed = parseTagplayVendasIngressosCsv(csv, {
+    excluirPos: opts.excluirPos,
+    somenteConfirmados: opts.somenteConfirmados,
+    agrupar: opts.agrupar,
+  });
+  const contatos = filterContatosPorCanal(parsed.contatos, opts.canal);
+  const template = String(com.template || '').trim() || '{{nome}}';
+
+  const [evRows] = await pool.query('SELECT nome FROM eventos WHERE id = ? LIMIT 1', [eventoId]);
+  const eventoNome = evRows[0]?.nome || '';
+
+  const { phoneKeys, emailKeys } = await loadExistingImportKeys(pool, comunicacaoId);
+
+  let inseridos = 0;
+  let duplicados = 0;
+
+  for (const c of contatos) {
+    const emailKey = c.email ? String(c.email).toLowerCase() : '';
+    const phoneKey = toWhatsAppNumber(c.telefone);
+    if (emailKey && emailKeys.has(emailKey)) {
+      duplicados += 1;
+      continue;
+    }
+    if (phoneKey && phoneKeys.has(phoneKey)) {
+      duplicados += 1;
+      continue;
+    }
+
+    const ctx = tagplayTemplateContext(c, eventoNome);
+    const mensagem = renderComunicacaoTemplate(template, ctx);
+    const telefone = String(c.telefone || '').trim();
+
+    await pool.query(
+      `INSERT INTO marketing_comunicacao_itens
+         (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, email, tipo, mensagem, valor_em_aberto, incluido, manual, status)
+       VALUES (?, NULL, ?, ?, ?, ?, 'tagplay', ?, NULL, 1, 1, 'pendente')`,
+      [
+        comunicacaoId,
+        ctx.nome || ctx.empresa || 'Contato',
+        ctx.nome || null,
+        telefone || null,
+        emailKey || null,
+        mensagem,
+      ],
+    );
+
+    if (emailKey) emailKeys.add(emailKey);
+    if (phoneKey) phoneKeys.add(phoneKey);
+    inseridos += 1;
+  }
+
+  if (inseridos > 0) {
+    await pool.query(
+      `UPDATE marketing_comunicacoes SET status = 'preview', updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND evento_id = ?`,
+      [comunicacaoId, eventoId],
+    );
+  }
+  await refreshComunicacaoCounts(pool, comunicacaoId);
+
+  return {
+    inseridos,
+    duplicados,
+    stats: parsed.stats,
+    canal: opts.canal,
+    totalContatosCsv: contatos.length,
+    comunicacao: await getComunicacaoById(pool, comunicacaoId, eventoId),
   };
 }
 
@@ -977,35 +1167,37 @@ export async function addComunicacaoItem(pool, comunicacaoId, eventoId, body) {
   const nome = String(body?.nome ?? body?.empresa ?? '').trim();
   const contatoNome = String(body?.contatoNome ?? body?.contato_nome ?? body?.nomeContato ?? '').trim();
   const telefone = String(body?.telefone ?? body?.phone ?? '').trim();
+  const email = String(body?.email ?? body?.e_mail ?? '').trim().toLowerCase();
   if (!nome) {
     throw Object.assign(new Error('Informe o nome do destinatário'), { status: 400 });
   }
-  if (!hasValidPhone(telefone)) {
-    throw Object.assign(new Error('Informe um WhatsApp válido'), { status: 400 });
+  if (!hasValidPhone(telefone) && !email) {
+    throw Object.assign(new Error('Informe WhatsApp ou e-mail'), { status: 400 });
   }
 
+  const { phoneKeys, emailKeys } = await loadExistingImportKeys(pool, comunicacaoId);
   const phoneKey = toWhatsAppNumber(telefone);
-  const [dupPhone] = await pool.query(
-    `SELECT id FROM marketing_comunicacao_itens
-     WHERE comunicacao_id = ? AND telefone = ? LIMIT 1`,
-    [comunicacaoId, telefone],
-  );
-  if (dupPhone[0]) {
+  if (phoneKey && phoneKeys.has(phoneKey)) {
     throw Object.assign(new Error('Já existe um destinatário com este telefone na lista'), { status: 409 });
+  }
+  if (email && emailKeys.has(email)) {
+    throw Object.assign(new Error('Já existe um destinatário com este e-mail na lista'), { status: 409 });
   }
 
   const mensagemRaw = String(body?.mensagem ?? body?.texto ?? '').trim();
+  const ctx = manualTemplateContext({ nome, contatoNome, telefone });
+  if (email) ctx.email = email;
   const mensagem = mensagemRaw
     ? mensagemRaw
     : template
-      ? renderComunicacaoTemplate(template, manualTemplateContext({ nome, contatoNome, telefone }))
+      ? renderComunicacaoTemplate(template, ctx)
       : `Olá${contatoNome ? ` ${contatoNome}` : ''}!`;
 
   const [result] = await pool.query(
     `INSERT INTO marketing_comunicacao_itens
-       (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, tipo, mensagem, valor_em_aberto, incluido, manual, status)
-     VALUES (?, NULL, ?, ?, ?, 'manual', ?, NULL, 1, 1, 'pendente')`,
-    [comunicacaoId, nome, contatoNome || null, telefone, mensagem],
+       (comunicacao_id, arrecadacao_id, nome, contato_nome, telefone, email, tipo, mensagem, valor_em_aberto, incluido, manual, status)
+     VALUES (?, NULL, ?, ?, ?, ?, 'manual', ?, NULL, 1, 1, 'pendente')`,
+    [comunicacaoId, nome, contatoNome || null, telefone || null, email || null, mensagem],
   );
   await refreshComunicacaoCounts(pool, comunicacaoId);
   const [rows] = await pool.query('SELECT * FROM marketing_comunicacao_itens WHERE id = ? LIMIT 1', [

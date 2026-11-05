@@ -6925,6 +6925,33 @@ tbody tr:hover {
   width: 100%;
 }
 
+.marketing-com-import-options {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.marketing-com-import-options legend {
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.marketing-com-import-summary {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.marketing-com-dest-email {
+  font-size: 0.85rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
 .marketing-com-preview-actions {
   flex-shrink: 0;
   margin-top: 0.75rem;
