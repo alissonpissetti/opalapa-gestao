@@ -9,6 +9,7 @@ import {
   patchFaturamentoPracaAlimentacao,
 } from '../lib/api.js';
 import { escapeHtml, fmtMoney, formatValorInput, maskValorInput, parseValor } from '../lib/format.js';
+import { calcTaxaPracaFromFaturamentoBruto } from '../../shared/financeiro-taxa-praca.js';
 import { BAR_CHART_COLORS, renderBarChart } from '../lib/bar-chart.js';
 import { renderFinSwatch, renderPieChart, resolvePieSliceColors } from '../lib/pie-chart.js';
 import {
@@ -338,28 +339,11 @@ function renderResultadoSinal(sinal) {
 function renderResultadoFinal(resultadoFinal) {
   if (!resultadoFinal?.linhas?.length) return '';
 
-  const fat = resultadoFinal.faturamentoPraca || { previsto: 0, realizado: 0, taxaPct: 0.2 };
-  const taxaPctLabel = `${Math.round((fat.taxaPct ?? 0.2) * 100)}%`;
-
   return `
       <section class="financeiro-resultado-final" id="financeiro-resultado-final" aria-label="Resultado final">
         <div class="financeiro-custos-head">
           <h2 class="financeiro-custos-title">Resultado final</h2>
-          <span class="financeiro-painel-lead">Consolidação financeira do evento · taxa praça ${taxaPctLabel}</span>
-        </div>
-        <div class="financeiro-resultado-final-fat">
-          <span class="financeiro-resultado-final-fat-label">Faturamento praça de alimentação (prévia)</span>
-          <div class="financeiro-resultado-final-fat-inputs">
-            <label class="financeiro-resultado-final-fat-field">
-              <span>Previsto</span>
-              <input type="text" class="fin-inline-input fin-inline-money fin-resultado-fat-previsto" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(fat.previsto))}" title="Base para taxa prevista (${taxaPctLabel})" />
-            </label>
-            <label class="financeiro-resultado-final-fat-field">
-              <span>Realizado</span>
-              <input type="text" class="fin-inline-input fin-inline-money fin-resultado-fat-realizado" inputmode="numeric" autocomplete="off" value="${escapeHtml(formatValorInput(fat.realizado))}" title="Base para taxa realizada (${taxaPctLabel})" />
-            </label>
-          </div>
-          <span class="financeiro-resultado-final-fat-hint">Taxa alimentação = ${taxaPctLabel} do faturamento informado</span>
+          <span class="financeiro-painel-lead">Consolidação financeira do evento (inclui taxa de 20% sobre o faturamento bruto da praça)</span>
         </div>
         <div class="table-wrap">
           <table class="table-financeiro-custos table-financeiro-resultado-final">
@@ -438,12 +422,33 @@ export function initFinanceiroGestaoModule() {
   let faturamentoSaving = false;
 
   function applyResultadoFinalFromResponse(res) {
+    if (res?.sumarioArrecadacao) {
+      painel.sumarioArrecadacao = res.sumarioArrecadacao;
+      syncTaxaPracaLinhaFromFaturamento();
+      refreshSumarioArrecadacao();
+      refreshFaseComparativoCharts();
+    }
     if (!res?.resultadoFinal) return;
     painel.resultadoFinal = res.resultadoFinal;
     refreshResultadoFinal();
   }
 
+  function syncTaxaPracaLinhaFromFaturamento() {
+    const sumario = painel?.sumarioArrecadacao;
+    const fat = sumario?.faturamentoPraca;
+    const linhas = sumario?.linhas;
+    if (!fat || !linhas?.length) return;
+    const pct = fat.taxaPct ?? 0.2;
+    const taxaLinha = linhas.find((l) => l.id === 'taxa-praca-alimentacao');
+    if (!taxaLinha) return;
+    taxaLinha.previsto = calcTaxaPracaFromFaturamentoBruto(fat.previsto, pct);
+    taxaLinha.realizado = calcTaxaPracaFromFaturamentoBruto(fat.realizado, pct);
+    fat.taxaPrevisto = taxaLinha.previsto;
+    fat.taxaRealizado = taxaLinha.realizado;
+  }
+
   function recalcSumarioTotais() {
+    syncTaxaPracaLinhaFromFaturamento();
     const sumario = painel?.sumarioArrecadacao;
     const linhas = sumario?.linhas;
     if (!linhas?.length) return;
@@ -490,6 +495,7 @@ export function initFinanceiroGestaoModule() {
     if (next) {
       host.replaceWith(next);
       bindSumarioArrecadacaoEditors();
+      bindFaturamentoPracaEditors();
     }
   }
 
@@ -559,12 +565,17 @@ export function initFinanceiroGestaoModule() {
     if (parsed == null) {
       const cur =
         field === 'previsto'
-          ? painel?.resultadoFinal?.faturamentoPraca?.previsto
-          : painel?.resultadoFinal?.faturamentoPraca?.realizado;
+          ? painel?.sumarioArrecadacao?.faturamentoPraca?.previsto ??
+            painel?.resultadoFinal?.faturamentoPraca?.previsto
+          : painel?.sumarioArrecadacao?.faturamentoPraca?.realizado ??
+            painel?.resultadoFinal?.faturamentoPraca?.realizado;
       input.value = formatValorInput(cur ?? 0);
       return;
     }
-    const fat = painel?.resultadoFinal?.faturamentoPraca || {};
+    const fat =
+      painel?.sumarioArrecadacao?.faturamentoPraca ||
+      painel?.resultadoFinal?.faturamentoPraca ||
+      {};
     const current = field === 'previsto' ? Number(fat.previsto) || 0 : Number(fat.realizado) || 0;
     if (Math.abs(parsed - current) < 0.005) {
       input.value = formatValorInput(current);
@@ -582,6 +593,10 @@ export function initFinanceiroGestaoModule() {
         field === 'previsto' ? parsed : undefined,
         field === 'realizado' ? parsed : undefined,
       );
+      if (painel?.sumarioArrecadacao?.faturamentoPraca) {
+        if (field === 'previsto') painel.sumarioArrecadacao.faturamentoPraca.previsto = parsed;
+        else painel.sumarioArrecadacao.faturamentoPraca.realizado = parsed;
+      }
       applyResultadoFinalFromResponse(res);
     } catch (err) {
       input.value = formatValorInput(current);
@@ -595,25 +610,13 @@ export function initFinanceiroGestaoModule() {
     }
   }
 
-  function bindResultadoFinalEditors() {
-    const section = document.getElementById('financeiro-resultado-final');
-    if (!section) return;
+  function bindFaturamentoPracaEditors() {
+    const root = els.painelBody;
+    if (!root) return;
 
-    section.querySelector('.fin-resultado-fat-previsto')?.addEventListener('input', (e) => {
-      maskValorInput(e.target);
-    });
-    section.querySelector('.fin-resultado-fat-realizado')?.addEventListener('input', (e) => {
-      maskValorInput(e.target);
-    });
-
-    section.querySelector('.fin-resultado-fat-previsto')?.addEventListener('blur', (e) => {
-      saveFaturamentoPraca(e.target, 'previsto');
-    });
-    section.querySelector('.fin-resultado-fat-realizado')?.addEventListener('blur', (e) => {
-      saveFaturamentoPraca(e.target, 'realizado');
-    });
-
-    section.querySelectorAll('.fin-resultado-fat-previsto, .fin-resultado-fat-realizado').forEach((input) => {
+    root.querySelectorAll('.fin-resultado-fat-previsto').forEach((input) => {
+      input.addEventListener('input', () => maskValorInput(input));
+      input.addEventListener('blur', () => saveFaturamentoPraca(input, 'previsto'));
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -621,6 +624,22 @@ export function initFinanceiroGestaoModule() {
         }
       });
     });
+
+    root.querySelectorAll('.fin-resultado-fat-realizado').forEach((input) => {
+      input.addEventListener('input', () => maskValorInput(input));
+      input.addEventListener('blur', () => saveFaturamentoPraca(input, 'realizado'));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          input.blur();
+        }
+      });
+    });
+  }
+
+  function bindResultadoFinalEditors() {
+    const section = document.getElementById('financeiro-resultado-final');
+    if (!section) return;
   }
 
   async function saveSumarioRealizado(input) {
@@ -1062,6 +1081,7 @@ export function initFinanceiroGestaoModule() {
     `;
 
     bindSumarioArrecadacaoEditors();
+    bindFaturamentoPracaEditors();
     bindVendasHoraEditors();
     bindBebidasEditors();
     bindResultadoFinalEditors();

@@ -2662,7 +2662,11 @@ app.patch('/api/financeiro/resultado-final/faturamento-praca', requireEvento, as
     const { previsto, realizado } = req.body ?? {};
     const result = await patchFaturamentoPracaAlimentacao(pool, req.eventoId, { previsto, realizado });
     const painel = await buildFinanceiroPainel(pool, req.eventoId);
-    res.json({ ...result, resultadoFinal: painel.resultadoFinal });
+    res.json({
+      ...result,
+      sumarioArrecadacao: painel.sumarioArrecadacao,
+      resultadoFinal: painel.resultadoFinal,
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('PATCH /api/financeiro/resultado-final/faturamento-praca', err);

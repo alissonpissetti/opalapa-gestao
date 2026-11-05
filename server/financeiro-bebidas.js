@@ -11,8 +11,66 @@ const CATEGORIA_BEBIDAS = 'BEBIDAS';
 export const BEBIDAS_TEMPLATE = [
   { item: 'Chopp 400ml', previstoQtde: '2321', realizadoQtde: '0', custoUnit: 0, valorUnit: 15 },
   { item: 'Chopp Vinho 400ml', previstoQtde: '172', realizadoQtde: '0', custoUnit: 0, valorUnit: 15 },
-  { item: '4 Chopps + 1 Ecocopo 400ml', previstoQtde: '27', realizadoQtde: '0', custoUnit: 0, valorUnit: 60 },
+  { item: 'Chopp IPA 400ml', previstoQtde: '0', realizadoQtde: '0', custoUnit: 0, valorUnit: 15 },
+  {
+    item: 'Combo Pilsen + Ecocopo 400ml',
+    previstoQtde: '27',
+    realizadoQtde: '0',
+    custoUnit: 0,
+    valorUnit: 60,
+  },
+  {
+    item: 'Combo Especial + Ecocopo 400ml',
+    previstoQtde: '0',
+    realizadoQtde: '0',
+    custoUnit: 0,
+    valorUnit: 60,
+  },
+  {
+    item: 'Combo 2 IPA e 2 Pilsen 400ml',
+    previstoQtde: '0',
+    realizadoQtde: '0',
+    custoUnit: 0,
+    valorUnit: 60,
+  },
 ];
+
+/** Nomes legados do modelo — não duplicar ao sincronizar itens novos. */
+const BEBIDAS_TEMPLATE_ALIASES = {
+  'combo pilsen + ecocopo 400ml': ['4 chopps + 1 ecocopo 400ml'],
+};
+
+function normalizeBebidaItemNome(nome) {
+  return String(nome || '').trim().toLowerCase();
+}
+
+function templateItemJaCadastrado(nomesExistentes, templateItem) {
+  const key = normalizeBebidaItemNome(templateItem);
+  if (nomesExistentes.has(key)) return true;
+  const aliases = BEBIDAS_TEMPLATE_ALIASES[key];
+  return aliases?.some((alias) => nomesExistentes.has(alias)) ?? false;
+}
+
+async function createBebidaLinhaFromTemplate(pool, eventoId, ordem, t) {
+  const prev = parseQty(t.previstoQtde);
+  const real = parseQty(t.realizadoQtde);
+  const custo = Number(t.custoUnit) || 0;
+  const valor = Number(t.valorUnit) || 0;
+  await createFinanceiroLinha(pool, eventoId, {
+    ordem,
+    item: CATEGORIA_BEBIDAS,
+    subItem: t.item,
+    tipo: 'linha',
+    previstoQtde: t.previstoQtde,
+    diaria: t.realizadoQtde,
+    orcamento: custo,
+    valorUnit: valor,
+    preEvento: prev * custo,
+    valorTotal: real * custo,
+    posEvento: prev * valor,
+    realizadoPago: real * valor,
+  });
+}
 
 function isBebidaLinha(linha) {
   const cat = String(linha.item || '').trim().toUpperCase();
@@ -56,8 +114,61 @@ export function buildBebidasFromLinhas(resultadoLinhas) {
   return { itens, totais, temDados: itens.length > 0 };
 }
 
-export async function listBebidas(pool, eventoId) {
+export async function ensureBebidasTemplateItens(pool, eventoId) {
   const linhas = await listFinanceiroResultado(pool, eventoId);
+  const bebidaLinhas = linhas.filter(isBebidaLinha);
+  if (bebidaLinhas.length === 0) return linhas;
+
+  const nomesExistentes = new Set(
+    bebidaLinhas.map((l) => normalizeBebidaItemNome(l.subItem)),
+  );
+
+  for (const template of BEBIDAS_TEMPLATE) {
+    const key = normalizeBebidaItemNome(template.item);
+    if (nomesExistentes.has(key)) continue;
+    const aliases = BEBIDAS_TEMPLATE_ALIASES[key];
+    if (!aliases?.length) continue;
+    const legado = bebidaLinhas.find((l) =>
+      aliases.includes(normalizeBebidaItemNome(l.subItem)),
+    );
+    if (!legado) continue;
+    await updateFinanceiroLinha(pool, legado.id, eventoId, {
+      item: legado.item,
+      subItem: template.item,
+      tipo: legado.tipo,
+      previstoQtde: legado.previstoQtde,
+      diaria: legado.diaria,
+      orcamento: legado.orcamento,
+      valorUnit: legado.valorUnit,
+      preEvento: legado.preEvento,
+      valorTotal: legado.valorTotal,
+      posEvento: legado.posEvento,
+      realizadoPago: legado.realizadoPago,
+    });
+    nomesExistentes.delete(normalizeBebidaItemNome(legado.subItem));
+    nomesExistentes.add(key);
+  }
+
+  const linhasAposRename = await listFinanceiroResultado(pool, eventoId);
+  const bebidaLinhasAtual = linhasAposRename.filter(isBebidaLinha);
+  const nomesAtual = new Set(
+    bebidaLinhasAtual.map((l) => normalizeBebidaItemNome(l.subItem)),
+  );
+  const faltantes = BEBIDAS_TEMPLATE.filter(
+    (t) => !templateItemJaCadastrado(nomesAtual, t.item),
+  );
+  if (faltantes.length === 0) return linhasAposRename;
+
+  const ordemBase =
+    Math.max(...bebidaLinhasAtual.map((l) => Number(l.ordem) || 0), 0) + 1;
+  for (let i = 0; i < faltantes.length; i += 1) {
+    await createBebidaLinhaFromTemplate(pool, eventoId, ordemBase + i, faltantes[i]);
+  }
+  return listFinanceiroResultado(pool, eventoId);
+}
+
+export async function listBebidas(pool, eventoId) {
+  const linhas = await ensureBebidasTemplateItens(pool, eventoId);
   return buildBebidasFromLinhas(linhas);
 }
 
@@ -133,25 +244,7 @@ export async function carregarModeloBebidas(pool, eventoId) {
   ordemBase += 1;
 
   for (let i = 0; i < BEBIDAS_TEMPLATE.length; i += 1) {
-    const t = BEBIDAS_TEMPLATE[i];
-    const prev = parseQty(t.previstoQtde);
-    const real = parseQty(t.realizadoQtde);
-    const custo = Number(t.custoUnit) || 0;
-    const valor = Number(t.valorUnit) || 0;
-    await createFinanceiroLinha(pool, eventoId, {
-      ordem: ordemBase + i,
-      item: CATEGORIA_BEBIDAS,
-      subItem: t.item,
-      tipo: 'linha',
-      previstoQtde: t.previstoQtde,
-      diaria: t.realizadoQtde,
-      orcamento: custo,
-      valorUnit: valor,
-      preEvento: prev * custo,
-      valorTotal: real * custo,
-      posEvento: prev * valor,
-      realizadoPago: real * valor,
-    });
+    await createBebidaLinhaFromTemplate(pool, eventoId, ordemBase + i, BEBIDAS_TEMPLATE[i]);
   }
 
   return listBebidas(pool, eventoId);

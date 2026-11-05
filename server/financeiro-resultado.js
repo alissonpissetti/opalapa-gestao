@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  TAXA_PRACA_ALIMENTACAO_PCT,
+  calcTaxaPracaFromFaturamentoBruto,
+} from '../shared/financeiro-taxa-praca.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_CSV_PATH = path.join(__dirname, 'data', 'financeiro-resultado.csv');
@@ -65,15 +69,20 @@ export function findFaturamentoPracaLinha(linhas) {
   );
 }
 
-export const TAXA_PRACA_ALIMENTACAO = 0.2;
+export const TAXA_PRACA_ALIMENTACAO = TAXA_PRACA_ALIMENTACAO_PCT;
+
+export { calcTaxaPracaFromFaturamentoBruto };
 
 /** Taxa de receita sobre o faturamento informado da praça (ex.: 20%). */
 export function computeTaxaPracaAlimentacao(resultadoLinhas, taxaPct = TAXA_PRACA_ALIMENTACAO) {
   const faturamentoLinha = findFaturamentoPracaLinha(resultadoLinhas || []);
   const faturamentoPrevisto = Number(faturamentoLinha?.preEvento) || 0;
   const faturamentoRealizado = Number(faturamentoLinha?.posEvento) || 0;
-  const previsto = faturamentoPrevisto > 0 ? faturamentoPrevisto * taxaPct : null;
-  const realizado = faturamentoRealizado > 0 ? faturamentoRealizado * taxaPct : 0;
+  const previsto =
+    faturamentoPrevisto > 0
+      ? calcTaxaPracaFromFaturamentoBruto(faturamentoPrevisto, taxaPct)
+      : null;
+  const realizado = calcTaxaPracaFromFaturamentoBruto(faturamentoRealizado, taxaPct);
   return {
     faturamentoPrevisto,
     faturamentoRealizado,

@@ -2,15 +2,12 @@ import { listContasPagar, summarizeContasPagar } from './financeiro-contas-pagar
 import { listArrecadacao } from './arrecadacao.js';
 import { listFunilEtapas, perdaStatuses } from './funil.js';
 import {
-  listFinanceiroResultado,
-  findSumarioArrecadacaoLinha,
-  clearSumarioArrecadacaoOverridesNaoEditaveis,
-  SUMARIO_ARRECADACAO_DEFS,
   TAXA_PRACA_ALIMENTACAO,
   computeTaxaPracaAlimentacao,
+  calcTaxaPracaFromFaturamentoBruto,
 } from './financeiro-resultado.js';
-import { buildVendasHoraFromLinhas } from './financeiro-vendas-hora.js';
-import { buildBebidasFromLinhas } from './financeiro-bebidas.js';
+import { buildVendasHoraFromLinhas, ensureVendasHoraEventItemLabels, ensureVendasHoraTemplateItens } from './financeiro-vendas-hora.js';
+import { buildBebidasFromLinhas, ensureBebidasTemplateItens } from './financeiro-bebidas.js';
 
 function summarizeTipo(list) {
   const previsto = list.reduce((s, i) => s + (Number(i.valorTotal) || 0), 0);
@@ -178,24 +175,25 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
   });
 
   const taxaPraca = computeTaxaPracaAlimentacao(resultadoLinhas);
-  if (taxaPraca.previsto != null || taxaPraca.realizado > 0) {
-    const pctLabel = Math.round((taxaPraca.taxaPct ?? TAXA_PRACA_ALIMENTACAO) * 100);
-    linhas.push({
-      id: 'taxa-praca-alimentacao',
-      linhaId: taxaPraca.linhaId,
-      nome: `TAXA ALIMENTAÇÃO (${pctLabel}% PRAÇA)`,
-      refAnterior: null,
-      previsto: taxaPraca.previsto ?? 0,
-      previstoManual: false,
-      previstoCalculado: taxaPraca.previsto ?? 0,
-      previstoEditavel: false,
-      realizadoEditavel: false,
-      posEvento: false,
-      fase: null,
-      realizado: taxaPraca.realizado,
-      calculado: true,
-    });
-  }
+  const pctLabel = Math.round((taxaPraca.taxaPct ?? TAXA_PRACA_ALIMENTACAO) * 100);
+  linhas.push({
+    id: 'taxa-praca-alimentacao',
+    linhaId: taxaPraca.linhaId,
+    nome: `TAXA ALIMENTAÇÃO (${pctLabel}% PRAÇA)`,
+    refAnterior: null,
+    previsto: taxaPraca.previsto ?? 0,
+    previstoManual: false,
+    previstoCalculado: taxaPraca.previsto ?? 0,
+    previstoEditavel: false,
+    realizadoEditavel: false,
+    posEvento: false,
+    fase: null,
+    realizado: calcTaxaPracaFromFaturamentoBruto(
+      taxaPraca.faturamentoRealizado,
+      taxaPraca.taxaPct ?? TAXA_PRACA_ALIMENTACAO,
+    ),
+    calculado: true,
+  });
 
   const sumTotais = (items) => {
     const prev = items.reduce((s, l) => s + (Number(l.previsto) || 0), 0);
@@ -213,6 +211,14 @@ function buildSumarioArrecadacao({ arrecadacao, perdas, contas, resultadoLinhas 
     totaisPre: sumTotais(linhasPre),
     totaisPos: sumTotais(linhasPos),
     totais: sumTotais(linhas),
+    faturamentoPraca: {
+      previsto: taxaPraca.faturamentoPrevisto,
+      realizado: taxaPraca.faturamentoRealizado,
+      linhaId: taxaPraca.linhaId,
+      taxaPct: taxaPraca.taxaPct ?? TAXA_PRACA_ALIMENTACAO,
+      taxaPrevisto: taxaPraca.previsto,
+      taxaRealizado: taxaPraca.realizado,
+    },
   };
 }
 
@@ -341,16 +347,23 @@ export async function buildFinanceiroPainel(pool, eventoId) {
 
   const perdas = perdaStatuses(etapas);
   await clearSumarioArrecadacaoOverridesNaoEditaveis(pool, eventoId, resultadoLinhas);
+  const resultadoLinhasAtualizado = await ensureBebidasTemplateItens(pool, eventoId);
+  const resultadoLinhasVendasTemplate = await ensureVendasHoraTemplateItens(pool, eventoId);
+  const resultadoLinhasPainel = await ensureVendasHoraEventItemLabels(
+    pool,
+    eventoId,
+    resultadoLinhasVendasTemplate,
+  );
   const custos = summarizeContasPagar(contas);
   const entradas = summarizeArrecadacao(arrecadacao, perdas);
   const sumarioArrecadacao = buildSumarioArrecadacao({
     arrecadacao,
     perdas,
     contas,
-    resultadoLinhas,
+    resultadoLinhas: resultadoLinhasPainel,
   });
-  const vendasHora = buildVendasHoraFromLinhas(resultadoLinhas);
-  const bebidas = buildBebidasFromLinhas(resultadoLinhas);
+  const vendasHora = buildVendasHoraFromLinhas(resultadoLinhasPainel);
+  const bebidas = buildBebidasFromLinhas(resultadoLinhasPainel);
 
   const bonificado = custos.totaisContasPagar?.bonificado || 0;
 
@@ -367,7 +380,7 @@ export async function buildFinanceiroPainel(pool, eventoId) {
     sumarioArrecadacao,
     totaisContasPagar: custos.totaisContasPagar,
     custosTotais: custos.totais,
-    resultadoLinhas,
+    resultadoLinhas: resultadoLinhasPainel,
   });
 
   return {
@@ -448,14 +461,16 @@ export async function buildArrecadacaoTresFontes(pool, eventoId) {
     listArrecadacao(pool, eventoId, { scope: 'alimentacao' }),
   ]);
 
-  const vendasOnline = sumarioVendasOnline(resultadoLinhas);
+  const resultadoLinhasAtualizado = await ensureBebidasTemplateItens(pool, eventoId);
+
+  const vendasOnline = sumarioVendasOnline(resultadoLinhasAtualizado);
   const comercial = sumArrecadacaoLeads(leadsComercial, perdaStatuses(etapasComercial));
   const leadsAlimentacao = sumArrecadacaoLeads(
     leadsAlimentacaoItens,
     perdaStatuses(etapasAlimentacao),
   );
-  const preAlimentacao = sumarioLinhaChave(resultadoLinhas, 'pre-alimentacao');
-  const bebidas = sumarioLinhaChave(resultadoLinhas, 'bebidas');
+  const preAlimentacao = sumarioLinhaChave(resultadoLinhasAtualizado, 'pre-alimentacao');
+  const bebidas = sumarioLinhaChave(resultadoLinhasAtualizado, 'bebidas');
   const alimentacaoPrevisto =
     leadsAlimentacao.previsto + preAlimentacao.previsto + bebidas.previsto;
   const alimentacaoRealizado =

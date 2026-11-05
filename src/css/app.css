@@ -11968,6 +11968,10 @@ body.wa-inbox-open {
   border-top: none;
 }
 
+.financeiro-faturamento-praca {
+  margin-bottom: 1rem;
+}
+
 .financeiro-resultado-final-fat {
   display: flex;
   flex-wrap: wrap;
